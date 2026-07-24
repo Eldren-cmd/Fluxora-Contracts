@@ -1553,9 +1553,15 @@ Where:
 
 ### Access Control Table Entry
 
-| Function        | Authorized Caller | Auth Check              |
-| --------------- | ----------------- | ----------------------- |
-| `sweep_excess`  | Admin             | `admin.require_auth()`  |
+| Function                 | Authorized Caller | Auth Check              |
+| ------------------------ | ----------------- | ----------------------- |
+| `sweep_excess`           | Admin             | `admin.require_auth()`  |
+| `get_total_liabilities`  | Anyone            | None (view)             |
+
+`get_total_liabilities` is a read-only view that returns the sum of all outstanding stream
+deposits tracked in `DataKey::TotalLiabilities`. It is used to verify that the contract's
+token balance always covers what it owes across all active streams, and to compute the
+`excess` amount available to `sweep_excess`.
 
 ### Event
 
