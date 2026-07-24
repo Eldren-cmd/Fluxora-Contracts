@@ -218,18 +218,15 @@ fn create_stream_after_reservation_exhausted_uses_live_counter() {
 }
 
 #[test]
-fn new_reservation_overwrites_existing() {
+fn new_reservation_fails_if_active() {
     let ctx = Ctx::setup();
     ctx.client.reserve_stream_ids(&ctx.sender, &5u32, &None); // IDs 0..4
-    let ids2 = ctx.client.reserve_stream_ids(&ctx.sender, &5u32, &None); // IDs 5..9
-    assert_eq!(ids2.get(0).unwrap(), 5u64);
+    let result = ctx.client.try_reserve_stream_ids(&ctx.sender, &5u32, &None);
+    assert_eq!(result, Err(Ok(ContractError::ReservationAlreadyActive)));
 
     let res = ctx.client.get_id_reservation(&ctx.sender).unwrap();
-    assert_eq!(res.start_id, 5);
+    assert_eq!(res.start_id, 0);
     assert_eq!(res.consumed, 0);
-
-    let id = ctx.create_stream(&ctx.sender);
-    assert_eq!(id, 5u64);
 }
 
 #[test]
@@ -374,4 +371,49 @@ fn test_reclaim_twice_errors() {
     // Reclaim second time (errors as it was already deleted)
     let result = ctx.client.try_reclaim_expired_id_reservation(&ctx.sender);
     assert_eq!(result, Err(Ok(ContractError::ReservationNotFound)));
+}
+
+// ---------------------------------------------------------------------------
+// release vs reclaim NextStreamId asymmetry regression tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_release_id_reservation_never_shrinks_next_stream_id() {
+    let ctx = Ctx::setup();
+
+    // NextStreamId is 0. Reserve 5. NextStreamId becomes 5.
+    ctx.client.reserve_stream_ids(&ctx.sender, &5u32, &None);
+    assert_eq!(ctx.client.get_stream_count(), 5);
+
+    // Release immediately via release_id_reservation
+    ctx.client.release_id_reservation(&ctx.sender);
+
+    // Reservation is gone
+    assert!(ctx.client.get_id_reservation(&ctx.sender).is_none());
+
+    // Counter didn't shrink. Next stream gets ID 5.
+    let id = ctx.create_stream(&ctx.sender);
+    assert_eq!(id, 5);
+}
+
+#[test]
+fn test_reclaim_expired_id_reservation_shrinks_next_stream_id() {
+    let ctx = Ctx::setup();
+    let now = ctx.env.ledger().timestamp();
+    let expiry = now + 100;
+
+    // NextStreamId is 0. Reserve 5. NextStreamId becomes 5.
+    ctx.client.reserve_stream_ids(&ctx.sender, &5u32, &Some(expiry));
+    assert_eq!(ctx.client.get_stream_count(), 5);
+
+    // Reclaim after advancing ledger past expiry
+    ctx.env.ledger().set_timestamp(expiry + 1);
+    ctx.client.reclaim_expired_id_reservation(&ctx.sender);
+
+    // Reservation is gone
+    assert!(ctx.client.get_id_reservation(&ctx.sender).is_none());
+
+    // Counter rewinds. Next stream gets ID 0.
+    let id = ctx.create_stream(&ctx.sender);
+    assert_eq!(id, 0);
 }
