@@ -365,11 +365,12 @@ mod tests {
         assert_eq!(MEMO_POS, 14);
     }
 
-    /// Stream struct field count with `is_pooled` appended.
-    /// V5 (14) + memo (1) + kind (1) + pause_ledger (1) + withdraw_ledger (1) + metadata (1) + is_pooled (1) = 20 fields.
+    /// Stream struct field count with both `is_pooled` and `irrevocable` appended.
+    /// V5 (14) + memo (1) + kind (1) + pause_ledger (1) + withdraw_ledger (1) + metadata (1)
+    /// + is_pooled (1) + irrevocable (1) = 21 fields.
     #[test]
-    fn stream_struct_has_20_fields_with_is_pooled() {
-        const TOTAL_STREAM_FIELDS: usize = 20;
-        assert_eq!(TOTAL_STREAM_FIELDS, 20);
+    fn stream_struct_has_21_fields_with_is_pooled_and_irrevocable() {
+        const TOTAL_STREAM_FIELDS: usize = 21;
+        assert_eq!(TOTAL_STREAM_FIELDS, 21);
     }
 }

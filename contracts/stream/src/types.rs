@@ -688,6 +688,8 @@ pub struct CreateStreamParams {
     pub kind: StreamKind,
     /// Optional structured metadata emitted for indexer consumption.
     pub metadata: Option<soroban_sdk::Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
+    /// If true, the stream cannot be cancelled or shortened. Defaults to false (None).
+    pub irrevocable: Option<bool>,
     /// Optional compliance witness authorized to cancel via signed attestation.
     pub witness: Option<Address>,
 }
@@ -725,6 +727,8 @@ pub struct CreateStreamRelativeParams {
     /// The architectural style of the stream (Linear or CliffOnly).
     pub kind: StreamKind,
     pub metadata: Option<soroban_sdk::Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
+    /// If true, the stream cannot be cancelled or shortened. Defaults to false (None).
+    pub irrevocable: Option<bool>,
 }
 
 /// Reusable relative schedule (offsets only). Amounts are supplied when creating a stream.

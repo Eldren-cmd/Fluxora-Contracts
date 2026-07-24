@@ -846,6 +846,9 @@ pub struct Stream {
     pub memo: Option<soroban_sdk::Bytes>,
     /// The architectural style of the stream (Linear or CliffOnly).
     pub kind: StreamKind,
+    /// If true, blocks all cancellation and shortening paths (cancel_stream, cancel_stream_as_admin, keeper_cancel, shorten_stream_end_time).
+    /// Defaults to false (None) for full backward compatibility with existing streams.
+    pub irrevocable: Option<bool>,
     /// Optional compliance witness authorized to cancel via signed attestation.
     /// `None` when not configured (default for backward compatibility).
     pub witness: Option<Address>,
@@ -930,6 +933,8 @@ pub struct CreateStreamParams {
     pub metadata: Option<soroban_sdk::Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
     /// The architectural style of the stream (Linear or CliffOnly).
     pub kind: StreamKind,
+    /// If true, the stream cannot be cancelled or shortened. Defaults to false (None).
+    pub irrevocable: Option<bool>,
     /// Optional compliance witness authorized to cancel via signed attestation.
     pub witness: Option<Address>,
 }
@@ -968,6 +973,8 @@ pub struct CreateStreamRelativeParams {
     pub metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
     /// The architectural style of the stream (Linear or CliffOnly).
     pub kind: StreamKind,
+    /// If true, the stream cannot be cancelled or shortened. Defaults to false (None).
+    pub irrevocable: Option<bool>,
 }
 
 /// Reusable relative schedule (offsets only). Amounts are supplied when creating a stream.
@@ -1833,6 +1840,7 @@ impl FluxoraStream {
         withdraw_dust_threshold: i128,
         memo: Option<soroban_sdk::Bytes>,
         kind: StreamKind,
+        irrevocable: Option<bool>,
         witness: Option<Address>,
     ) -> Result<u64, ContractError> {
         // Validate memo length before allocating a stream ID.
@@ -1928,6 +1936,7 @@ impl FluxoraStream {
         withdraw_dust_threshold: i128,
         memo: Option<soroban_sdk::Bytes>,
         kind: StreamKind,
+        irrevocable: Option<bool>,
         witness: Option<Address>,
     ) -> Result<u64, ContractError> {
         if let Some(ref m) = memo {
@@ -2176,6 +2185,7 @@ impl FluxoraStream {
         withdraw_dust_threshold: i128,
         memo: Option<soroban_sdk::Bytes>,
         kind: StreamKind,
+        irrevocable: Option<bool>,
         witness: Option<Address>,
     ) -> Result<u64, ContractError> {
         sender.require_auth();
@@ -2213,6 +2223,7 @@ impl FluxoraStream {
             withdraw_dust_threshold,
             memo,
             kind,
+            irrevocable,
             witness,
         )
     }
@@ -2326,6 +2337,7 @@ impl FluxoraStream {
             params.withdraw_dust_threshold.unwrap_or(0),
             params.memo,
             params.kind,
+            params.irrevocable,
             None,
         )
     }
@@ -2624,6 +2636,7 @@ impl FluxoraStream {
                 params.withdraw_dust_threshold.unwrap_or(0),
                 params.memo.clone(),
                 params.kind,
+                params.irrevocable,
                 params.witness.clone(),
             )?;
             created_ids.push_back(stream_id);
@@ -2860,6 +2873,7 @@ impl FluxoraStream {
                 params.withdraw_dust_threshold.unwrap_or(0),
                 params.memo,
                 params.kind,
+                params.irrevocable,
                 params.witness,
             );
 
@@ -5090,6 +5104,10 @@ impl FluxoraStream {
         // Only non-terminal streams may be shortened.
         Self::require_cancellable_status(stream.status)?;
 
+        if stream.irrevocable.unwrap_or(false) {
+            return Err(ContractError::Unauthorized);
+        }
+
         let now = current_accrual_timestamp(&env)?;
 
         // New end time must move strictly earlier and remain strictly in the future.
@@ -5694,6 +5712,7 @@ impl FluxoraStream {
         memo: Option<soroban_sdk::Bytes>,
         metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
         kind: StreamKind,
+        irrevocable: Option<bool>,
     ) -> Result<u64, ContractError> {
         let tpl = load_stream_template(&env, template_id)?;
         Self::create_stream_relative(
@@ -5710,6 +5729,7 @@ impl FluxoraStream {
                 memo,
                 metadata,
                 kind,
+                irrevocable,
             },
         )
     }
@@ -6125,6 +6145,9 @@ impl FluxoraStream {
     /// - same refund rule (`refund = deposit_amount - accrued_at_now`)
     /// - same event shape (`StreamCancelled(stream_id)`)
     fn cancel_stream_internal(env: &Env, stream: &mut Stream) -> Result<(), ContractError> {
+        if stream.irrevocable.unwrap_or(false) {
+            return Err(ContractError::Unauthorized);
+        }
         Self::require_cancellable_status(stream.status)?;
 
         let now = current_accrual_timestamp(env)?;
@@ -6389,6 +6412,10 @@ impl FluxoraStream {
 
         // Reject streams already in a terminal state.
         Self::require_cancellable_status(stream.status)?;
+
+        if stream.irrevocable.unwrap_or(false) {
+            return Err(ContractError::Unauthorized);
+        }
 
         let now = env.ledger().timestamp();
 
@@ -7726,6 +7753,7 @@ impl FluxoraStream {
             source.withdraw_dust_threshold,
             source.memo.clone(),
             source.kind,
+            source.irrevocable,
             source.witness.clone(),
         )?;
 
@@ -7983,6 +8011,10 @@ impl FluxoraStream {
             let stream = load_stream(&env, id)?;
 
             if stream.sender != sender {
+                return Err(ContractError::Unauthorized);
+            }
+
+            if stream.irrevocable.unwrap_or(false) {
                 return Err(ContractError::Unauthorized);
             }
 
