@@ -16,7 +16,7 @@ When changing the contract:
 - Update snapshot tests if externally visible behavior changes
 - No behavior change required for doc-only updates
 
-**Entrypoint index (validator):** `accept_recipient_update`, `batch_withdraw_to`, `bulk_cancel_streams`, `bulk_resume_streams_as_admin`, `cancel_recipient_update`, `close_cancelled_stream`, `close_completed_stream`, `compute_keeper_fee_split`, `delete_stream_template`, `get_auto_renew`, `get_global_emergency_paused`, `get_paused_stream_count`, `get_pending_recipient_update`, `get_protocol_fees_accrued`, `get_recipient_stream_count`, `get_stream_health`, `get_stream_memo`, `get_stream_template`, `global_resume`, `keeper_cancel`, `renew_stream`, `set_auto_renew`, `set_contract_paused`, `set_global_emergency_paused`, `version`, `migration_v5_to_v6`, `set_max_rate_per_second`.
+**Entrypoint index (validator):** `accept_recipient_update`, `batch_withdraw_to`, `bulk_cancel_streams`, `bulk_resume_streams_as_admin`, `cancel_recipient_update`, `close_cancelled_stream`, `close_completed_stream`, `compute_keeper_fee_split`, `create_stream_with_lookback`, `delete_stream_template`, `get_auto_renew`, `get_global_emergency_paused`, `get_lookback_window`, `get_paused_stream_count`, `get_pending_recipient_update`, `get_protocol_fees_accrued`, `get_recipient_stream_count`, `get_stream_health`, `get_stream_memo`, `get_stream_template`, `global_resume`, `keeper_cancel`, `renew_stream`, `set_auto_renew`, `set_contract_paused`, `set_global_emergency_paused`, `set_lookback_window`, `version`, `migration_v5_to_v6`, `set_max_rate_per_second`.
 **Entrypoint index (validator):** `accept_recipient_update`, `batch_withdraw_to`, `bulk_cancel_streams`, `bulk_resume_streams_as_admin`, `cancel_recipient_update`, `delete_stream_template`, `get_auto_renew`, `get_global_emergency_paused`, `get_keeper_fee_split`, `get_pending_recipient_update`, `get_recipient_stream_count`, `get_stream_health`, `get_stream_memo`, `get_stream_template`, `global_resume`, `keeper_cancel`, `renew_stream`, `set_auto_renew`, `set_contract_paused`, `set_global_emergency_paused`, `version`, `migration_v5_to_v6`, `set_max_rate_per_second`.
 
 ## Externally Visible Assurances
@@ -99,6 +99,29 @@ From **CONTRACT_VERSION 4**, the contract supports distinct streaming styles, go
   - Before the `cliff_time`, `0` tokens are accrued/withdrawable (all funds are locked).
   - At or after the `cliff_time`, the total `deposit_amount` is immediately and fully unlocked and made claimable by the recipient.
   - To enforce the single-unlock model, `rate_per_second` is forced to `0` during creation and all subsequent mutation/adjustment requests are rejected.
+
+### Lookback-bounded withdrawals (CONTRACT_VERSION 8)
+
+`calculate_accrued(stream_id)` always reports the stream's total lifetime accrual. It is
+deliberately independent of the optional `max_lookback_ledgers` setting. The lookback
+setting affects only the amount currently claimable by `withdraw`, `withdraw_to`, batch
+withdrawal, delegated withdrawal, and auto-claim paths.
+
+Use `create_stream_with_lookback(..., max_lookback_ledgers)` to configure the bound at
+creation, or call `set_lookback_window(stream_id, sender, Some(ledgers))` later. `None`
+clears the bound; `Some(0)` is rejected. One ledger is treated as five seconds, matching
+the contract's ledger timing assumption.
+
+When configured, a single claim is capped to the accrual represented by the most recent
+`N` ledgers. Older unclaimed accrual remains represented by the unchanged
+`withdrawn_amount` and can be claimed by subsequent calls in later windows. This limits
+claim velocity, not entitlement: repeated withdrawals eventually release 100% of the
+accrued amount. `get_withdrawable` and `get_claimable_at` return this bounded claimable
+amount, while `calculate_accrued` continues to return the uncapped lifetime total.
+
+CliffOnly streams are one-shot unlocks. Once the cliff has passed, their full deposit is
+claimable even if the first query occurs after the lookback window; otherwise a missed
+cliff would permanently strand the recipient's entitlement.
 
 ### ID pre-allocation (`reserve_stream_ids`) — issue #584
 
@@ -781,6 +804,9 @@ contract.create_streams_relative(&sender, &params)?;
 | `cancel_stream_as_admin`  | Admin                         | `admin.require_auth()`                      |
 | `close_completed_stream`  | Anyone                        | None (permissionless terminal cleanup)     |
 | `top_up_stream`           | Funder address                | `funder.require_auth()`                     |
+| `create_stream_with_lookback` | Sender                    | `sender.require_auth()`                     |
+| `set_lookback_window`     | Original stream sender        | `sender.require_auth()`                     |
+| `get_lookback_window`     | Anyone                        | None (view)                                 |
 | `set_auto_renew`          | Original stream sender        | `sender.require_auth()`                     |
 | `renew_stream`            | Anyone                        | None (permissionless; funds fixed to original sender) |
 | `get_auto_renew`          | Anyone                        | None (view)                                 |
@@ -1324,6 +1350,7 @@ errors relevant to stream creation and timing.
 | `ContractError::InvalidState` (2)                                       | `close_completed_stream`           | Close Cancelled stream with remaining claimable balance |
 | `ContractError::AutoRenewFundingUnavailable` (36)                      | `renew_stream`                     | Original sender balance or allowance is below deposit amount |
 | `ContractError::InvalidState` (2)                                       | `renew_stream`                     | Source is not Completed or auto-renew is disabled |
+| `ContractError::InvalidParams` (3)                                      | `create_stream_with_lookback` / `set_lookback_window` | `max_lookback_ledgers == Some(0)` |
 | `"contract not initialised: missing config"`                            | Functions requiring config         | Config missing                                |
 
 ## Protocol-Level Pausing

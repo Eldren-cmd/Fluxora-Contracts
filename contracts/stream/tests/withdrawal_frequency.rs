@@ -174,6 +174,68 @@ fn test_withdrawal_after_interval_succeeds() {
 }
 
 #[test]
+fn lookback_caps_each_claim_without_reducing_lifetime_accrual() {
+    let ctx = TestContext::setup();
+    let stream_id = ctx
+        .client
+        .create_stream_with_lookback(
+            &ctx.sender,
+            &ctx.recipient,
+            &1000,
+            &1,
+            &0,
+            &0,
+            &1000,
+            &0,
+            &None,
+            &StreamKind::Linear,
+            &Some(10_u32),
+        )
+        .unwrap();
+
+    ctx.advance_ledger(100);
+    assert_eq!(ctx.client.calculate_accrued(&stream_id).unwrap(), 500);
+    assert_eq!(ctx.client.get_withdrawable(&stream_id).unwrap(), 50);
+    assert_eq!(ctx.client.get_claimable_at(&stream_id, &500).unwrap(), 50);
+
+    let mut total_withdrawn = 0_i128;
+    for index in 0..20 {
+        if index > 0 {
+            // The normal withdrawal-frequency guard still applies, so each
+            // lookback window is separated by the minimum interval.
+            ctx.advance_ledger(17);
+        }
+        total_withdrawn += ctx.client.withdraw(&stream_id).unwrap();
+    }
+
+    // The cap limits each call, but no accrued entitlement is permanently lost.
+    assert_eq!(total_withdrawn, 1000);
+    assert_eq!(ctx.client.calculate_accrued(&stream_id), 1000);
+}
+
+#[test]
+fn lookback_window_can_be_cleared_or_rejected_by_sender() {
+    let ctx = TestContext::setup();
+    let stream_id = ctx.create_stream();
+
+    let zero = ctx
+        .client
+        .try_set_lookback_window(&stream_id, &ctx.sender, &Some(0_u32));
+    assert_eq!(zero, Err(Ok(ContractError::InvalidParams)));
+
+    ctx.client
+        .set_lookback_window(&stream_id, &ctx.sender, &Some(10_u32));
+    assert_eq!(
+        ctx.client.get_lookback_window(&stream_id).unwrap(),
+        Some(10_u32)
+    );
+
+    ctx.client
+        .set_lookback_window(&stream_id, &ctx.sender, &None);
+    assert_eq!(ctx.client.get_lookback_window(&stream_id).unwrap(), None);
+}
+
+#[test]
 fn test_third_withdrawal_resets_window() {
     let ctx = TestContext::setup();
     let stream_id = ctx.create_stream();

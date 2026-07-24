@@ -188,7 +188,10 @@ const MIN_PAUSE_INTERVAL_LEDGERS: u32 = 17;
 ///
 /// Bumped to 7: permissionless auto-renewal entrypoints and the append-only
 /// `DataKey::AutoRenewEnabled` opt-in were added.
-pub const CONTRACT_VERSION: u32 = 7;
+///
+/// Bumped to 8: additive lookback-bounded creation, configuration, and claim
+/// calculation support were added without changing the persisted `Stream` shape.
+pub const CONTRACT_VERSION: u32 = 8;
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -1011,6 +1014,8 @@ pub enum DataKey {
     TotalKeeperFeesPaid,
     /// Per-stream auto-renew opt-in flag. Appended to preserve storage discriminants.
     AutoRenewEnabled(u64),
+    /// Optional per-stream withdrawal lookback window in ledger count.
+    MaxLookbackLedgers(u64),
 }
 
 // ---------------------------------------------------------------------------
@@ -1064,6 +1069,94 @@ fn set_auto_renew_enabled(env: &Env, stream_id: u64, enabled: bool) {
         PERSISTENT_LIFETIME_THRESHOLD,
         PERSISTENT_BUMP_AMOUNT,
     );
+}
+
+const SECONDS_PER_LEDGER: u64 = 5;
+
+fn max_lookback_ledgers(env: &Env, stream_id: u64) -> Option<u32> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::MaxLookbackLedgers(stream_id))
+}
+
+fn validate_lookback_window(max_lookback_ledgers: Option<u32>) -> Result<(), ContractError> {
+    if max_lookback_ledgers == Some(0) {
+        return Err(ContractError::InvalidParams);
+    }
+    Ok(())
+}
+
+fn set_max_lookback_ledgers(
+    env: &Env,
+    stream_id: u64,
+    max_lookback_ledgers: Option<u32>,
+) -> Result<(), ContractError> {
+    validate_lookback_window(max_lookback_ledgers)?;
+    let key = DataKey::MaxLookbackLedgers(stream_id);
+    match max_lookback_ledgers {
+        Some(ledgers) => {
+            env.storage().persistent().set(&key, &ledgers);
+            env.storage().persistent().extend_ttl(
+                &key,
+                PERSISTENT_LIFETIME_THRESHOLD,
+                PERSISTENT_BUMP_AMOUNT,
+            );
+        }
+        None => env.storage().persistent().remove(&key),
+    }
+    Ok(())
+}
+
+/// Cap a withdrawal without changing lifetime accrual or withdrawn accounting.
+/// `calculate_accrued` remains the total entitlement; this helper only limits
+/// the amount payable in the current claim to one recent ledger window.
+fn apply_lookback_cap(
+    env: &Env,
+    stream: &Stream,
+    effective_time: u64,
+    accrued: i128,
+    claimable: i128,
+) -> i128 {
+    let Some(ledgers) = max_lookback_ledgers(env, stream.stream_id) else {
+        return claimable;
+    };
+
+    let window_seconds = u64::from(ledgers).saturating_mul(SECONDS_PER_LEDGER);
+    let endpoint = effective_time.min(stream.end_time);
+    let window_start = endpoint.saturating_sub(window_seconds);
+    let recent_accrual = accrual::calculate_accrued_amount_checkpointed(
+        accrual::CheckpointState {
+            checkpointed_amount: stream.checkpointed_amount,
+            checkpointed_at: stream.checkpointed_at,
+            cliff_time: stream.cliff_time,
+            end_time: stream.end_time,
+            deposit_amount: stream.deposit_amount,
+            kind: stream.kind,
+        },
+        stream.rate_per_second,
+        endpoint,
+    )
+    .saturating_sub(accrual::calculate_accrued_amount_checkpointed(
+        accrual::CheckpointState {
+            checkpointed_amount: stream.checkpointed_amount,
+            checkpointed_at: stream.checkpointed_at,
+            cliff_time: stream.cliff_time,
+            end_time: stream.end_time,
+            deposit_amount: stream.deposit_amount,
+            kind: stream.kind,
+        },
+        stream.rate_per_second,
+        window_start,
+    ));
+
+    // CliffOnly accrual is a one-shot event. Once unlocked, its full entitlement
+    // is claimable even if the caller first observes it after the lookback window.
+    let cap = if stream.kind == StreamKind::CliffOnly && accrued > 0 {
+        accrued
+    } else {
+        recent_accrual.max(0)
+    };
+    claimable.min(cap).max(0)
 }
 
 fn acquire_reentrancy_lock(env: &Env) -> Result<(), ContractError> {
@@ -2034,8 +2127,46 @@ impl FluxoraStream {
         memo: Option<soroban_sdk::Bytes>,
         kind: StreamKind,
     ) -> Result<u64, ContractError> {
+        Self::create_stream_with_lookback(
+            env,
+            sender,
+            recipient,
+            deposit_amount,
+            rate_per_second,
+            start_time,
+            cliff_time,
+            end_time,
+            withdraw_dust_threshold,
+            memo,
+            kind,
+            None,
+        )
+    }
+
+    /// Create a stream with an optional per-withdrawal lookback window.
+    ///
+    /// `max_lookback_ledgers` limits each claim to the accrual represented by
+    /// the most recent N five-second ledger windows. It does not alter
+    /// `calculate_accrued`, `deposit_amount`, or `withdrawn_amount`; older
+    /// unclaimed entitlement remains available to later calls.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_stream_with_lookback(
+        env: Env,
+        sender: Address,
+        recipient: Address,
+        deposit_amount: i128,
+        rate_per_second: i128,
+        start_time: u64,
+        cliff_time: u64,
+        end_time: u64,
+        withdraw_dust_threshold: i128,
+        memo: Option<soroban_sdk::Bytes>,
+        kind: StreamKind,
+        max_lookback_ledgers: Option<u32>,
+    ) -> Result<u64, ContractError> {
         sender.require_auth();
         require_not_creation_paused(&env)?;
+        validate_lookback_window(max_lookback_ledgers)?;
 
         let mut final_rate = rate_per_second;
         if kind == StreamKind::CliffOnly {
@@ -2057,7 +2188,7 @@ impl FluxoraStream {
 
         pull_token(&env, &sender, deposit_amount)?;
 
-        Self::persist_new_stream(
+        let stream_id = Self::persist_new_stream(
             &env,
             sender,
             recipient,
@@ -2069,7 +2200,9 @@ impl FluxoraStream {
             withdraw_dust_threshold,
             memo,
             kind,
-        )
+        )?;
+        set_max_lookback_ledgers(&env, stream_id, max_lookback_ledgers)?;
+        Ok(stream_id)
     }
 
     /// Create a new payment stream with relative (offset-based) timing.
@@ -2898,6 +3031,16 @@ impl FluxoraStream {
 
         let accrued = Self::calculate_accrued(env.clone(), stream_id)?;
         let mut withdrawable = accrued - stream.withdrawn_amount;
+        let effective_time = stream
+            .cancelled_at
+            .unwrap_or_else(|| env.ledger().timestamp());
+        withdrawable = apply_lookback_cap(
+            &env,
+            &stream,
+            effective_time,
+            accrued,
+            withdrawable,
+        );
 
         // Cap by contract balance for safety (#39)
         let token_address = get_token(&env)?;
@@ -3038,6 +3181,16 @@ impl FluxoraStream {
 
         let accrued = Self::calculate_accrued(env.clone(), stream_id)?;
         let mut withdrawable = accrued - stream.withdrawn_amount;
+        let effective_time = stream
+            .cancelled_at
+            .unwrap_or_else(|| env.ledger().timestamp());
+        withdrawable = apply_lookback_cap(
+            &env,
+            &stream,
+            effective_time,
+            accrued,
+            withdrawable,
+        );
 
         // Cap by contract balance for safety (#39)
         let token_address = get_token(&env)?;
@@ -3326,7 +3479,13 @@ impl FluxoraStream {
                     stream.rate_per_second,
                     effective_now,
                 );
-                (accrued - stream.withdrawn_amount).max(0)
+                apply_lookback_cap(
+                    &env,
+                    &stream,
+                    effective_now,
+                    accrued,
+                    (accrued - stream.withdrawn_amount).max(0),
+                )
             };
 
             // Cap by running contract balance for safety
@@ -3475,7 +3634,13 @@ impl FluxoraStream {
                     stream.rate_per_second,
                     effective_now,
                 );
-                (accrued - stream.withdrawn_amount).max(0)
+                apply_lookback_cap(
+                    &env,
+                    &stream,
+                    effective_now,
+                    accrued,
+                    (accrued - stream.withdrawn_amount).max(0),
+                )
             };
 
             // Cap by running contract balance for safety
@@ -3660,6 +3825,15 @@ impl FluxoraStream {
         // 7. Compute withdrawable amount.
         let accrued = Self::calculate_accrued(env.clone(), stream_id)?;
         let mut withdrawable = accrued - stream.withdrawn_amount;
+        withdrawable = apply_lookback_cap(
+            &env,
+            &stream,
+            stream
+                .cancelled_at
+                .unwrap_or_else(|| env.ledger().timestamp()),
+            accrued,
+            withdrawable,
+        );
 
         // Cap by contract balance for safety.
         let token_address = get_token(&env)?;
@@ -3792,6 +3966,35 @@ impl FluxoraStream {
         ))
     }
 
+    /// Set or clear the per-withdrawal lookback window for a stream.
+    ///
+    /// Only the original sender may change this setting. `None` removes the
+    /// bound. `Some(ledgers)` must be nonzero. The setting affects claimable
+    /// amounts only; total lifetime accrual remains unchanged.
+    pub fn set_lookback_window(
+        env: Env,
+        stream_id: u64,
+        sender: Address,
+        max_lookback_ledgers: Option<u32>,
+    ) -> Result<(), ContractError> {
+        require_not_globally_paused(&env)?;
+        let stream = load_stream(&env, stream_id)?;
+        sender.require_auth();
+        if sender != stream.sender {
+            return Err(ContractError::Unauthorized);
+        }
+        if stream.status == StreamStatus::Cancelled {
+            return Err(ContractError::InvalidState);
+        }
+        set_max_lookback_ledgers(&env, stream_id, max_lookback_ledgers)
+    }
+
+    /// Return the configured per-withdrawal lookback window, if any.
+    pub fn get_lookback_window(env: Env, stream_id: u64) -> Result<Option<u32>, ContractError> {
+        load_stream(&env, stream_id)?;
+        Ok(max_lookback_ledgers(&env, stream_id))
+    }
+
     /// Calculate the currently withdrawable amount for a stream without performing a withdrawal.
     ///
     /// This is a read-only view function intended for UIs to display the "available to withdraw"
@@ -3819,6 +4022,13 @@ impl FluxoraStream {
 
         let accrued = Self::calculate_accrued(env.clone(), stream_id)?;
         let mut withdrawable = accrued - stream.withdrawn_amount;
+        withdrawable = apply_lookback_cap(
+            &env,
+            &stream,
+            env.ledger().timestamp(),
+            accrued,
+            withdrawable,
+        );
 
         // Cap by contract balance for consistency with withdraw() (#39)
         let token_address = get_token(&env)?;
@@ -3891,6 +4101,13 @@ impl FluxoraStream {
         );
 
         let claimable = accrued - stream.withdrawn_amount;
+        let claimable = apply_lookback_cap(
+            &env,
+            &stream,
+            effective_time,
+            accrued,
+            claimable,
+        );
         Ok(if claimable > 0 { claimable } else { 0 })
     }
 
@@ -4963,6 +5180,9 @@ impl FluxoraStream {
         env.storage()
             .persistent()
             .remove(&DataKey::AutoRenewEnabled(stream_id));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::MaxLookbackLedgers(stream_id));
         remove_stream(&env, stream_id);
 
         Ok(())
@@ -5026,6 +5246,9 @@ impl FluxoraStream {
         env.storage()
             .persistent()
             .remove(&DataKey::AutoRenewEnabled(stream_id));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::MaxLookbackLedgers(stream_id));
         remove_stream(&env, stream_id);
 
         Ok(())
@@ -6570,7 +6793,13 @@ impl FluxoraStream {
             now,
         );
 
-        let withdrawable = accrued.saturating_sub(stream.withdrawn_amount).max(0);
+        let withdrawable = apply_lookback_cap(
+            &env,
+            &stream,
+            now,
+            accrued,
+            accrued.saturating_sub(stream.withdrawn_amount).max(0),
+        );
 
         // Early return if nothing to withdraw
         if withdrawable == 0 {
@@ -6717,6 +6946,13 @@ impl FluxoraStream {
                 );
 
                 let claimable = accrued.saturating_sub(stream.withdrawn_amount).max(0);
+                let claimable = apply_lookback_cap(
+                    &env,
+                    &stream,
+                    now,
+                    accrued,
+                    claimable,
+                );
 
                 Ok(AutoClaimStatus::ValidDestination(AutoClaimValidPayload {
                     destination,
@@ -6913,6 +7149,11 @@ impl FluxoraStream {
             source.withdraw_dust_threshold,
             source.memo.clone(),
             source.kind,
+        )?;
+        set_max_lookback_ledgers(
+            &env,
+            new_stream_id,
+            max_lookback_ledgers(&env, stream_id),
         )?;
 
         // ── 9. Emit clone-specific event for indexer correlation ──────────────
