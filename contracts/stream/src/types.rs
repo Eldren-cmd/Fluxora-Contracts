@@ -332,6 +332,19 @@ pub struct RecipientUpdated {
     pub new_recipient: Address,
 }
 
+/// Emitted when a recipient delegates a portion of their stream to a new recipient.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecipientShareDelegated {
+    pub parent_stream_id: u64,
+    pub child_stream_id: u64,
+    pub delegator: Address,
+    pub delegatee: Address,
+    pub share_bps: u32,
+    pub new_parent_rate: i128,
+    pub child_rate: i128,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PendingRecipientUpdate {
