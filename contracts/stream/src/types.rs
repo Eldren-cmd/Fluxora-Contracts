@@ -13,6 +13,9 @@ use soroban_sdk::{contracttype, Address, Map};
 // Data types
 // ---------------------------------------------------------------------------
 
+/// Maximum number of recipients allowed in a single pooled stream.
+pub const MAX_POOL_RECIPIENTS: u32 = 100;
+
 /// Global configuration for the Fluxora protocol.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
