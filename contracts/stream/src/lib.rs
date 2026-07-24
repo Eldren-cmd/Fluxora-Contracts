@@ -4209,7 +4209,7 @@ impl FluxoraStream {
         require_not_globally_paused(&env)?;
         let mut stream = load_stream(&env, stream_id)?;
 
-        if stream.kind == StreamKind::CliffOnly {
+        if stream.kind != StreamKind::Linear {
             return Err(ContractError::UnsupportedStreamKind);
         }
 
@@ -4351,7 +4351,7 @@ impl FluxoraStream {
         require_not_globally_paused(&env)?;
         let mut stream = load_stream(&env, stream_id)?;
 
-        if stream.kind == StreamKind::CliffOnly {
+        if stream.kind != StreamKind::Linear {
             return Err(ContractError::UnsupportedStreamKind);
         }
 
@@ -4489,7 +4489,7 @@ impl FluxoraStream {
         require_not_globally_paused(&env)?;
         let mut stream = load_stream(&env, stream_id)?;
 
-        if stream.kind == StreamKind::CliffOnly {
+        if stream.kind != StreamKind::Linear {
             return Err(ContractError::UnsupportedStreamKind);
         }
 
@@ -4606,7 +4606,7 @@ impl FluxoraStream {
         require_not_globally_paused(&env)?;
         let mut stream = load_stream(&env, stream_id)?;
 
-        if stream.kind == StreamKind::CliffOnly {
+        if stream.kind != StreamKind::Linear {
             return Err(ContractError::UnsupportedStreamKind);
         }
 
@@ -4714,7 +4714,7 @@ impl FluxoraStream {
 
         let stream = load_stream(&env, stream_id)?;
 
-        if stream.kind == StreamKind::CliffOnly {
+        if stream.kind != StreamKind::Linear {
             return Err(ContractError::UnsupportedStreamKind);
         }
 
