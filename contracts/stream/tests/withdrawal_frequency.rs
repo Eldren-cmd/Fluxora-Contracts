@@ -643,3 +643,276 @@ fn test_backward_timestamp_skew_cannot_bypass_rate_limit() {
         "backward timestamp skew must NOT bypass rate limit"
     );
 }
+
+// ─── Lookback-bounded withdrawal — extended coverage (CONTRACT_VERSION 8)
+// ──────────────────────────────────────────────────────────────────────
+
+/// Helper: build a stream with a custom lookback window for isolation.
+fn create_stream_with_lookback_for(ctx: &TestContext, lookback: Option<u32>) -> u64 {
+    ctx.client
+        .create_stream_with_lookback(
+            &ctx.sender,
+            &ctx.recipient,
+            &1000,
+            &1, // 1 token per second
+            &0,
+            &0,
+            &1000,
+            &0,
+            &None,
+            &StreamKind::Linear,
+            &lookback,
+        )
+        .unwrap()
+}
+
+/// `calculate_accrued` reports the stream's total lifetime accrual and must not
+/// be perturbed by the optional lookback bound.
+#[test]
+fn lookback_does_not_change_calculate_accrued() {
+    let ctx = TestContext::setup();
+
+    // No bound: full accrual visible.
+    let no_bound = ctx.create_stream();
+    // Tight bound: same stream params, but cap = 1 ledger (5 s).
+    let bounded = create_stream_with_lookback_for(&ctx, Some(1));
+
+    ctx.advance_ledger(100); // both now at t=500 s, accrued = 500
+
+    assert_eq!(ctx.client.calculate_accrued(&no_bound).unwrap(), 500);
+    assert_eq!(ctx.client.calculate_accrued(&bounded).unwrap(), 500);
+
+    // `calculate_accrued` is the lifetime entitlement; the lookback only
+    // affects *withdrawable* amounts, never the entitlement itself.
+}
+
+/// The lookback bound is the per-call ceiling on top of the recipient's
+/// normal withdrawable amount. Both views agree on the ceiling.
+#[test]
+fn lookback_caps_each_claim_to_one_window() {
+    let ctx = TestContext::setup();
+    let stream_id = create_stream_with_lookback_for(&ctx, Some(10)); // 10 ledgers = 50 s
+
+    ctx.advance_ledger(100); // t=500. Lifetime accrued = 500 tokens.
+
+    // First claim: cap is one window worth (50 tokens).
+    let first = ctx.client.withdraw(&stream_id).unwrap();
+    assert_eq!(first, 50, "first claim must equal the window size");
+
+    // The withdrawal-frequency guard guarantees at least 17 ledgers elapse
+    // between calls. After that, time has advanced past one full window
+    // and a fresh slice of accrual is reachable.
+    ctx.advance_ledger(17); // t=585
+    let second = ctx.client.withdraw(&stream_id).unwrap();
+    assert!(second > 0);
+    assert!(
+        second <= 50,
+        "subsequent call is also bounded by the lookback window"
+    );
+}
+
+/// Across enough disjoint lookback windows, the recipient drains the *full*
+/// lifetime entitlement even though each call is bounded. This is the
+/// "no permanent loss" guarantee called out in the feature spec.
+#[test]
+fn lookback_repeated_claims_drain_full_entitlement() {
+    let ctx = TestContext::setup();
+    let stream_id = create_stream_with_lookback_for(&ctx, Some(10));
+
+    ctx.advance_ledger(100); // t=500 (pre-end_time)
+    let initial_total = ctx.client.calculate_accrued(&stream_id).unwrap();
+    assert_eq!(initial_total, 500);
+
+    let mut withdrawn = 0_i128;
+    // Each `advance_ledger(17)` shifts the lookback window forward by 85 s,
+    // bringing fresh accrual into the claimed slice. After enough iterations
+    // the recipient recovers every accrued token (capped by deposit).
+    for _ in 0..30 {
+        let amount = ctx.client.withdraw(&stream_id).unwrap();
+        withdrawn += amount;
+        ctx.advance_ledger(17);
+    }
+
+    // Re-query lifetime accrual *after* the loop: time elapsed by `2_550 s`
+    // is well past `end_time=1_000`, so accrual clamps to `deposit_amount`
+    // (`calculate_accrued` is time-terminal-aware — see accrual.rs).
+    //
+    // Because `deposit_amount` is the absolute ceiling and the lookback cap
+    // never permanently destroys entitlement, the recipient must end up
+    // matching the *final* claimable ceiling exactly.
+    let final_total = ctx.client.calculate_accrued(&stream_id).unwrap();
+    assert_eq!(
+        withdrawn, final_total,
+        "repeated bounded claims across windows recover 100% of the final entitlement"
+    );
+    // The cap only restricts velocity: the lifetime total it allows us to
+    // recover equals the lifetime total the stream ever produced.
+    assert_eq!(
+        final_total, 1000,
+        "after time-terminal, calculate_accrued clamps to deposit_amount"
+    );
+}
+
+/// Setting then clearing the bound restores the full claimable amount.
+#[test]
+fn lookback_cleared_restores_full_claimability() {
+    let ctx = TestContext::setup();
+    let stream_id = create_stream_with_lookback_for(&ctx, Some(10));
+
+    ctx.advance_ledger(100); // t=500
+
+    // While the bound is present, claimable is capped at the window size.
+    assert_eq!(ctx.client.get_withdrawable(&stream_id).unwrap(), 50);
+
+    ctx.client
+        .set_lookback_window(&stream_id, &ctx.sender, &None);
+    assert_eq!(ctx.client.get_lookback_window(&stream_id).unwrap(), None);
+
+    // After clearing, the full accrued amount (500) is claimable again.
+    assert_eq!(ctx.client.get_withdrawable(&stream_id).unwrap(), 500);
+}
+
+/// Non-sender callers are rejected with `Unauthorized`. The signer in the
+/// call (`sender` argument) must match the original stream's sender.
+#[test]
+fn lookback_setter_rejects_non_sender() {
+    let ctx = TestContext::setup();
+    let stream_id = ctx.create_stream();
+
+    let result = ctx
+        .client
+        .try_set_lookback_window(&stream_id, &ctx.admin, &Some(10_u32));
+    assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
+
+    // Recipient also not allowed (only the original sender authorises reads).
+    let result = ctx
+        .client
+        .try_set_lookback_window(&stream_id, &ctx.recipient, &Some(10_u32));
+    assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
+}
+
+/// Cancelled streams cannot have their lookback modified; the cap is read-only
+/// post-cancellation so existing frozen accounting is preserved.
+#[test]
+fn lookback_setter_rejects_cancelled_stream() {
+    let ctx = TestContext::setup();
+    let stream_id = create_stream_with_lookback_for(&ctx, Some(10));
+
+    ctx.advance_ledger(100);
+    ctx.client.cancel_stream(&stream_id).unwrap();
+
+    let result = ctx
+        .client
+        .try_set_lookback_window(&stream_id, &ctx.sender, &Some(20_u32));
+    assert_eq!(result, Err(Ok(ContractError::InvalidState)));
+
+    // ...and clearing is also blocked.
+    let result = ctx
+        .client
+        .try_set_lookback_window(&stream_id, &ctx.sender, &None);
+    assert_eq!(result, Err(Ok(ContractError::InvalidState)));
+}
+
+/// `set_lookback_window` on a non-existent stream returns `StreamNotFound`,
+/// matching the rest of the contract's storage-key error model.
+#[test]
+fn lookback_setter_rejects_unknown_stream() {
+    let ctx = TestContext::setup();
+    let bogus = 9_999_u64;
+    let result = ctx
+        .client
+        .try_set_lookback_window(&bogus, &ctx.sender, &Some(10_u32));
+    assert_eq!(result, Err(Ok(ContractError::StreamNotFound)));
+}
+
+/// `get_withdrawable` and `get_claimable_at` must agree at the same evaluation
+/// timestamp — both views apply the same lookback cap.
+#[test]
+fn lookback_get_withdrawable_matches_get_claimable_at() {
+    let ctx = TestContext::setup();
+    let stream_id = create_stream_with_lookback_for(&ctx, Some(10));
+
+    ctx.advance_ledger(60); // t=300
+    let now = ctx.env.ledger().timestamp();
+    assert_eq!(
+        ctx.client.get_withdrawable(&stream_id).unwrap(),
+        ctx.client.get_claimable_at(&stream_id, &now).unwrap()
+    );
+}
+
+/// CliffOnly streams lazily unlock their full deposit. Once the cliff has
+/// passed, that one-shot entitlement wins over the lookback cap so a recipient
+/// who first queries after a window has elapsed does not strand funds.
+#[test]
+fn lookback_cliff_only_full_claim_after_cliff() {
+    let ctx = TestContext::setup();
+    let stream_id = ctx
+        .client
+        .create_stream_with_lookback(
+            &ctx.sender,
+            &ctx.recipient,
+            &1000,
+            &0, // CliffOnly enforces rate=0
+            &0,
+            &500, // cliff at 500 s
+            &1000,
+            &0,
+            &None,
+            &StreamKind::CliffOnly,
+            &Some(10), // 50 s window — would otherwise cap at 0 before cliff
+        )
+        .unwrap();
+
+    // Before cliff: nothing claimable regardless of lookback.
+    ctx.advance_ledger(50); // t=250
+    assert_eq!(ctx.client.get_withdrawable(&stream_id).unwrap(), 0);
+
+    // Advance past cliff, and well past the lookback window.
+    ctx.advance_ledger(60); // t=550, then 60 more... = 850
+    // Claimable = full deposit because CliffOnly entitlement bypasses cap.
+    assert_eq!(
+        ctx.client.get_withdrawable(&stream_id).unwrap(),
+        1000,
+        "CliffOnly post-cliff must bypass lookback cap to avoid stranded funds"
+    );
+}
+
+/// Mid-stream activation of the lookback only affects future claims;
+/// previously accrued (but unclaimed) amounts become claimable in
+/// subsequent windows. Once `withdrawn_amount == deposit_amount`, the stream
+/// transitions to `Completed`, so the loop terminates naturally.
+#[test]
+fn lookback_set_mid_stream_preserves_old_accrual() {
+    let ctx = TestContext::setup();
+    // Start with no bound.
+    let stream_id = ctx.create_stream();
+    ctx.advance_ledger(100); // t=500, pre-end_time. accrued = 500.
+
+    // Now apply a tight bound.
+    ctx.client
+        .set_lookback_window(&stream_id, &ctx.sender, &Some(10));
+
+    let mut withdrawn = 0_i128;
+    let mut cycles: u32 = 0;
+    // Bound the loop to keep time below `end_time` so the post-loop assertions
+    // can still talk about the *initial* lifetime accrual (500). 20 cycles
+    // is exactly the number needed to drain 1000 tokens at 50/cycle.
+    while cycles < 20 {
+        let available = ctx.client.get_withdrawable(&stream_id).unwrap();
+        if available == 0 {
+            break;
+        }
+        let amount = ctx.client.withdraw(&stream_id).unwrap();
+        withdrawn += amount;
+        ctx.advance_ledger(17);
+        cycles += 1;
+    }
+
+    // By this point the loop has run for ~1_700 s of ledger time (well past
+    // end_time=1_000), so `calculate_accrued` clamps to deposit_amount.
+    assert_eq!(withdrawn, 1_000);
+
+    // The bound doesn't change the lifetime ceiling. Whichever the publisher
+    // bound sets, the recipient can still recover `deposit_amount`.
+    assert_eq!(ctx.client.calculate_accrued(&stream_id).unwrap(), 1_000);
+}

@@ -141,7 +141,7 @@ test = false
 [[test]]
 name = "withdrawal_frequency"
 path = "tests/withdrawal_frequency.rs"
-test = false
+test = true
 
 # ---------------------------------------------------------------------------
 # Known-broken integration tests, second batch (compile fine, fail at runtime)
