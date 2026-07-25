@@ -46,6 +46,7 @@ treasury tooling) can use this reference to handle protocol exceptions correctly
 | `WithdrawalTooFrequent` | 33 | Withdrawal attempted before minimum interval elapsed | `withdraw`, `delegated_withdraw`, `batch_withdraw` |
 | `KeeperGracePeriodNotElapsed` | 34 | Keeper cancellation grace period has not elapsed | `keeper_cancel` |
 | `InvalidDustThreshold` | 35 | Withdraw dust threshold is negative or exceeds deposit amount | `create_stream`, `create_streams`, `create_streams_partial`, `create_stream_relative`, `create_stream_from_template` |
+| `AutoRenewFundingUnavailable` | 36 | The sender cannot fund an auto-renewal with the available balance and allowance | `renew_stream` |
 
 Non-error enum values used by stream creation and accrual:
 
@@ -726,6 +727,48 @@ match client.try_create_stream(..., &withdraw_dust_threshold, ...) {
 **Integrator Note**: The dust threshold enforces a minimum withdrawable amount to prevent dust accumulation. The threshold must be in the range `[0, deposit_amount]`. When `withdraw_dust_threshold == deposit_amount`, withdrawals are only allowed when the full deposit is withdrawable (e.g., at stream end or after final drain).
 
 ---
+
+### AutoRenewFundingUnavailable (36)
+
+**Definition**: The sender on a stream opted-in to auto-renewal via `set_auto_renew` does not currently have sufficient token balance or allowance to fund a fresh deposit for the renewal.
+
+**Trigger Conditions**:
+
+| Condition | Detection |
+|-----------|-----------|
+| `token.balance(stream.sender) < stream.deposit_amount` | Token client balance read returns less than the required deposit |
+| `token.allowance(stream.sender, contract_address) < stream.deposit_amount` | Token client allowance read returns less than the required deposit |
+
+Either condition causes `renew_stream` to revert before any state mutation or token transfer is attempted, preserving CEI ordering.
+
+**Affected Roles**:
+
+| Role | Can Trigger | Notes |
+|------|------------|-------|
+| Anyone | Yes | `renew_stream` is permissionless once a sender has opted the stream in via `set_auto_renew` |
+| Sender | Yes | Same path; the renewal precondition involves reading the sender's own balance and allowance |
+| Admin | No | Admin cannot pre-fund another sender's renewal balance/allowance through this path |
+
+**Client Action**:
+
+```rust
+match client.try_renew_stream(&stream_id) {
+    Ok(new_stream_id) => { /* success — fresh deposit wired and old stream archived */ }
+    Err(ContractError::AutoRenewFundingUnavailable) => {
+        // The opted-in sender (or topology: anyone triggering the renewal on their behalf)
+        // must refill balance OR increase allowance before retrying.
+        let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+        let balance    = token_client.balance(&stream.sender);
+        let allowance  = token_client.allowance(&stream.sender, &env.current_contract_address());
+        // Notify the sender with the shortfall; expose both numbers for fast UI display.
+    }
+    Err(e) => { /* handle other errors */ }
+}
+```
+
+**Success Semantics**: Returns the newly created `stream_id` from the renewal transaction; the old stream transitions to `Completed` and a `StreamRenewed` event is emitted correlating the two IDs.
+
+**Integrator Note**: This error is **recoverable**. The opt-in survives across failures, so once the sender tops up balance and/or bumps allowance, any caller (including the original sender) can re-invoke `renew_stream` without re-registering the opt-in. Treat surfacing this error to the opted-in sender as a strong signal to surface the current `balance`/`allowance` shortfall inline in the UI; do not auto-retry with exponential backoff because the precondition can only be fixed by an explicit on-chain action by the sender.
 
 ## Previously Panicking Paths (Now Structured Errors)
 

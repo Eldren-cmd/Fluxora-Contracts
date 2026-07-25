@@ -16,8 +16,8 @@ When changing the contract:
 - Update snapshot tests if externally visible behavior changes
 - No behavior change required for doc-only updates
 
-**Entrypoint index (validator):** `accept_recipient_update`, `batch_withdraw_to`, `bulk_cancel_streams`, `bulk_resume_streams_as_admin`, `cancel_recipient_update`, `close_cancelled_stream`, `close_completed_stream`, `compute_keeper_fee_split`, `create_stream_with_lookback`, `delete_stream_template`, `get_auto_renew`, `get_global_emergency_paused`, `get_lookback_window`, `get_paused_stream_count`, `get_pending_recipient_update`, `get_protocol_fees_accrued`, `get_recipient_stream_count`, `get_stream_health`, `get_stream_memo`, `get_stream_template`, `global_resume`, `keeper_cancel`, `renew_stream`, `set_auto_renew`, `set_contract_paused`, `set_global_emergency_paused`, `set_lookback_window`, `version`, `migration_v5_to_v6`, `set_max_rate_per_second`.
-**Entrypoint index (validator):** `accept_recipient_update`, `batch_withdraw_to`, `bulk_cancel_streams`, `bulk_resume_streams_as_admin`, `cancel_recipient_update`, `delete_stream_template`, `get_auto_renew`, `get_global_emergency_paused`, `get_keeper_fee_split`, `get_pending_recipient_update`, `get_recipient_stream_count`, `get_stream_health`, `get_stream_memo`, `get_stream_template`, `global_resume`, `keeper_cancel`, `renew_stream`, `set_auto_renew`, `set_contract_paused`, `set_global_emergency_paused`, `version`, `migration_v5_to_v6`, `set_max_rate_per_second`.
+**Entrypoint index (validator):** `accept_recipient_update`, `batch_withdraw_to`, `bulk_cancel_streams`, `bulk_resume_streams_as_admin`, `cancel_recipient_update`, `close_cancelled_stream`, `close_completed_stream`, `compute_keeper_fee_split`, `create_stream_with_lookback`, `delete_stream_template`, `get_auto_renew`, `get_global_emergency_paused`, `get_lookback_window`, `get_paused_stream_count`, `get_pending_recipient_update`, `get_protocol_fees_accrued`, `get_recipient_stream_count`, `get_stream_health`, `get_stream_memo`, `get_stream_template`, `get_total_liabilities`, `global_resume`, `keeper_cancel`, `renew_stream`, `set_auto_renew`, `set_contract_paused`, `set_global_emergency_paused`, `set_lookback_window`, `version`, `migration_v5_to_v6`, `set_max_rate_per_second`.
+**Entrypoint index (validator):** `accept_recipient_update`, `batch_withdraw_to`, `bulk_cancel_streams`, `bulk_resume_streams_as_admin`, `cancel_recipient_update`, `delete_stream_template`, `get_auto_renew`, `get_global_emergency_paused`, `get_keeper_fee_split`, `get_pending_recipient_update`, `get_recipient_stream_count`, `get_stream_health`, `get_stream_memo`, `get_stream_template`, `get_total_liabilities`, `global_resume`, `keeper_cancel`, `renew_stream`, `set_auto_renew`, `set_contract_paused`, `set_global_emergency_paused`, `version`, `migration_v5_to_v6`, `set_max_rate_per_second`.
 
 ## Externally Visible Assurances
 
@@ -253,6 +253,7 @@ The `keeper_cancel` entrypoint allows any third-party keeper to cancel an expire
 - The contract does **not** retain a protocol split of this fee. The entire fee is transferred directly to the keeper.
 - The view function `get_protocol_fees_accrued` (added in #623) tracks the cumulative total of keeper fees *paid out* of the contract, rather than an internal sweepable balance.
 - **Accounting Invariant**: The contract's token balance must securely cover all remaining liabilities. Since the keeper fee is transferred entirely to the keeper and leaves the contract, the tracked total in `get_protocol_fees_accrued` is strictly monotone and safely independent of the contract's real-time asset/liability ratio.
+- **Total Liabilities View**: The auth-free view function `get_total_liabilities` returns the sum of every stream's remaining (not-yet-withdrawn) balance, sourced from the instance-stored `DataKey::TotalLiabilities` counter. Integrators can cross-check it against the contract's token balance to confirm solvency: a positive gap represents a healthy buffer above the aggregate outstanding payout obligation; a negative gap would indicate under-collateralisation and warrants operator investigation. This view is read-only, requires no parameters, and recomputes lazily on each call.
 
 ### Clone Semantics
 
@@ -1211,13 +1212,38 @@ message = stream_id            (u64,  8 bytes, big-endian)
         | nonce                (u64,  8 bytes, big-endian)
         | deadline             (u64,  8 bytes, big-endian)
         | expected_minimum_amount (i128, 16 bytes, big-endian)
+        | relayer_fee          (i128, 16 bytes, big-endian)
 ```
 
-Total: 40 bytes.
+Total: 40 bytes (v8) / 56 bytes from `CONTRACT_VERSION = 9` (adds the 16-byte `relayer_fee` row).
 
 #### `expected_minimum_amount` — front-running protection
 
 Without this field, a relayer could delay the transaction until the accrued amount is much smaller than the recipient expected (e.g. after a rate decrease or near stream end), constituting a griefing vector. By committing to a minimum, the call reverts with `BelowMinimumAmount` (16) if `withdrawable < expected_minimum_amount`. Pass `0` to accept any positive amount.
+
+#### `expected_minimum_amount` is evaluated against the recipient's **net** amount (`CONTRACT_VERSION = 9`)
+
+Starting from `CONTRACT_VERSION = 9`, `delegated_withdraw` accepts an optional
+signed `relayer_fee: i128` that the recipient authorises as part of the
+signature payload (16 extra bytes appended in big-endian — see the layout table
+above). The contract computes `gross_withdrawable` and
+`net_amount = gross_withdrawable - relayer_fee`, then enforces
+`expected_minimum_amount <= net_amount` (not `expected_minimum_amount <= gross_withdrawable`).
+
+What this means for integrators:
+
+| Scenario | Pre-v9 semantics (gross) | v9 semantics (net = gross − relayer_fee) |
+|----------|--------------------------|------------------------------------------|
+| `expected_minimum_amount = 10`, accrued `= 100`, `relayer_fee = 5` | success (100 ≥ 10) | success (recipient receives 95, relayer 5) |
+| `expected_minimum_amount = 96`, accrued `= 100`, `relayer_fee = 5` | success (100 ≥ 96) | revert with `BelowMinimumAmount` (16) — recipient expected 96 but only receives 95 |
+| `expected_minimum_amount = 99`, accrued `= 100`, `relayer_fee = 5` | success (100 ≥ 99) | revert with `BelowMinimumAmount` (16) — recipient expected 99, net is 95 |
+| `expected_minimum_amount = 0`, accrued `= 100`, `relayer_fee = 50` | success | success (recipient 50, relayer 50) — `0` still means "any positive net" |
+
+The relayer receives `relayer_fee` only when `gross_withdrawable >= relayer_fee`;
+otherwise the whole call reverts with `BelowMinimumAmount` before any token
+transfer is attempted (CEI: recipient's net is evaluated first, then
+`push_token` to recipient, then `push_token` to relayer — two sequential
+calls inside `delegated_withdraw`, in that order).
 
 #### Nonce — replay protection
 

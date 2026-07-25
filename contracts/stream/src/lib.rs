@@ -191,7 +191,19 @@ const MIN_PAUSE_INTERVAL_LEDGERS: u32 = 17;
 ///
 /// Bumped to 8: additive lookback-bounded creation, configuration, and claim
 /// calculation support were added without changing the persisted `Stream` shape.
-pub const CONTRACT_VERSION: u32 = 8;
+///
+/// Bumped to 9: `delegated_withdraw` now accepts an optional `relayer_fee: i128`
+/// in the signed payload (recipient explicitly authorises it). The recipient
+/// receives `net_amount = gross_withdrawable - relayer_fee`, two sequential
+/// `push_token` calls are issued in CEI order (recipient first, relayer second),
+/// and the `BelowMinimumAmount` (16) precondition is now evaluated against
+/// `net_amount` (not the gross withdrawable). The `Withdrawal` event's
+/// `amount` field now publishes `net_amount` rather than the gross withdraw
+/// total — this is a **breaking event-payload change** and triggers the
+/// documented CONTRACT_VERSION bump policy at the top of this file, since
+/// existing indexers, dashboards, and accounting pipelines built against
+/// pre-v9 snapshots will under-report by the relayer fee.
+pub const CONTRACT_VERSION: u32 = 9;
 
 // ---------------------------------------------------------------------------
 // Data types

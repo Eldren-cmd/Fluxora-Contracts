@@ -484,6 +484,8 @@ The `remaining_balance` and `seconds_remaining` fields allow precise monitoring 
 
 - Use `topics[0]` to filter by event type; use `topics[1]` to get the `stream_id`
   for all stream-level events.
+- **v9 breaking event-payload change**: Starting from `CONTRACT_VERSION = 9`, the `amount` field on a `Withdrawal` event emitted by `delegated_withdraw` reports the **recipient's net amount** (`gross_withdrawable − relayer_fee`), **not** the gross withdrawable total. Indexers, dashboards, and accounting pipelines built against pre-v9 fixtures need to recompute against this new semantics, otherwise they will under-report by `relayer_fee`. The `Withdrawal.amount` from
+  plain `withdraw` / `withdraw_to` / `batch_withdraw` paths is **unchanged** (still equals the amount transferred). Only the `delegated_withdraw` path now reports the net.
 - For `Withdrawal` and `WithdrawalTo`, the `amount` field is `i128` — use a
   big-int library that supports 128-bit signed integers.
 - `StreamCompleted` is emitted on the **same call** as the final `Withdrawal` that drains
