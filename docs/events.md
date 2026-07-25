@@ -612,3 +612,12 @@ Commit message suggestion: `docs: add event schema and topics for indexers`
 
 If you change event topics or payloads in the contract, update this document and
 include updated example snapshots in the PR.
+
+
+## Additional event topics
+
+- `claim_own`: Emitted when claim ownership is transferred via `transfer_claim_ownership`.
+- `del_share`: Emitted when a recipient delegates a share of their yield via `delegate_recipient_share`.
+- `offr_acc`: Emitted when a `StreamOffer` is accepted by its recipient.
+- `offr_crt`: Emitted when a `StreamOffer` is created by a sender.
+- `offr_cxl`: Emitted when a `StreamOffer` is cancelled by the sender or rejected by the recipient.
