@@ -210,20 +210,18 @@ const MIN_RATE_INTERVAL_LEDGERS: u32 = 17;
 /// documented CONTRACT_VERSION bump policy at the top of this file, since
 /// existing indexers, dashboards, and accounting pipelines built against
 /// pre-v9 snapshots will under-report by the relayer fee.
+///
+/// Bumped to 7 (historical detail; the `AutoRenewEnabled` portion is also
+/// captured in the existing "Bumped to 7" line above): two-phase
+/// offer-then-accept creation flow added (`create_stream_offer`,
+/// `accept_stream_offer`, `reject_stream_offer`, `cancel_stream_offer`,
+/// `get_stream_offer`, `get_recipient_pending_offers`), the `StreamOffer`
+/// struct, the `DataKey::PendingStreamOffer` / `DataKey::RecipientPendingOffers`
+/// keys, the `OfferNotFound` / `OfferExpired` / `OfferWrongRecipient` /
+/// `OfferWrongSender` errors, optional `witness: Option<Address>` supporting
+/// `witnessed_cancel_stream`, and an irrevocable stream mode blocking all
+/// cancel/shorten paths.
 pub const CONTRACT_VERSION: u32 = 9;
-/// Bumped to 7: Two-phase offer-then-accept stream creation flow added.
-/// New entry points: `create_stream_offer`, `accept_stream_offer`,
-/// `reject_stream_offer`, `cancel_stream_offer`, `get_stream_offer`,
-/// `get_recipient_pending_offers`. New `StreamOffer` struct, new
-/// `DataKey::PendingStreamOffer` / `DataKey::RecipientPendingOffers` variants,
-/// new `ContractError` variants `OfferNotFound`, `OfferExpired`,
-/// `OfferWrongRecipient`, `OfferWrongSender`. Also in this bump: `Stream` and
-/// `CreateStreamParams` gained optional `witness: Option<Address>` for
-/// off-chain compliance attestation cancellation (`witnessed_cancel_stream`
-/// entrypoint added), permissionless auto-renewal entrypoints and the
-/// append-only `DataKey::AutoRenewEnabled` opt-in, and an irrevocable stream
-/// mode blocking all cancel/shorten paths.
-pub const CONTRACT_VERSION: u32 = 7;
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -1230,8 +1228,6 @@ pub enum DataKey {
     ///
     /// Added in issue #sender-portfolio-health. Appended to preserve existing discriminants.
     SenderStreams(Address),
-    /// Per-stream auto-renew opt-in flag. Appended to preserve storage discriminants.
-    AutoRenewEnabled(u64),
     /// Pending stream offer awaiting recipient acceptance (persistent).
     /// Keyed by offer_id, which reuses the global stream ID counter.
     /// Absent once the offer is accepted, rejected, or cancelled.
