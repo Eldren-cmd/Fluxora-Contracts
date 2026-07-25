@@ -164,12 +164,21 @@ cliff would permanently strand the recipient's entitlement.
    window_seconds = max_lookback_ledgers * 5
    endpoint       = min(effective_time, stream.end_time)
    window_start   = endpoint.saturating_sub(window_seconds)
-   recent_accrual = calculate_accrued_at(endpoint) - calculate_accrued_at(window_start)
-   cap            = min(claimable, max(0, recent_accrual))
+   recent_accrual = saturating_sub(
+                       calculate_accrued_at(endpoint),
+                       calculate_accrued_at(window_start))
+   cap_normal     = max(0, recent_accrual)
+   // CliffOnly bypasses the lookback so a recipient whose first claim
+   // arrives after cliff_time + window_size does not strand funds.
+   // See Security Notes § 2 for the rationale.
+   cap            = if (kind == CliffOnly && accrued > 0) { accrued }
+                    else                             { cap_normal }
+   final          = max(0, min(claimable, cap))
    ```
    `calculate_accrued` is reused *twice* — once at the endpoint, once at the
    window-start — so checkpointing from `decrease_rate_per_second` and `update_rate_per_second`
-   is fully respected.
+   is fully respected. Final clamping is always non-negative even if arithmetic
+   would otherwise underflow.
 
 #### Failure semantics (observable)
 
