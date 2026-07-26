@@ -28,6 +28,7 @@ The public entrypoint table below is kept in sync with every `pub fn` on the `Fl
 | `create_stream_from_template` | `env: Env`, `sender: Address`, `template_id: u64`, `recipient: Address`, `deposit_amount: i128`, `rate_per_second: i128`, `withdraw_dust_threshold: i128`, `memo: Option<Bytes>`, `metadata: Option<Map<Bytes, Bytes>>`, `kind: StreamKind`, `irrevocable: Option<bool>` | `u64` | Sender | Create a stream using a registered schedule template plus caller-funded amounts. |
 | `create_stream_offer` | `env: Env`, `sender: Address`, `recipient: Address`, `deposit_amount: i128`, `rate_per_second: i128`, `start_time: u64`, `cliff_time: u64`, `end_time: u64`, `withdraw_dust_threshold: i128`, `memo: Option<Bytes>`, `kind: StreamKind`, `metadata: Option<Map<Bytes, Bytes>>`, `expiry_time: Option<u64>` | `u64` | Sender | Create a signed offer for a recipient to later accept; deposit escrowed at creation. |
 | `create_stream_relative` | `env: Env`, `sender: Address`, `params: CreateStreamRelativeParams` | `u64` | Sender | Create a stream with timing expressed relative to the current ledger timestamp. |
+| `create_stream_with_lookback` | `env: Env`, `sender: Address`, `recipient: Address`, `deposit_amount: i128`, `rate_per_second: i128`, `start_time: u64`, `cliff_time: u64`, `end_time: u64`, `withdraw_dust_threshold: i128`, `memo: Option<Bytes>`, `kind: StreamKind`, `max_lookback_ledgers: Option<u32>` | `u64` | Sender | Create a stream with an optional per-withdrawal lookback bound; `Some(0)` is rejected, `None` removes any bound. |
 | `create_streams` | `env: Env`, `sender: Address`, `streams: Vec<CreateStreamParams>` | `Vec<u64>` | Sender | Atomically create multiple streams with a single sender authorization and deposit pull. |
 | `create_streams_partial` | `env: Env`, `sender: Address`, `streams: Vec<CreateStreamParams>` | `Vec<CreateStreamResult>` | Sender | Batch create with per-entry success/failure results instead of all-or-nothing semantics. |
 | `create_streams_relative` | `env: Env`, `sender: Address`, `streams_relative: Vec<CreateStreamRelativeParams>` | `Vec<u64>` | Sender | Batch create using relative timing parameters converted to absolute timestamps. |
@@ -45,6 +46,7 @@ The public entrypoint table below is kept in sync with every `pub fn` on the `Fl
 | `get_global_emergency_paused` | `env: Env` | `bool` | None (view) | Return whether the global emergency pause flag is set. |
 | `get_id_reservation` | `env: Env`, `caller: Address` | `Option<IdReservation>` | None (view) | Return the active stream-ID reservation for a caller, if any. |
 | `get_keeper_fee_split` | `env: Env`, `stream_id: u64` | `(i128, i128)` | None (view) | Preview keeper fee and sender refund that `keeper_cancel` would pay. |
+| `get_lookback_window` | `env: Env`, `stream_id: u64` | `Option<u32>` | None (view) | Return the configured per-withdrawal lookback bound in ledgers, if any. |
 | `get_pause_info` | `env: Env` | `PauseInfo` | None (view) | Return protocol pause state including reason, timestamp, and admin audit trail. |
 | `get_paused_stream_count` | `env: Env` | `u64` | None (view) | Return count of streams currently in Paused status. |
 | `get_pending_recipient_update` | `env: Env`, `stream_id: u64` | `Option<PendingRecipientUpdate>` | None (view) | Return a pending recipient rotation awaiting acceptance, if any. |
@@ -86,6 +88,7 @@ The public entrypoint table below is kept in sync with every `pub fn` on the `Fl
 | `set_auto_renew` | `env: Env`, `stream_id: u64`, `sender: Address`, `enabled: bool` | — | Sender | Enable or disable permissionless auto-renew on a stream. |
 | `set_contract_paused` | `env: Env`, `paused: bool` | — | Admin | Toggle creation-only pause (`CreationPaused`); does not block withdrawals. |
 | `set_global_emergency_paused` | `env: Env`, `paused: bool` | — | Admin | Toggle global emergency pause blocking operational mutations. |
+| `set_lookback_window` | `env: Env`, `stream_id: u64`, `sender: Address`, `max_lookback_ledgers: Option<u32>` | — | Sender | Set or clear the per-stream lookback bound; rejects `Some(0)` and rejects Cancelled streams. |
 | `set_max_rate_per_second` | `env: Env`, `max_rate: i128` | — | Admin | Set maximum allowed stream rate for future rate updates. |
 | `shorten_stream_end_time` | `env: Env`, `stream_id: u64`, `new_end_time: u64` | — | Sender | Reduce `end_time` and refund unstreamed tokens to sender; Active or Paused only. |
 | `sweep_excess` | `env: Env`, `recipient: Address` | `i128` | Admin | Recover token balance exceeding tracked liabilities to an admin-chosen address. |
