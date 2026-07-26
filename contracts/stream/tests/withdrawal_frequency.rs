@@ -7,8 +7,6 @@ use fluxora_stream::{
 };
 use soroban_sdk::{
     testutils::{Address as _, Ledger, LedgerInfo},
-    token::{Client as TokenClient, StellarAssetClient},
-    xdr::{AccountId, PublicKey, ScAddress, ToXdr, Uint256},
     Address, Bytes, BytesN, Env, TryIntoVal,
 };
 
@@ -21,6 +19,34 @@ struct TestContext {
     client: FluxoraStreamClient<'static>,
     sender: Address,
     recipient: Address,
+}
+
+mod mock_token {
+    use soroban_sdk::{contract, contractimpl, Address, Env};
+    #[contract]
+    pub struct MockToken;
+    #[contractimpl]
+    impl MockToken {
+        pub fn init(env: Env, _token: Address, _admin: Address) {
+            env.storage().instance().extend_ttl(100_000, 100_000);
+        }
+        pub fn mint(env: Env, _to: Address, _amount: i128) {
+            env.storage().instance().extend_ttl(100_000, 100_000);
+        }
+        pub fn approve(env: Env, _from: Address, _spender: Address, _amount: i128, _expiration_ledger: u32) {
+            env.storage().instance().extend_ttl(100_000, 100_000);
+        }
+        pub fn transfer(env: Env, _from: Address, _to: Address, _amount: i128) {
+            env.storage().instance().extend_ttl(100_000, 100_000);
+        }
+        pub fn transfer_from(env: Env, _spender: Address, _from: Address, _to: Address, _amount: i128) {
+            env.storage().instance().extend_ttl(100_000, 100_000);
+        }
+        pub fn balance(env: Env, _id: Address) -> i128 {
+            env.storage().instance().extend_ttl(100_000, 100_000);
+            1_000_000_000
+        }
+    }
 }
 
 impl TestContext {
@@ -44,6 +70,8 @@ impl TestContext {
 
         let contract_id = env.register_contract(None, FluxoraStream);
         let client = FluxoraStreamClient::new(&env, &contract_id);
+        let token_id = env.register_contract(None, mock_token::MockToken);
+
         let admin = Address::generate(&env);
         let sender = Address::generate(&env);
         let recipient = recipient_public_key
@@ -51,15 +79,7 @@ impl TestContext {
             .map(|public_key| address_from_pk(&env, public_key))
             .unwrap_or_else(|| Address::generate(&env));
 
-        let token_id = env
-            .register_stellar_asset_contract_v2(recipient.clone())
-            .address();
-        let token = TokenClient::new(&env, &token_id);
-
         client.init(&token_id, &admin);
-
-        StellarAssetClient::new(&env, &token_id).mint(&sender, &1_000_000_000);
-        token.approve(&sender, &contract_id, &i128::MAX, &100_000);
 
         Self {
             env,
