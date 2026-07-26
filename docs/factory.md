@@ -97,9 +97,11 @@ These views are permissionless and do not mutate factory state.
 ## Important Bypass Warning
 
 > [!WARNING]
-> Because the underlying `FluxoraStream` contract does not natively enforce these policies, **they are only enforced if the stream is created by routing through the factory contract.** 
-> 
-> If a user (e.g. the treasury multi-sig itself) directly calls `create_stream` on the `FluxoraStream` contract, these policies will be bypassed. To truly lock down treasury funds, the token vault or multi-sig must be configured to *only* approve transactions that invoke the `fluxora_factory` contract.
+> Because the underlying `FluxoraStream` contract does not natively enforce these policies, **they are only enforced if the stream is created by routing through the factory contract.**
+>
+> If a user (e.g. the treasury multi-sig itself) directly calls `create_stream` on the `FluxoraStream` contract, **all** factory-level policies are bypassed — recipient allowlist, deposit cap, minimum duration, rate bounds, creation pause, and aggregate batch cap. The stream contract only enforces its own independent invariants (positive deposit, valid time range, cliff within bounds, deposit covers rate × duration). This behavior is confirmed by regression tests in `contracts/factory/tests/factory_stream_e2e.rs` (`test_direct_stream_call_bypasses_recipient_allowlist`, `test_direct_stream_call_bypasses_deposit_cap`, `test_direct_stream_call_bypasses_minimum_duration`).
+>
+> This is the expected architecture: the factory is an optional policy wrapper, not a security boundary. Anyone who knows the stream contract's address can create streams that violate every factory rule. To truly lock down treasury funds, the token vault or multi-sig must be configured to *only* approve transactions that invoke the `fluxora_factory` contract — not the stream contract directly.
 
 ## Stream Kind and Memo
 
