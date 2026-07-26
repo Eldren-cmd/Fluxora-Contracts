@@ -154,6 +154,19 @@ name = "withdrawal_frequency"
 path = "tests/withdrawal_frequency.rs"
 test = true
 
+# Hard gate: Cargo.lock determinism structural checks.
+# Verifies lockfile presence, soroban-sdk exact pin, no [patch] table,
+# resolver = "2", modern lockfile format, and manifest/lockfile version
+# consistency. Complements the CI "Verify Cargo.lock is committed and
+# unchanged" step in .github/workflows/ci.yml (build job). No soroban
+# testutils dependency — compiles and runs in every cargo test invocation.
+# See contracts/stream/src/checksum.rs ("Dependency resolution" residual risk)
+# and docs/upgrade.md §8 "Cargo.lock Determinism".
+[[test]]
+name = "cargo_lock_determinism"
+path = "tests/cargo_lock_determinism.rs"
+test = true
+
 # ---------------------------------------------------------------------------
 # Known-broken integration tests, second batch (compile fine, fail at runtime)
 # ---------------------------------------------------------------------------
