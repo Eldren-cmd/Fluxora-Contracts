@@ -98,8 +98,8 @@ The following table provides the CPU instruction counts for core operations.
     "100": 45453389
   },
   "keeper_cancel": {
-    "partial_accrual": 817573,
-    "fully_accrued": 416775
+    "partial_accrual": 786739,
+    "fully_accrued": 386889
   }
 }
 <!-- GAS_BASELINE_END -->
