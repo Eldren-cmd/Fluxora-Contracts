@@ -34,7 +34,7 @@ treasury tooling) can use this reference to handle protocol exceptions correctly
 | `TemplateNotFound` | 20 | Requested stream template does not exist | `get_stream_template`, `create_stream_from_template`, `delete_stream_template` |
 | `TemplateLimitExceeded` | 21 | Per-owner or global template limit would be exceeded | `register_stream_template` |
 | `TemplateUnauthorized` | 22 | Caller is not authorized to delete a template | `delete_stream_template` |
-| `TokenVerificationFailed` | 23 | Token contract does not expose the expected SEP-41 interface during init | `init` |
+| `PauseReasonTooLong` | 23 | Pause reason string exceeds `MAX_PAUSE_REASON_BYTES` | `pause_protocol` |
 | `ReservationNotFound` | 24 | No ID reservation exists for the specified holder | `release_id_reservation`, `reclaim_expired_id_reservation` |
 | `ReservationStillActive` | 25 | Reservation has not yet expired and cannot be reclaimed | `reclaim_expired_id_reservation` |
 | `ReservationNotExpirable` | 26 | Reservation has no expiry and cannot be reclaimed | `reclaim_expired_id_reservation` |
@@ -59,6 +59,7 @@ Non-error enum values used by stream creation and accrual:
 |------|-------|---------|
 | `Linear` | 0 | A `StreamKind` that accrues continuously over time after the start time. |
 | `CliffOnly` | 1 | A `StreamKind` that unlocks the full deposit at the cliff time in one step. |
+| `CliffSlope` | 2 | A `StreamKind` that accrues linearly from cliff_time to end_time, and nothing before. |
 
 ---
 
@@ -622,7 +623,7 @@ match client.try_delegated_withdraw(&relayer, &stream_id, &signature, &nonce, &e
 
 ---
 
-### ClockRegression (28)
+### ClockRegression (27)
 
 **Definition**: Ledger-backed accrual observed a ledger timestamp lower than the previous accrual timestamp stored for the contract instance.
 
@@ -684,7 +685,7 @@ match client.try_delegated_withdraw(&relayer, &stream_id, &signature, &nonce, &e
 
 ---
 
-### TokenVerificationFailed (23)
+### TokenVerificationFailed (88)
 
 **Definition**: During initialization, the configured token contract did not expose the expected SEP-41 interface.
 
@@ -692,7 +693,7 @@ match client.try_delegated_withdraw(&relayer, &stream_id, &signature, &nonce, &e
 
 ---
 
-### PauseReasonTooLong (27)
+### PauseReasonTooLong (23)
 
 **Definition**: `pause_protocol` received a reason string longer than `MAX_PAUSE_REASON_BYTES`.
 

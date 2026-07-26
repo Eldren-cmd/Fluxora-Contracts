@@ -2,11 +2,11 @@
 extern crate std;
 
 use ed25519_dalek::{Signer, SigningKey};
-use fluxora_stream::{ContractError, FluxoraStream, FluxoraStreamClient, StreamKind};
+use fluxora_stream::{
+    ContractError, CreateStreamParams, FluxoraStream, FluxoraStreamClient, StreamKind,
+};
 use soroban_sdk::{
     testutils::{Address as _, Ledger, LedgerInfo},
-    token::{Client as TokenClient, StellarAssetClient},
-    xdr::{AccountId, PublicKey, ScAddress, Uint256},
     Address, Bytes, BytesN, Env, TryIntoVal,
 };
 
@@ -19,6 +19,34 @@ struct TestContext {
     client: FluxoraStreamClient<'static>,
     sender: Address,
     recipient: Address,
+}
+
+mod mock_token {
+    use soroban_sdk::{contract, contractimpl, Address, Env};
+    #[contract]
+    pub struct MockToken;
+    #[contractimpl]
+    impl MockToken {
+        pub fn init(env: Env, _token: Address, _admin: Address) {
+            env.storage().instance().extend_ttl(100_000, 100_000);
+        }
+        pub fn mint(env: Env, _to: Address, _amount: i128) {
+            env.storage().instance().extend_ttl(100_000, 100_000);
+        }
+        pub fn approve(env: Env, _from: Address, _spender: Address, _amount: i128, _expiration_ledger: u32) {
+            env.storage().instance().extend_ttl(100_000, 100_000);
+        }
+        pub fn transfer(env: Env, _from: Address, _to: Address, _amount: i128) {
+            env.storage().instance().extend_ttl(100_000, 100_000);
+        }
+        pub fn transfer_from(env: Env, _spender: Address, _from: Address, _to: Address, _amount: i128) {
+            env.storage().instance().extend_ttl(100_000, 100_000);
+        }
+        pub fn balance(env: Env, _id: Address) -> i128 {
+            env.storage().instance().extend_ttl(100_000, 100_000);
+            1_000_000_000
+        }
+    }
 }
 
 impl TestContext {
@@ -42,10 +70,7 @@ impl TestContext {
 
         let contract_id = env.register_contract(None, FluxoraStream);
         let client = FluxoraStreamClient::new(&env, &contract_id);
-        let token_id = env
-            .register_stellar_asset_contract_v2(Address::generate(&env))
-            .address();
-        let token = TokenClient::new(&env, &token_id);
+        let token_id = env.register_contract(None, mock_token::MockToken);
 
         let admin = Address::generate(&env);
         let sender = Address::generate(&env);
@@ -53,10 +78,8 @@ impl TestContext {
             .as_ref()
             .map(|public_key| address_from_pk(&env, public_key))
             .unwrap_or_else(|| Address::generate(&env));
-        client.init(&token_id, &admin);
 
-        StellarAssetClient::new(&env, &token_id).mint(&sender, &1_000_000_000);
-        token.approve(&sender, &contract_id, &i128::MAX, &100_000);
+        client.init(&token_id, &admin);
 
         Self {
             env,
@@ -69,15 +92,20 @@ impl TestContext {
     fn create_stream(&self, dust_threshold: i128) -> u64 {
         self.client.create_stream(
             &self.sender,
-            &self.recipient,
-            &2_000,
-            &1,
-            &0,
-            &0,
-            &1_000,
-            &dust_threshold,
-            &None,
-            &StreamKind::Linear,
+            &CreateStreamParams {
+                recipient: self.recipient.clone(),
+                deposit_amount: 2_000,
+                rate_per_second: 1,
+                start_time: 0,
+                cliff_time: 0,
+                end_time: 1_000,
+                withdraw_dust_threshold: Some(dust_threshold),
+                memo: None,
+                metadata: None,
+                kind: StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
         )
     }
 
@@ -616,16 +644,31 @@ fn batch_withdraw_shares_the_per_stream_interval() {
     let first = ctx.create_stream(0);
     let second = ctx.create_stream(0);
     ctx.advance_ledger(10);
-    let streams = soroban_sdk::vec![&ctx.env, first, second];
+    let withdrawals = soroban_sdk::vec![
+        &ctx.env,
+        fluxora_stream::WithdrawToParam {
+            stream_id: first,
+            destination: ctx.recipient.clone(),
+        },
+        fluxora_stream::WithdrawToParam {
+            stream_id: second,
+            destination: ctx.recipient.clone(),
+        },
+    ];
 
-    ctx.client.batch_withdraw(&ctx.recipient, &streams);
+    ctx.client.batch_withdraw_to(&ctx.recipient, &withdrawals);
     assert_eq!(
-        ctx.client.try_batch_withdraw(&ctx.recipient, &streams),
+        ctx.client.try_batch_withdraw_to(&ctx.recipient, &withdrawals),
         Err(Ok(ContractError::WithdrawalTooFrequent))
     );
 
     ctx.advance_ledger(MIN_WITHDRAW_INTERVAL_LEDGERS);
-    assert_eq!(ctx.client.batch_withdraw(&ctx.recipient, &streams).len(), 2);
+    assert_eq!(
+        ctx.client
+            .batch_withdraw_to(&ctx.recipient, &withdrawals)
+            .len(),
+        2
+    );
 }
 
 #[test]
