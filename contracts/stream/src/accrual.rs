@@ -166,7 +166,7 @@ pub struct CheckpointState {
     ///
     /// **Invariant**: `deposit_amount >= rate_per_second * (end_time - start_time)`
     pub deposit_amount: i128,
-    /// The kind of stream (Linear or CliffOnly).
+    /// The kind of stream (Linear, CliffOnly, or CliffSlope).
     pub kind: StreamKind,
 }
 

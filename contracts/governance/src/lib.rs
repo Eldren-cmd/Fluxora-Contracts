@@ -384,10 +384,10 @@ fn dispatch_call(env: &Env, target: &Address, calldata: &Bytes) -> Result<(), Go
             set_threshold_internal(env, new_threshold)?;
         }
         CallData::GovAddSigner(signer) => {
-            add_signer_internal(env, signer)?;
+            FluxoraGovernance::add_signer_internal(env, signer)?;
         }
         CallData::GovRemoveSigner(signer) => {
-            remove_signer_internal(env, signer)?;
+            FluxoraGovernance::remove_signer_internal(env, signer)?;
         }
     }
     Ok(())
@@ -1393,15 +1393,15 @@ impl FluxoraGovernance {
 #[cfg(test)]
 impl FluxoraGovernance {
     pub fn test_only_set_threshold(env: Env, new_threshold: u32) -> Result<(), GovernanceError> {
-        set_threshold_internal(&env, new_threshold)
+        Self::set_threshold_internal(&env, new_threshold)
     }
 
     pub fn test_only_add_signer(env: Env, signer: Address) -> Result<(), GovernanceError> {
-        add_signer_internal(&env, signer)
+        Self::add_signer_internal(&env, signer)
     }
 
     pub fn test_only_remove_signer(env: Env, signer: Address) -> Result<(), GovernanceError> {
-        remove_signer_internal(&env, signer)
+        Self::remove_signer_internal(&env, signer)
     }
 }
 

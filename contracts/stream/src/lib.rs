@@ -382,7 +382,7 @@ pub enum StreamStatus {
     Cancelled = 3,
 }
 
-/// The architectural style of the stream (Linear or CliffOnly).
+/// The architectural style of the stream (Linear, CliffOnly, or CliffSlope).
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StreamKind {
@@ -1105,7 +1105,7 @@ pub struct CreateStreamParams {
     pub memo: Option<soroban_sdk::Bytes>,
     /// Optional structured metadata for indexer consumption.
     pub metadata: Option<soroban_sdk::Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
-    /// The architectural style of the stream (Linear or CliffOnly).
+    /// The architectural style of the stream (Linear, CliffOnly, or CliffSlope).
     pub kind: StreamKind,
     /// If true, the stream cannot be cancelled or shortened. Defaults to false (None).
     pub irrevocable: Option<bool>,
@@ -1113,19 +1113,15 @@ pub struct CreateStreamParams {
     pub witness: Option<Address>,
 }
 
-/// Parameters for creating a payment stream with relative (offset-based) times.
-///
-/// Computes `start_time`, `cliff_time`, and `end_time` by adding offsets to the
-/// current ledger timestamp (`env.ledger().timestamp()`). This eliminates off-chain
-/// calculation errors that lead to `StartTimeInPast` failures.
-///
-/// # Time offsets
-/// - `start_delay`: Seconds to add to current timestamp for stream start
-/// - `cliff_delay`: Seconds to add to current timestamp for cliff time (must be >= start_delay)
-/// - `duration`: Total duration of stream in seconds (end_time = start_time + duration)
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CreateStreamRelativeParams {
+pub struct CreateStreamOptions {
+    /// Optional bounded memo for indexer correlation (e.g. payroll batch ID).
+    /// Maximum `MAX_MEMO_BYTES` (64) bytes. Pass `None` to omit.
+    pub memo: Option<soroban_sdk::Bytes>,
+    /// Optional structured metadata for indexer consumption.
+    pub metadata: Option<soroban_sdk::Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
+    /// The architectural style of the stream (Linear, CliffOnly, or CliffSlope).
     /// Address that will receive streamed tokens for this stream entry.
     pub recipient: Address,
     /// Total amount escrowed for this stream entry.
@@ -2149,20 +2145,22 @@ impl FluxoraStream {
             return Err(ContractError::InvalidParams);
         }
 
-        if kind == StreamKind::Linear {
-            if rate_per_second <= 0 {
-                return Err(ContractError::InvalidParams);
-            }
+        match kind {
+            StreamKind::Linear | StreamKind::CliffSlope => {
+                if rate_per_second <= 0 {
+                    return Err(ContractError::InvalidParams);
+                }
 
-            // Enforce governance-controlled maximum rate per second cap
-            let max_rate = get_max_rate_per_second(env);
-            if rate_per_second > max_rate {
-                return Err(ContractError::InvalidParams);
+                // Enforce governance-controlled maximum rate per second cap.
+                let max_rate = get_max_rate_per_second(env);
+                if rate_per_second > max_rate {
+                    return Err(ContractError::InvalidParams);
+                }
             }
-        } else {
-            // For CliffOnly stream, rate must be 0
-            if rate_per_second != 0 {
-                return Err(ContractError::InvalidParams);
+            StreamKind::CliffOnly => {
+                if rate_per_second != 0 {
+                    return Err(ContractError::InvalidParams);
+                }
             }
         }
 
@@ -2182,16 +2180,31 @@ impl FluxoraStream {
             return Err(ContractError::InvalidParams);
         }
 
-        if kind == StreamKind::Linear {
-            // Validate deposit covers total streamable amount (#34)
-            let duration = (end_time - start_time) as i128;
-            let total_streamable = rate_per_second
-                .checked_mul(duration)
-                .ok_or(ContractError::InvalidParams)?; // Return InvalidParams on overflow as expected by tests
+        match kind {
+            StreamKind::Linear => {
+                // Validate deposit covers the full streamable amount from start to end.
+                let duration = (end_time - start_time) as i128;
+                let total_streamable = rate_per_second
+                    .checked_mul(duration)
+                    .ok_or(ContractError::InvalidParams)?;
 
-            if deposit_amount < total_streamable {
-                return Err(ContractError::InsufficientDeposit);
+                if deposit_amount < total_streamable {
+                    return Err(ContractError::InsufficientDeposit);
+                }
             }
+            StreamKind::CliffSlope => {
+                // CliffSlope accrues only after the cliff, so the deposit must cover the
+                // post-cliff portion of the schedule.
+                let post_cliff_duration = (end_time.saturating_sub(cliff_time)) as i128;
+                let post_cliff_streamable = rate_per_second
+                    .checked_mul(post_cliff_duration)
+                    .ok_or(ContractError::InvalidParams)?;
+
+                if deposit_amount < post_cliff_streamable {
+                    return Err(ContractError::InsufficientDeposit);
+                }
+            }
+            StreamKind::CliffOnly => {}
         }
 
         Ok(())
@@ -2712,8 +2725,8 @@ impl FluxoraStream {
             .ok_or(ContractError::InvalidParams)?;
 
         // Delegate to standard create_stream with computed absolute times
-        Self::create_stream(
-            env,
+        Self::persist_new_stream(
+            &env,
             sender,
             CreateStreamParams {
                 recipient: params.recipient,
@@ -5590,6 +5603,9 @@ impl FluxoraStream {
             is_pooled: None,
             parent_stream_id: Some(stream_id),
             delegation_depth: stream.delegation_depth + 1,
+            claim_owner: None,
+            witness: None,
+            last_rate_change_ledger: 0,
         };
 
         save_stream(&env, &child_stream);
