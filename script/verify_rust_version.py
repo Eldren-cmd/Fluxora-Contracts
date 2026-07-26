@@ -104,15 +104,16 @@ def installed_targets() -> list[str]:
     """
     override = os.environ.get("RUSTUP_TARGET_LIST_OUTPUT")
     if override is not None:
-        return [line.strip() for line in override.splitlines() if line.strip()]
-
-    completed = subprocess.run(
-        ["rustup", "target", "list", "--installed"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+        lines = [line.strip() for line in override.splitlines() if line.strip()]
+    else:
+        completed = subprocess.run(
+            ["rustup", "target", "list", "--installed"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    return [line.split()[0] for line in lines]
 
 
 def installed_components() -> list[str]:
@@ -123,15 +124,16 @@ def installed_components() -> list[str]:
     """
     override = os.environ.get("RUSTUP_COMPONENT_LIST_OUTPUT")
     if override is not None:
-        return [line.strip() for line in override.splitlines() if line.strip()]
-
-    completed = subprocess.run(
-        ["rustup", "component", "list", "--installed"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+        lines = [line.strip() for line in override.splitlines() if line.strip()]
+    else:
+        completed = subprocess.run(
+            ["rustup", "component", "list", "--installed"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    return lines
 
 
 def main() -> int:
@@ -143,7 +145,7 @@ def main() -> int:
         actual_targets = set(installed_targets())
         
         expected_components = set(pinned_components())
-        actual_components = set(installed_components())
+        actual_components = installed_components()
     except Exception as exc:
         print(f"::error::{exc}", file=sys.stderr)
         return 1
@@ -169,7 +171,17 @@ def main() -> int:
     elif expected_targets:
         print(f"Installed targets match requirements: {', '.join(sorted(expected_targets))}")
 
-    missing_components = expected_components - actual_components
+    missing_components = set()
+    for exp in expected_components:
+        found = False
+        for comp in actual_components:
+            comp_clean = comp.strip()
+            if comp_clean == exp or comp_clean.startswith(f"{exp}-") or comp_clean.startswith(f"{exp} "):
+                found = True
+                break
+        if not found:
+            missing_components.add(exp)
+
     if missing_components:
         print(
             f"::error::Missing required components: {', '.join(sorted(missing_components))}",
