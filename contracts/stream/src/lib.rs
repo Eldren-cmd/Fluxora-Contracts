@@ -2201,8 +2201,7 @@ impl FluxoraStream {
         withdraw_dust_threshold: i128,
         memo: Option<soroban_sdk::Bytes>,
         kind: StreamKind,
-        irrevocable: Option<bool>,
-        witness: Option<Address>,
+        metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
     ) -> Result<u64, ContractError> {
         // Validate memo length before allocating a stream ID.
         if let Some(ref m) = memo {
@@ -2211,12 +2210,9 @@ impl FluxoraStream {
             }
         }
 
-        // Validate withdraw_dust_threshold: must be in range [0, deposit_amount]
-        if withdraw_dust_threshold < 0 {
-            return Err(ContractError::InvalidDustThreshold);
-        }
-        if withdraw_dust_threshold > deposit_amount {
-            return Err(ContractError::InvalidDustThreshold);
+        // Validate metadata size bounds before allocating a stream ID.
+        if let Some(ref md) = metadata {
+            validate_metadata(md)?;
         }
 
         let stream_id = next_stream_id_for(env, &sender);
@@ -2241,15 +2237,7 @@ impl FluxoraStream {
             kind,
             last_pause_toggle_ledger: 0,
             last_withdraw_ledger: 0,
-            metadata: None,
-            irrevocable,
-            witness: witness.clone(),
-            claim_owner: None,
-            irrevocable: None,
-            delegation_depth: 0,
-            parent_stream_id: None,
-            last_rate_change_ledger: 0,
-            is_pooled: None,
+            metadata: metadata.clone(),
         };
 
         save_stream(env, &stream);
@@ -2278,7 +2266,7 @@ impl FluxoraStream {
                 end_time,
                 withdraw_dust_threshold,
                 memo,
-                metadata: None,
+                metadata,
             },
         );
 
@@ -2303,13 +2291,17 @@ impl FluxoraStream {
         withdraw_dust_threshold: i128,
         memo: Option<soroban_sdk::Bytes>,
         kind: StreamKind,
-        irrevocable: Option<bool>,
-        witness: Option<Address>,
+        metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
     ) -> Result<u64, ContractError> {
         if let Some(ref m) = memo {
             if m.len() as usize > MAX_MEMO_BYTES {
                 return Err(ContractError::InvalidParams);
             }
+        }
+
+        // Validate metadata size bounds before allocating a stream ID.
+        if let Some(ref md) = metadata {
+            validate_metadata(md)?;
         }
 
         let stream_id = next_stream_id_for(env, &sender);
@@ -2333,16 +2325,7 @@ impl FluxoraStream {
             kind,
             last_pause_toggle_ledger: 0,
             last_withdraw_ledger: 0,
-            metadata: None,
-            claim_owner: None,
-            irrevocable,
-            witness: witness.clone(),
-            claim_owner: None,
-            irrevocable: None,
-            delegation_depth: 0,
-            parent_stream_id: None,
-            last_rate_change_ledger: 0,
-            is_pooled: None,
+            metadata: metadata.clone(),
         };
 
         save_stream(env, &stream);
@@ -2367,7 +2350,7 @@ impl FluxoraStream {
                 end_time,
                 withdraw_dust_threshold,
                 memo,
-                metadata: None,
+                metadata,
             },
         );
 
@@ -2624,11 +2607,7 @@ impl FluxoraStream {
             withdraw_dust_threshold,
             memo,
             kind,
-        )?;
-        set_max_lookback_ledgers(&env, stream_id, max_lookback_ledgers)?;
-        Ok(stream_id)
-            irrevocable,
-            witness,
+            None,
         )
     }
 
@@ -3048,8 +3027,7 @@ impl FluxoraStream {
                 params.withdraw_dust_threshold.unwrap_or(0),
                 params.memo.clone(),
                 params.kind,
-                params.irrevocable,
-                params.witness.clone(),
+                params.metadata.clone(),
             )?;
             created_ids.push_back(stream_id);
 
@@ -3284,10 +3262,9 @@ impl FluxoraStream {
                 params.cliff_time,
                 params.end_time,
                 params.withdraw_dust_threshold.unwrap_or(0),
-                params.memo,
+                params.memo.clone(),
                 params.kind,
-                params.irrevocable,
-                params.witness,
+                params.metadata.clone(),
             );
 
             match stream_id {
@@ -8342,13 +8319,7 @@ impl FluxoraStream {
             source.withdraw_dust_threshold,
             source.memo.clone(),
             source.kind,
-            source.irrevocable,
-            source.witness.clone(),
-        )?;
-        set_max_lookback_ledgers(
-            &env,
-            new_stream_id,
-            max_lookback_ledgers(&env, stream_id),
+            source.metadata.clone(),
         )?;
 
         // ── 9. Emit clone-specific event for indexer correlation ──────────────
