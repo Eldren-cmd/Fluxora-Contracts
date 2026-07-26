@@ -887,7 +887,12 @@ impl FluxoraFactory {
             return Err(FactoryError::RecipientNotAllowlisted);
         }
 
-        // ── Guard 4: deposit cap ─────────────────────────────────────────────
+        // ── Guard 4: deposit must be positive ───────────────────────────────
+        if params.deposit_amount <= 0 {
+            return Err(FactoryError::InvalidCap);
+        }
+
+        // ── Guard 5: deposit cap ─────────────────────────────────────────────
         if params.deposit_amount > policy.max_deposit {
             return Err(FactoryError::DepositExceedsCap);
         }
@@ -1013,6 +1018,10 @@ impl FluxoraFactory {
                 .unwrap_or(false);
             if !is_allowed {
                 return Err(FactoryError::RecipientNotAllowlisted);
+            }
+
+            if params.deposit_amount <= 0 {
+                return Err(FactoryError::InvalidCap);
             }
 
             if params.deposit_amount > max_deposit {
