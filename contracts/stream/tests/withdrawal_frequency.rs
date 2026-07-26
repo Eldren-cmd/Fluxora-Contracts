@@ -1,102 +1,131 @@
 #![cfg(test)]
 extern crate std;
 
+use ed25519_dalek::{Signer, SigningKey};
 use fluxora_stream::{ContractError, FluxoraStream, FluxoraStreamClient, StreamKind};
 use soroban_sdk::{
     testutils::{Address as _, Ledger, LedgerInfo},
-    token::Client as TokenClient,
-    Address, Env,
+    token::{Client as TokenClient, StellarAssetClient},
+    xdr::{AccountId, PublicKey, ScAddress, Uint256},
+    Address, Bytes, BytesN, Env, TryIntoVal,
 };
+
+/// The withdrawal limiter is deliberately one ledger: it prevents duplicate
+/// same-ledger writes without delaying a recipient's next ledger withdrawal.
+const MIN_WITHDRAW_INTERVAL_LEDGERS: u32 = 1;
 
 struct TestContext {
     env: Env,
     client: FluxoraStreamClient<'static>,
-    admin: Address,
     sender: Address,
     recipient: Address,
-    token: TokenClient<'static>,
 }
 
 impl TestContext {
     fn setup() -> Self {
+        Self::setup_with_recipient(None)
+    }
+
+    fn setup_with_recipient(recipient_public_key: Option<[u8; 32]>) -> Self {
         let env = Env::default();
         env.mock_all_auths();
+        env.ledger().set(LedgerInfo {
+            timestamp: 0,
+            protocol_version: 20,
+            sequence_number: 1,
+            network_id: Default::default(),
+            base_reserve: 10,
+            min_temp_entry_ttl: 16,
+            min_persistent_entry_ttl: 16,
+            max_entry_ttl: 6_312_000,
+        });
 
         let contract_id = env.register_contract(None, FluxoraStream);
         let client = FluxoraStreamClient::new(&env, &contract_id);
-
-        let token_admin = Address::generate(&env);
         let token_id = env
-            .register_stellar_asset_contract_v2(token_admin)
+            .register_stellar_asset_contract_v2(Address::generate(&env))
             .address();
         let token = TokenClient::new(&env, &token_id);
 
         let admin = Address::generate(&env);
         let sender = Address::generate(&env);
-        let recipient = Address::generate(&env);
-
+        let recipient = recipient_public_key
+            .as_ref()
+            .map(|public_key| address_from_pk(&env, public_key))
+            .unwrap_or_else(|| Address::generate(&env));
         client.init(&token_id, &admin);
 
-        // Mint tokens to sender
-        token.mint(&sender, &1_000_000_000);
+        StellarAssetClient::new(&env, &token_id).mint(&sender, &1_000_000_000);
+        token.approve(&sender, &contract_id, &i128::MAX, &100_000);
 
         Self {
             env,
             client,
-            admin,
             sender,
             recipient,
-            token,
         }
     }
 
-    fn create_stream(&self) -> u64 {
-        self.client
-            .create_stream(
-                &self.sender,
-                &self.recipient,
-                &1000,
-                &1, // 1 token per second
-                &0,
-                &0,
-                &1000,
-                &0,
-                &None,
-            )
-            .unwrap()
+    fn create_stream(&self, dust_threshold: i128) -> u64 {
+        self.client.create_stream(
+            &self.sender,
+            &self.recipient,
+            &2_000,
+            &1,
+            &0,
+            &0,
+            &1_000,
+            &dust_threshold,
+            &None,
+            &StreamKind::Linear,
+        )
     }
 
     fn advance_ledger(&self, ledgers: u32) {
         let current = self.env.ledger().sequence();
         self.env.ledger().set(LedgerInfo {
-            timestamp: self.env.ledger().timestamp() + (ledgers as u64 * 5),
+            timestamp: self.env.ledger().timestamp() + u64::from(ledgers) * 5,
             protocol_version: 20,
             sequence_number: current + ledgers,
             network_id: Default::default(),
             base_reserve: 10,
             min_temp_entry_ttl: 16,
             min_persistent_entry_ttl: 16,
-            max_entry_ttl: 6312000,
+            max_entry_ttl: 6_312_000,
         });
     }
 }
 
-#[test]
-fn test_first_withdrawal_succeeds() {
-    let ctx = TestContext::setup();
-    let stream_id = ctx.create_stream();
+fn address_from_pk(env: &Env, pk: &[u8; 32]) -> Address {
+    ScAddress::Account(AccountId(PublicKey::PublicKeyTypeEd25519(Uint256(*pk))))
+        .try_into_val(env)
+        .expect("valid ed25519 public key")
+}
 
-    // Advance time to accrue tokens
-    ctx.advance_ledger(100);
+fn delegated_message(
+    env: &Env,
+    stream_id: u64,
+    nonce: u64,
+    deadline: u64,
+    expected_minimum: i128,
+) -> Bytes {
+    let mut message = Bytes::new(env);
+    message.extend_from_array(&stream_id.to_be_bytes());
+    message.extend_from_array(&nonce.to_be_bytes());
+    message.extend_from_array(&deadline.to_be_bytes());
+    message.extend_from_array(&expected_minimum.to_be_bytes());
+    message
+}
 
-    // First withdrawal should succeed
-    let result = ctx.client.withdraw(&stream_id);
-    assert!(result.is_ok());
-    assert!(result.unwrap() > 0);
+fn sign_message(env: &Env, signing_key: &SigningKey, message: &Bytes) -> BytesN<64> {
+    let bytes: std::vec::Vec<u8> = (0..message.len())
+        .map(|index| message.get_unchecked(index))
+        .collect();
+    BytesN::from_array(env, &signing_key.sign(&bytes).to_bytes())
 }
 
 #[test]
-fn test_second_withdrawal_same_ledger_fails() {
+fn same_ledger_withdrawal_is_rejected_and_exact_interval_succeeds() {
     let ctx = TestContext::setup();
     let stream_id = ctx.create_stream();
 
@@ -540,107 +569,146 @@ fn test_multiple_streams_independent_rate_limits() {
     // Advance by 10 ledgers
     ctx.advance_ledger(10);
 
-    // Withdraw from stream2 (should succeed, independent rate limit)
-    let result = ctx.client.withdraw(&stream_id2);
-    assert!(result.is_ok());
+    assert!(ctx.client.withdraw(&stream_id) > 0);
+    assert_eq!(
+        ctx.client.try_withdraw(&stream_id),
+        Err(Ok(ContractError::WithdrawalTooFrequent))
+    );
 
-    // Attempt to withdraw from stream1 again (should fail, only 10 ledgers elapsed)
-    let result = ctx.client.try_withdraw(&stream_id1);
-    assert_eq!(result, Err(Ok(ContractError::WithdrawalTooFrequent)));
-
-    // Advance by 7 more ledgers (total 17 from stream1's last withdrawal)
-    ctx.advance_ledger(7);
-
-    // Now stream1 withdrawal should succeed
-    let result = ctx.client.withdraw(&stream_id1);
-    assert!(result.is_ok());
+    ctx.advance_ledger(MIN_WITHDRAW_INTERVAL_LEDGERS);
+    assert!(ctx.client.withdraw(&stream_id) > 0);
 }
 
-// ─── Backward timestamp skew test (issue #940) ─────────────────────────────
-
-/// After a withdrawal records `last_withdraw_ledger`, set the ledger to a
-/// timestamp with a sequence number earlier than the recorded value.
-/// This simulates a validator clock anomaly.
-///
-/// Without `saturating_sub`, `current_ledger - last_withdraw_ledger` would
-/// underflow to a huge u32 value, bypassing the frequency limiter.
-/// With `saturating_sub`, the elapsed time is clamped to 0, and the
-/// withdrawal is correctly rejected.
 #[test]
-fn test_backward_timestamp_skew_cannot_bypass_rate_limit() {
-    use soroban_sdk::testutils::{Ledger, LedgerInfo};
+fn every_successful_withdrawal_resets_the_interval() {
+    let ctx = TestContext::setup();
+    let stream_id = ctx.create_stream(0);
+    ctx.advance_ledger(10);
+    ctx.client.withdraw(&stream_id);
 
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let contract_id = env.register_contract(None, FluxoraStream);
-    let client = FluxoraStreamClient::new(&env, &contract_id);
-
-    let token_id = env
-        .register_stellar_asset_contract_v2(Address::generate(&env))
-        .address();
-
-    let admin = Address::generate(&env);
-    let sender = Address::generate(&env);
-    let recipient = Address::generate(&env);
-
-    client.init(&token_id, &admin);
-
-    // Create a stream: deposit=1000, rate=1/s, no cliff, duration=1000
-    let stream_id = client.create_stream(
-        &sender,
-        &recipient,
-        &1000,
-        &1,
-        &0,
-        &0,
-        &1000,
-        &0,
-        &None,
-        &StreamKind::Linear,
-    );
-    assert!(stream_id > 0, "stream should be created");
-    // Advance to ledger 100 to accrue tokens
-    let ledger_100 = LedgerInfo {
-        timestamp: 500,
-        protocol_version: 20,
-        sequence_number: 100,
-        network_id: Default::default(),
-        base_reserve: 10,
-        min_temp_entry_ttl: 16,
-        min_persistent_entry_ttl: 16,
-        max_entry_ttl: 6312000,
-    };
-    env.ledger().set(ledger_100);
-
-    // First withdrawal — succeeds, records last_withdraw_ledger = 100
-    let result = client.withdraw(&stream_id);
-    assert!(result > 0, "first withdrawal should accrue tokens");
-
-    // ── ATTACK: set ledger backward ──
-    // Simulate a validator clock anomaly: sequence number jumps BACK
-    // from 100 to 50 (earlier than the recorded last_withdraw_ledger).
-    let ledger_backward = LedgerInfo {
-        timestamp: 250, // earlier timestamp too
-        protocol_version: 20,
-        sequence_number: 50, // < last_withdraw_ledger (100)
-        network_id: Default::default(),
-        base_reserve: 10,
-        min_temp_entry_ttl: 16,
-        min_persistent_entry_ttl: 16,
-        max_entry_ttl: 6312000,
-    };
-    env.ledger().set(ledger_backward);
-
-    // With `saturating_sub`: elapsed = 50 - 100 = 0 (clamped)
-    // 0 < MIN_WITHDRAW_INTERVAL_LEDGERS → withdrawal REJECTED
-    // Without the fix: 50 - 100 would underflow to 4294967246,
-    // which is >> MIN_WITHDRAW_INTERVAL_LEDGERS → withdrawal ALLOWED (vuln)
-    let result = client.try_withdraw(&stream_id);
+    ctx.advance_ledger(MIN_WITHDRAW_INTERVAL_LEDGERS);
+    ctx.client.withdraw(&stream_id);
     assert_eq!(
-        result,
-        Err(Ok(ContractError::WithdrawalTooFrequent)),
-        "backward timestamp skew must NOT bypass rate limit"
+        ctx.client.try_withdraw(&stream_id),
+        Err(Ok(ContractError::WithdrawalTooFrequent))
+    );
+
+    ctx.advance_ledger(MIN_WITHDRAW_INTERVAL_LEDGERS);
+    assert!(ctx.client.withdraw(&stream_id) > 0);
+}
+
+#[test]
+fn zero_withdrawable_does_not_consume_the_interval() {
+    let ctx = TestContext::setup();
+    let stream_id = ctx.create_stream(100);
+    ctx.advance_ledger(10); // 50 accrued, below the dust threshold.
+
+    assert_eq!(ctx.client.withdraw(&stream_id), 0);
+    assert_eq!(ctx.client.get_stream_state(&stream_id).last_withdraw_ledger, 0);
+
+    ctx.advance_ledger(10); // 100 accrued, exactly at the threshold.
+    assert_eq!(ctx.client.withdraw(&stream_id), 100);
+}
+
+#[test]
+fn batch_withdraw_shares_the_per_stream_interval() {
+    let ctx = TestContext::setup();
+    let first = ctx.create_stream(0);
+    let second = ctx.create_stream(0);
+    ctx.advance_ledger(10);
+    let streams = soroban_sdk::vec![&ctx.env, first, second];
+
+    ctx.client.batch_withdraw(&ctx.recipient, &streams);
+    assert_eq!(
+        ctx.client.try_batch_withdraw(&ctx.recipient, &streams),
+        Err(Ok(ContractError::WithdrawalTooFrequent))
+    );
+
+    ctx.advance_ledger(MIN_WITHDRAW_INTERVAL_LEDGERS);
+    assert_eq!(ctx.client.batch_withdraw(&ctx.recipient, &streams).len(), 2);
+}
+
+#[test]
+fn rate_change_checkpoints_accrual_without_bypassing_the_interval() {
+    let ctx = TestContext::setup();
+    let stream_id = ctx.create_stream(0);
+    ctx.advance_ledger(10);
+
+    assert_eq!(ctx.client.withdraw(&stream_id), 50);
+    ctx.client.update_rate_per_second(&stream_id, &2);
+
+    // The checkpoint preserves the first 50 tokens, but a rate update must not
+    // make a second withdrawal possible in the same ledger.
+    assert_eq!(
+        ctx.client.try_withdraw(&stream_id),
+        Err(Ok(ContractError::WithdrawalTooFrequent))
+    );
+
+    ctx.advance_ledger(MIN_WITHDRAW_INTERVAL_LEDGERS);
+    assert_eq!(ctx.client.withdraw(&stream_id), 10);
+    let stream = ctx.client.get_stream_state(&stream_id);
+    assert_eq!(stream.checkpointed_amount, 50);
+    assert_eq!(stream.withdrawn_amount, 60);
+}
+
+#[test]
+fn delegated_withdrawal_obeys_the_same_ledger_limit() {
+    let signing_key = SigningKey::from_bytes(&[0xA5; 32]);
+    let ctx = TestContext::setup_with_recipient(Some(signing_key.verifying_key().to_bytes()));
+    let public_key = BytesN::from_array(&ctx.env, &signing_key.verifying_key().to_bytes());
+    let stream_id = ctx.create_stream(0);
+    let relayer = Address::generate(&ctx.env);
+    ctx.advance_ledger(10);
+
+    let deadline = ctx.env.ledger().timestamp() + 3_600;
+    let first = sign_message(
+        &ctx.env,
+        &signing_key,
+        &delegated_message(&ctx.env, stream_id, 0, deadline, 0),
+    );
+    assert!(ctx.client.delegated_withdraw(
+        &stream_id,
+        &relayer,
+        &public_key,
+        &0,
+        &deadline,
+        &0,
+        &first,
+    ) > 0);
+
+    let second = sign_message(
+        &ctx.env,
+        &signing_key,
+        &delegated_message(&ctx.env, stream_id, 1, deadline, 0),
+    );
+    assert_eq!(
+        ctx.client.try_delegated_withdraw(
+            &stream_id, &relayer, &public_key, &1, &deadline, &0, &second,
+        ),
+        Err(Ok(ContractError::WithdrawalTooFrequent))
+    );
+}
+
+#[test]
+fn backward_ledger_sequence_cannot_bypass_the_limit() {
+    let ctx = TestContext::setup();
+    let stream_id = ctx.create_stream(0);
+    ctx.advance_ledger(10);
+    ctx.client.withdraw(&stream_id);
+
+    ctx.env.ledger().set(LedgerInfo {
+        timestamp: 25,
+        protocol_version: 20,
+        sequence_number: 5,
+        network_id: Default::default(),
+        base_reserve: 10,
+        min_temp_entry_ttl: 16,
+        min_persistent_entry_ttl: 16,
+        max_entry_ttl: 6_312_000,
+    });
+    assert_eq!(
+        ctx.client.try_withdraw(&stream_id),
+        Err(Ok(ContractError::WithdrawalTooFrequent))
     );
 }
 

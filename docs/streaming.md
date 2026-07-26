@@ -404,7 +404,6 @@ This section is the protocol-level contract for the global pause state managed v
 | `is_paused()` | Query if protocol is currently paused (permissionless) |
 | `get_pause_info()` | Query detailed pause info including audit trail (permissionless) |
 | `set_max_rate_per_second(max_rate)` | Admin-only governance entrypoint that sets the maximum allowed stream rate for future rate updates |
-| `migration_v5_to_v6(admin)` | Admin-only deployment checkpoint that emits a `migrated` audit event; no storage transformation is required |
 
 **Pause reason length:** The `reason` string passed to `pause_protocol` is bounded by `MAX_PAUSE_REASON_BYTES = 256`. Strings longer than 256 bytes are rejected with `ContractError::InvalidParams`. This prevents unbounded ledger-entry growth (Issue #513).
 
@@ -771,7 +770,7 @@ On failure (`InvalidParams` or `InvalidState`):
 - No arbitrary hard-coded caps (e.g. "max 1M tokens").
 - The technical upper bound is `i128::MAX` or the underlying token's total supply.
 - Rationale: Accrual math (in `accrual.rs`) is already overflow-safe via `checked_mul` and clamping.
-- Application-specific limits should be handled in the frontend or factory contracts.
+- Application-specific limits should be handled in the frontend or factory contracts. Note that the factory's policies (allowlist, deposit cap, minimum duration) only apply when streams are created through the factory — direct calls to this contract bypass them entirely. See [factory.md § Important Bypass Warning](./factory.md#important-bypass-warning).
 
 ### Batch Creation: Atomic vs Partial
 
@@ -1569,6 +1568,7 @@ For a full list of contract errors, see [error.md](./error.md).
 - **Recipient Applications**: See §2 (Accrual Formula), §4 (Withdrawal), §5 (Events)
 - **Indexers**: See §5 (Events), §6 (Error Behavior)
 - **Auditors**: See [protocol-narrative-code-alignment.md](./protocol-narrative-code-alignment.md) for complete verification
+- **Factory/Policy Integrators**: The stream contract enforces no recipient allowlist, deposit cap, or minimum duration. These policies exist only in the factory contract and are bypassed by direct stream-contract calls. See [factory.md § Important Bypass Warning](./factory.md#important-bypass-warning) for details.
 
 ### Verification
 
@@ -2161,3 +2161,81 @@ Creates a pooled stream. The `recipients` list takes pairs of `(Address, u32)` d
 Withdrawals from a pooled stream are independent. When a recipient calls `withdraw_from_pool(stream_id, caller)`, the contract calculates the total accrued tokens and multiplies by the caller's proportional share `(caller_share / total_shares)`. The contract independently tracks withdrawn amounts for each pool member using `DataKey::PooledStreamWithdrawn`.
 
 **Rounding:** The calculation uses strict integer math (`checked_mul` followed by `checked_div`), rounding down on remainders to avoid over-withdrawing the pool's deposit.
+
+---
+
+## Balance Conservation Invariants (Property-Based Testing)
+
+### Overview
+
+The protocol's core financial-safety property is token conservation: no
+operation may create or destroy tokens, and the contract must always hold
+enough balance to cover every outstanding stream liability. The
+operation-sequence space (pause/resume, rate changes, top-ups,
+shorten/extend, cancel, withdraw — in any order, at any time) is too large
+to enumerate by hand, so this property is verified with a dedicated
+property-based test harness rather than unit tests alone.
+
+### Core invariant
+
+```
+sender_balance + recipient_balance + contract_balance == initial_mint
+```
+
+Equivalently, per stream:
+
+```
+contract_balance_for_stream == deposit_amount - withdrawn_amount - refunded_amount
+```
+
+### Test harness: `contracts/stream/tests/balance_conservation.rs`
+
+The harness uses `proptest` to generate randomized sequences of mutating
+operations — `Withdraw`, `TopUp`, `DecreaseRate`, `IncreaseRate`, `Shorten`,
+`Extend`, `Pause`, `Resume`, `Cancel` — against both `Linear` and `CliffOnly`
+streams, and asserts after every step that:
+
+1. **Global balance conservation** — `sender + recipient + contract` token
+   balance is constant across the whole sequence.
+2. **Contract solvency** — contract balance equals
+   `total_deposited - total_withdrawn - total_refunded`.
+3. **Accrual boundedness** — `0 <= calculate_accrued <= deposit_amount`.
+4. **Accrual monotonicity** — `calculate_accrued` never decreases as time
+   advances.
+5. **Withdrawal bound** — `0 <= withdrawn_amount <= deposit_amount` and
+   `accrued >= withdrawn`.
+6. **Rate-decrease entitlement preservation** — a successful
+   `decrease_rate_per_second` checkpoint never reduces the same-timestamp
+   withdrawable amount (see §2, Accrual Formula, above).
+7. **`CliffOnly` unsupported-operation guard** — `top_up_stream`,
+   `decrease_rate_per_second`, `update_rate_per_second`,
+   `shorten_stream_end_time`, and `extend_stream_end_time` all return
+   `ContractError::UnsupportedStreamKind` for `CliffOnly` streams.
+
+The randomized property (`prop_random_op_sequences_preserve_invariants`,
+256 cases by default) is paired with deterministic regression tests for
+specific historical scenarios: `regression_rate_decrease_preserves_entitlement`,
+`regression_cliff_only_unsupported_mutations`,
+`regression_completed_stream_accrual_is_deterministic`, and
+`regression_immediate_cancel_refunds_full_deposit`.
+
+### Running the tests
+
+```bash
+# Standard run (256 proptest cases)
+cargo test -p fluxora_stream --features testutils --test balance_conservation
+
+# Deeper local coverage before an audit or release
+PROPTEST_CASES=10000 cargo test -p fluxora_stream --features testutils --test balance_conservation
+```
+
+### Security note for auditors
+
+Balance conservation is the single most important property to verify here —
+a violation means either token minting/burning or a double-spend. Property
+testing complements, but does not replace, the formal Kani proofs on the
+accrual math in `contracts/stream/src/accrual.rs` (`#[cfg(kani)] mod
+kani_proofs`) or a full manual audit. `sweep_excess` (see
+[Admin Recovery](#admin-recovery-sweep_excess) above) is the only entrypoint
+that can move tokens not backed by a stream liability, and it requires admin
+authorization.
