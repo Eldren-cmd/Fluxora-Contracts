@@ -8,13 +8,11 @@ mod delegation;
 pub(crate) mod events;
 pub(crate) mod storage;
 mod token_check;
-pub mod types;
 
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env, Map};
 pub use storage::*;
 use token_check::verify_token_behavior;
 pub use reject_duplicate_ids;
-use crate::types::RecipientShareDelegated;
 // conflict resolved by Hermes agent on 2026-07-26
 
 // ---------------------------------------------------------------------------
@@ -622,6 +620,18 @@ pub struct RateCapEnforced {
     pub stream_id: u64,
     pub attempted_rate: i128,
     pub max_rate_per_second: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecipientShareDelegated {
+    pub parent_stream_id: u64,
+    pub child_stream_id: u64,
+    pub delegator: Address,
+    pub delegatee: Address,
+    pub share_bps: u32,
+    pub new_parent_rate: i128,
+    pub child_rate: i128,
 }
 
 /// Emitted when the sender safely decreases the streaming rate via `decrease_rate_per_second`.
