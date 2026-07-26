@@ -73,7 +73,7 @@ test = false
 [[test]]
 name = "factory_policy"
 path = "tests/factory_policy.rs"
-test = false
+test = true
 
 [[test]]
 name = "formal_verification_smoke"
