@@ -10,25 +10,27 @@
 //!
 //! ## Doc / code mismatches (flagged, not silently fixed)
 //!
-//! 1. **`InvalidDustThreshold` is documented but missing.**  
+//! 1. **`InvalidDustThreshold` is documented but missing.**
 //!    `docs/dust-threshold.md` says creation must reject
 //!    `withdraw_dust_threshold > deposit_amount` with
-//!    `ContractError::InvalidDustThreshold` (claimed code 20).  
+//!    `ContractError::InvalidDustThreshold` (claimed code 20).
 //!    Actual code has no such variant (code 20 is `TemplateNotFound`) and
 //!    does not validate the threshold at creation. See
 //!    `flag_mismatch_create_allows_threshold_above_deposit`.
 //!
-//! 2. **Negative thresholds are documented as rejected but are accepted.**  
+//! 2. **Negative thresholds are documented as rejected but are accepted.**
 //!    See `flag_mismatch_create_allows_negative_dust_threshold`.
 //!
-//! 3. **`token_check.rs` does not implement dust-threshold logic.**  
+//! 3. **`token_check.rs` does not implement dust-threshold logic.**
 //!    Zero-amount SEP-41 smoke tests live in `token_check::verify_token_behavior`
 //!    (covered in `src/test_token_edge_cases.rs`). Dust enforcement lives in the
 //!    withdraw paths in `lib.rs`.
 
 extern crate std;
 
-use fluxora_stream::{FluxoraStream, FluxoraStreamClient, StreamKind, WithdrawToParam};
+use fluxora_stream::{
+    CreateStreamParams, FluxoraStream, FluxoraStreamClient, StreamKind, WithdrawToParam,
+};
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
     token::{Client as TokenClient, StellarAssetClient},
@@ -85,15 +87,20 @@ impl<'a> TestContext<'a> {
     fn create_linear_stream(&self, deposit: i128, threshold: i128, end_time: u64) -> u64 {
         self.client().create_stream(
             &self.sender,
-            &self.recipient,
-            &deposit,
-            &1_i128,
-            &0u64,
-            &0u64,
-            &end_time,
-            &threshold,
-            &None,
-            &StreamKind::Linear,
+            &CreateStreamParams {
+                recipient: self.recipient.clone(),
+                deposit_amount: deposit,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: end_time,
+                withdraw_dust_threshold: Some(threshold),
+                memo: None,
+                metadata: None,
+                kind: StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
         )
     }
 }
@@ -377,69 +384,99 @@ fn withdraw_dust_threshold_bypassed_past_end_time() {
 // Doc / code mismatch flags (assert actual behavior; do not "fix" production)
 // ---------------------------------------------------------------------------
 
-/// DOC MISMATCH: docs require `InvalidDustThreshold` when threshold > deposit.
-/// Actual: creation succeeds and stores the oversized threshold.
+/// Creating a stream with withdraw_dust_threshold > deposit_amount fails with InvalidDustThreshold.
 #[test]
-fn flag_mismatch_create_allows_threshold_above_deposit() {
+fn create_rejects_threshold_above_deposit() {
     let ctx = TestContext::setup();
     ctx.env.ledger().set_timestamp(0);
 
     let deposit = 1_000_i128;
     let oversized = deposit + 1;
-    let stream_id = ctx.client().create_stream(
+    let result = ctx.client().try_create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &deposit,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &oversized,
-        &None,
-        &StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: deposit,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(oversized),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
-    let state = ctx.client().get_stream_state(&stream_id);
     assert_eq!(
-        state.withdraw_dust_threshold, oversized,
-        "MISMATCH vs docs/dust-threshold.md: creation should reject \
-         threshold > deposit with InvalidDustThreshold, but currently accepts it"
+        result,
+        Err(Ok(fluxora_stream::ContractError::InvalidDustThreshold)),
+        "creation must reject threshold > deposit with InvalidDustThreshold"
     );
-    // `ContractError::InvalidDustThreshold` does not exist; code 20 is TemplateNotFound.
 }
 
-/// DOC MISMATCH: docs say negative thresholds are rejected.
-/// Actual: negative thresholds are stored; because withdrawable ≥ 0, the
-/// `withdrawable < threshold` check is never true, so behavior equals threshold=0.
+/// Creating a stream with negative withdraw_dust_threshold fails with InvalidDustThreshold.
 #[test]
-fn flag_mismatch_create_allows_negative_dust_threshold() {
+fn create_rejects_negative_dust_threshold() {
     let ctx = TestContext::setup();
     ctx.env.ledger().set_timestamp(0);
 
+    let result = ctx.client().try_create_stream(
+        &ctx.sender,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(-1_i128),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
+    );
+
+    assert_eq!(
+        result,
+        Err(Ok(fluxora_stream::ContractError::InvalidDustThreshold)),
+        "creation must reject negative threshold with InvalidDustThreshold"
+    );
+}
+
+/// Boundary test: withdraw_dust_threshold == deposit_amount should succeed at creation.
+#[test]
+fn create_allows_threshold_equal_to_deposit() {
+    let ctx = TestContext::setup();
+    ctx.env.ledger().set_timestamp(0);
+
+    let deposit = 1_000_i128;
+    let threshold = deposit; // threshold == deposit is allowed (boundary case)
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &-1_i128,
-        &None,
-        &StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: deposit,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(threshold),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     let state = ctx.client().get_stream_state(&stream_id);
     assert_eq!(
-        state.withdraw_dust_threshold, -1,
-        "MISMATCH vs docs/dust-threshold.md: negative thresholds should be rejected, \
-         but currently are accepted"
-    );
-
-    ctx.env.ledger().set_timestamp(1);
-    assert_eq!(
-        ctx.client().withdraw(&stream_id),
-        1,
-        "negative threshold acts like 0 (never blocks) — flag for maintainer review"
+        state.withdraw_dust_threshold, threshold,
+        "threshold == deposit should be accepted at creation"
     );
 }

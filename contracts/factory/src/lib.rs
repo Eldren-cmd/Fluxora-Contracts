@@ -15,17 +15,17 @@ pub const MAX_PAGE_SIZE: u32 = 100;
 
 /// Instance TTL threshold (ledgers). Below this value the entry will be extended.
 /// Mirrors governance contract to keep TTL semantics consistent across contracts.
-const INSTANCE_LIFETIME_THRESHOLD: u32 = 17_280;
+pub const INSTANCE_LIFETIME_THRESHOLD: u32 = 17_280;
 
 /// Instance TTL bump target (ledgers). ~60 days at 5-second ledger close.
 /// Mirrors governance contract to keep TTL semantics consistent across contracts.
-const INSTANCE_BUMP_AMOUNT: u32 = 120_960;
+pub const INSTANCE_BUMP_AMOUNT: u32 = 120_960;
 
 /// Persistent TTL threshold (ledgers). Below this value the entry will be extended.
-const PERSISTENT_LIFETIME_THRESHOLD: u32 = 17_280;
+pub const PERSISTENT_LIFETIME_THRESHOLD: u32 = 17_280;
 
 /// Persistent TTL bump target (ledgers). ~60 days at 5-second ledger close.
-const PERSISTENT_BUMP_AMOUNT: u32 = 120_960;
+pub const PERSISTENT_BUMP_AMOUNT: u32 = 120_960;
 
 /// Maximum accepted value for the factory `min_duration` policy, in seconds.
 ///
@@ -415,6 +415,13 @@ pub struct RateBoundsUpdated {
     pub max_rate: Option<i128>,
 }
 
+/// Emitted when the aggregate batch-cap enforcement is toggled (`batch_cap`).
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct BatchCapEnforcementUpdated {
+    pub enabled: bool,
+}
+
 /// Emitted when a stream is successfully created through the factory (`fct_strm`).
 /// Provides enough context for indexers to attribute stream creation to a policy-gated path.
 #[contracttype]
@@ -653,6 +660,10 @@ impl FluxoraFactory {
         // Bump instance TTL after successful update.
         bump_instance(&env);
 
+        env.events().publish(
+            (symbol_short!("batch_cap"),),
+            BatchCapEnforcementUpdated { enabled },
+        );
         Ok(())
     }
 
@@ -832,7 +843,8 @@ impl FluxoraFactory {
     ///   to the stream contract; all policy checks (cap, allowlist, duration) apply
     ///   regardless of kind.
     /// - `memo`: Optional opaque correlation bytes forwarded to the stream contract
-    ///   and stored there. Length bounds are validated by the stream contract.
+    ///   and stored there. Length is validated against `fluxora_stream::MAX_MEMO_BYTES`
+    ///   by the factory prior to making the cross-contract call.
     ///
     /// # Guard order (checked strictly in sequence)
     /// 1. **CreationPaused** — rejects immediately, before any policy read.
@@ -841,24 +853,16 @@ impl FluxoraFactory {
     /// 4. Time-range invariants
     /// 5. Minimum-duration check
     /// 6. Rate-per-second bounds check
-    /// 7. Cross-contract stream creation
+    /// 7. Memo length check (`fluxora_stream::MAX_MEMO_BYTES`)
+    /// 8. Cross-contract stream creation
     ///
     /// On success the returned stream ID is appended to the factory's [`DataKey::FactoryStreamIds`]
     /// registry. The registry is only written **after** the cross-contract call succeeds, so a
     /// downstream failure leaves no orphan index entry.
-    #[allow(clippy::too_many_arguments)]
     pub fn create_stream(
         env: Env,
         sender: Address,
-        recipient: Address,
-        deposit_amount: i128,
-        rate_per_second: i128,
-        start_time: u64,
-        cliff_time: u64,
-        end_time: u64,
-        withdraw_dust_threshold: i128,
-        stream_kind: StreamKind,
-        memo: Option<Bytes>,
+        params: fluxora_stream::CreateStreamParams,
     ) -> Result<u64, FactoryError> {
         // ── Guard 1: load the full policy in one pass ────────────────────────
         // Single chokepoint guarantees the single-path policy set is identical
@@ -877,29 +881,29 @@ impl FluxoraFactory {
         let is_allowed: bool = env
             .storage()
             .persistent()
-            .get(&DataKey::Allowlist(recipient.clone()))
+            .get(&DataKey::Allowlist(params.recipient.clone()))
             .unwrap_or(false);
         if !is_allowed {
             return Err(FactoryError::RecipientNotAllowlisted);
         }
 
         // ── Guard 4: deposit cap ─────────────────────────────────────────────
-        if deposit_amount > policy.max_deposit {
+        if params.deposit_amount > policy.max_deposit {
             return Err(FactoryError::DepositExceedsCap);
         }
 
         // ── Guard 5: time invariants ─────────────────────────────────────────
         // Mirror FluxoraStream time invariants before the cross-contract call so
         // invalid schedules return typed factory errors instead of downstream panics.
-        if start_time >= end_time {
+        if params.start_time >= params.end_time {
             return Err(FactoryError::InvalidTimeRange);
         }
-        if cliff_time < start_time || cliff_time > end_time {
+        if params.cliff_time < params.start_time || params.cliff_time > params.end_time {
             return Err(FactoryError::InvalidCliff);
         }
 
         // ── Guard 6: minimum duration ────────────────────────────────────────
-        let duration = end_time - start_time;
+        let duration = params.end_time - params.start_time;
         if duration < policy.min_duration {
             return Err(FactoryError::DurationTooShort);
         }
@@ -907,13 +911,13 @@ impl FluxoraFactory {
         // ── Guard 7: rate bounds ─────────────────────────────────────────────
         // Unset bounds are permissive. Bounds are inclusive.
         validate_rate_bounds(
-            rate_per_second,
+            params.rate_per_second,
             &policy.min_rate_per_second,
             &policy.max_rate_per_second,
         )?;
 
         // ── Guard 8: memo length ─────────────────────────────────────────────
-        if let Some(ref m) = memo {
+        if let Some(ref m) = params.memo {
             if m.len() as usize > fluxora_stream::MAX_MEMO_BYTES {
                 return Err(FactoryError::InvalidMemo);
             }
@@ -927,18 +931,7 @@ impl FluxoraFactory {
         let stream_contract = policy.stream_contract;
         let stream_client = FluxoraStreamClient::new(&env, &stream_contract);
 
-        match stream_client.try_create_stream(
-            &sender,
-            &recipient,
-            &deposit_amount,
-            &rate_per_second,
-            &start_time,
-            &cliff_time,
-            &end_time,
-            &withdraw_dust_threshold,
-            &memo,
-            &stream_kind,
-        ) {
+        match stream_client.try_create_stream(&sender, &params) {
             Ok(Ok(stream_id)) => {
                 // --- Effect (post-interaction): record only after a successful creation ---
                 // The registry is written only after the cross-contract call succeeds,
@@ -949,9 +942,9 @@ impl FluxoraFactory {
                     FactoryStreamCreated {
                         stream_id,
                         sender,
-                        recipient,
-                        deposit_amount,
-                        rate_per_second,
+                        recipient: params.recipient,
+                        deposit_amount: params.deposit_amount,
+                        rate_per_second: params.rate_per_second,
                     },
                 );
                 Ok(stream_id)
