@@ -148,7 +148,7 @@ test = false
 [[test]]
 name = "upgrade_path"
 path = "tests/upgrade_path.rs"
-test = false
+test = true
 
 [[test]]
 name = "withdrawal_frequency"
