@@ -38,6 +38,7 @@ treasury tooling) can use this reference to handle protocol exceptions correctly
 | `ReservationNotFound` | 24 | No ID reservation exists for the specified holder | `release_id_reservation`, `reclaim_expired_id_reservation` |
 | `ReservationStillActive` | 25 | Reservation has not yet expired and cannot be reclaimed | `reclaim_expired_id_reservation` |
 | `ReservationNotExpirable` | 26 | Reservation has no expiry and cannot be reclaimed | `reclaim_expired_id_reservation` |
+| `ReservationAlreadyActive` | 41 | A reservation is already active for this caller | `reserve_stream_ids` |
 | `PauseReasonTooLong` | 27 | Pause reason string exceeds `MAX_PAUSE_REASON_BYTES` | `pause_protocol` |
 | `ClockRegression` | 28 | Ledger-backed accrual observed a timestamp lower than the previous accrual timestamp | `calculate_accrued`, `get_withdrawable`, `withdraw`, `withdraw_to`, `batch_withdraw`, `batch_withdraw_to`, rate changes, `cancel_stream`, auto-claim paths |
 | `MetadataTooLarge` | 29 | Stream metadata exceeds size limits | `create_stream`, `create_streams`, `create_streams_partial` |
@@ -46,12 +47,11 @@ treasury tooling) can use this reference to handle protocol exceptions correctly
 | `WithdrawalTooFrequent` | 33 | Withdrawal attempted before minimum interval elapsed | `withdraw`, `delegated_withdraw`, `batch_withdraw` |
 | `ReservationAlreadyActive` | 34 | A reservation is already active for this caller | `reserve_stream_ids` |
 | `InvalidDustThreshold` | 35 | Withdraw dust threshold is negative or exceeds deposit amount | `create_stream`, `create_streams`, `create_streams_partial`, `create_stream_relative`, `create_stream_from_template` |
-| `AutoRenewFundingUnavailable` | 36 | The sender cannot fund an auto-renewal with the available balance and allowance | `trigger_auto_claim` |
-| `OfferNotFound` | 37 | Stream offer not found (accepted, rejected, cancelled, or never existed) | `accept_stream_offer`, `reject_stream_offer`, `cancel_stream_offer` |
-| `OfferExpired` | 38 | Stream offer has expired (`current_time > offer.expiry_time`) | `accept_stream_offer`, `reject_stream_offer` |
+| `AutoRenewFundingUnavailable` | 36 | The sender cannot fund an auto-renewal with the available balance and allowance | `renew_stream` |
+| `OfferNotFound` | 37 | Stream offer not found (accepted, rejected, cancelled, or never existed) | `accept_stream_offer`, `reject_stream_offer`, `cancel_stream_offer`, `get_stream_offer` |
+| `OfferExpired` | 38 | Stream offer `expiry_time` has passed at acceptance | `accept_stream_offer` |
 | `OfferWrongRecipient` | 39 | Caller is not the intended recipient of this offer | `accept_stream_offer`, `reject_stream_offer` |
-| `OfferWrongSender` | 40 | Caller is not the sender who created this offer | `cancel_stream_offer` |
-| `KeeperGracePeriodNotElapsed` | 41 | Keeper cancellation grace period has not elapsed | `keeper_cancel` |
+| `OfferWrongSender` | 40 | Caller is not the original sender who created this offer | `cancel_stream_offer` |
 
 Non-error enum values used by stream creation and accrual:
 
@@ -735,184 +735,47 @@ match client.try_create_stream(..., &withdraw_dust_threshold, ...) {
 
 ---
 
-### RateCooldownActive (36)
+### AutoRenewFundingUnavailable (36)
 
-**Definition**: Rate change attempted too soon after a previous rate change.
+**Definition**: The sender on a stream opted-in to auto-renewal via `set_auto_renew` does not currently have sufficient token balance or allowance to fund a fresh deposit for the renewal.
 
 **Trigger Conditions**:
-- `update_rate_per_second` or `decrease_rate_per_second` called before `MIN_RATE_INTERVAL_LEDGERS` has elapsed since the last rate change
-- Cooldown period enforced to prevent rate manipulation attacks
+
+| Condition | Detection |
+|-----------|-----------|
+| `token.balance(stream.sender) < stream.deposit_amount` | Token client balance read returns less than the required deposit |
+| `token.allowance(stream.sender, contract_address) < stream.deposit_amount` | Token client allowance read returns less than the required deposit |
+
+Either condition causes `renew_stream` to revert before any state mutation or token transfer is attempted, preserving CEI ordering.
 
 **Affected Roles**:
+
 | Role | Can Trigger | Notes |
 |------|------------|-------|
-| Sender | Yes | Attempting rate changes too frequently |
-| Admin | Yes | If admin can modify rates |
+| Anyone | Yes | `renew_stream` is permissionless once a sender has opted the stream in via `set_auto_renew` |
+| Sender | Yes | Same path; the renewal precondition involves reading the sender's own balance and allowance |
+| Admin | No | Admin cannot pre-fund another sender's renewal balance/allowance through this path |
 
 **Client Action**:
+
 ```rust
-match client.try_update_rate_per_second(&stream_id, &new_rate) {
-    Ok(()) => { /* success */ }
-    Err(ContractError::RateCooldownActive) => {
-        // Wait for cooldown period to elapse
-        // Check last_rate_change_ledger from stream state
-        let stream = client.get_stream_state(&stream_id)?;
-        let cooldown_remaining = MIN_RATE_INTERVAL_LEDGERS - (current_ledger - stream.last_rate_change_ledger);
-        // Retry after cooldown_remaining ledgers
+match client.try_renew_stream(&stream_id) {
+    Ok(new_stream_id) => { /* success — fresh deposit wired and old stream archived */ }
+    Err(ContractError::AutoRenewFundingUnavailable) => {
+        // The opted-in sender (or topology: anyone triggering the renewal on their behalf)
+        // must refill balance OR increase allowance before retrying.
+        let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+        let balance    = token_client.balance(&stream.sender);
+        let allowance  = token_client.allowance(&stream.sender, &env.current_contract_address());
+        // Notify the sender with the shortfall; expose both numbers for fast UI display.
     }
     Err(e) => { /* handle other errors */ }
 }
 ```
 
-**Success Semantics**: Returns `()` on successful rate update.
+**Success Semantics**: Returns the newly created `stream_id` from the renewal transaction; the old stream transitions to `Completed` and a `StreamRenewed` event is emitted correlating the two IDs.
 
----
-
-### CyclicDelegation (43)
-
-**Definition**: Cyclic delegation detected in delegation chain.
-
-**Trigger Conditions**:
-- `delegate_recipient_share` called when the delegation would create a cycle (A delegates to B, B delegates to A)
-- Prevents infinite loops in delegation traversal
-
-**Affected Roles**:
-| Role | Can Trigger | Notes |
-|------|------------|-------|
-| Recipient | Yes | Attempting to delegate to an ancestor in the chain |
-
-**Client Action**:
-```rust
-match client.try_delegate_recipient_share(&stream_id, &new_recipient, &share_bps) {
-    Ok(child_stream_id) => { /* success */ }
-    Err(ContractError::CyclicDelegation) => {
-        // Delegation would create a cycle
-        // Choose a different recipient that is not an ancestor
-        // Check parent_stream_id chain to avoid cycles
-    }
-    Err(e) => { /* handle other errors */ }
-}
-```
-
-**Success Semantics**: Returns `u64` child_stream_id of the delegated stream.
-
----
-
-### DelegationDepthExceeded (44)
-
-**Definition**: Delegation depth limit exceeded.
-
-**Trigger Conditions**:
-- `delegate_recipient_share` called when the delegation chain would exceed `MAX_DELEGATION_DEPTH`
-- Prevents excessively deep delegation chains that could impact performance
-
-**Affected Roles**:
-| Role | Can Trigger | Notes |
-|------|------------|-------|
-| Recipient | Yes | Attempting to delegate beyond maximum depth |
-
-**Client Action**:
-```rust
-match client.try_delegate_recipient_share(&stream_id, &new_recipient, &share_bps) {
-    Ok(child_stream_id) => { /* success */ }
-    Err(ContractError::DelegationDepthExceeded) => {
-        // Delegation chain would exceed MAX_DELEGATION_DEPTH
-        // Choose a recipient closer in the chain or reduce delegation depth
-        // Check current delegation_depth from stream state
-    }
-    Err(e) => { /* handle other errors */ }
-}
-```
-
-**Success Semantics**: Returns `u64` child_stream_id of the delegated stream.
-
----
-
-### AutoRenewFundingUnavailable (37)
-
-**Definition**: The sender cannot fund an auto-renewal with the available balance and allowance.
-
-**Trigger Conditions**:
-- Auto-renew trigger path attempted but sender token balance or allowance is insufficient
-
-**Affected Roles**:
-| Role | Can Trigger | Notes |
-|------|------------|-------|
-| Funder / Keeper | Yes | `trigger_auto_claim`, auto-renew execution |
-
-**Client Action**:
-Ensure the stream sender has deposited sufficient balance and granted sufficient token allowance for auto-renewal.
-
----
-
-### OfferNotFound (38)
-
-**Definition**: Stream offer not found (accepted, rejected, cancelled, or never existed).
-
-**Trigger Conditions**:
-- Attempting to accept, reject, cancel, or query an `offer_id` that does not exist in pending offer storage
-
-**Affected Roles**:
-| Role | Can Trigger | Notes |
-|------|------------|-------|
-| Recipient | Yes | `accept_stream_offer`, `reject_stream_offer` |
-| Sender | Yes | `cancel_stream_offer` |
-
-**Client Action**:
-Verify the `offer_id` parameter and ensure the offer has not already been accepted, rejected, or cancelled.
-
----
-
-### OfferExpired (39)
-
-**Definition**: Stream offer has expired (`current_time > offer.expiry_time`).
-
-**Trigger Conditions**:
-- Calling `accept_stream_offer` when the ledger timestamp exceeds the offer's `expiry_time`
-
-**Affected Roles**:
-| Role | Can Trigger | Notes |
-|------|------------|-------|
-| Recipient | Yes | `accept_stream_offer` |
-
-**Client Action**:
-Do not attempt to accept an expired offer. The sender must create a new stream offer with an updated expiry.
-
----
-
-### OfferWrongRecipient (40)
-
-**Definition**: Caller is not the intended recipient of this offer.
-
-**Trigger Conditions**:
-- Calling `accept_stream_offer` or `reject_stream_offer` with an address that does not match `offer.recipient`
-
-**Affected Roles**:
-| Role | Can Trigger | Notes |
-|------|------------|-------|
-| Caller | Yes | `accept_stream_offer`, `reject_stream_offer` |
-
-**Client Action**:
-Ensure the transaction is signed and authorized by the specified recipient address.
-
----
-
-### OfferWrongSender (41)
-
-**Definition**: Caller is not the sender who created this offer.
-
-**Trigger Conditions**:
-- Calling `cancel_stream_offer` with an address that does not match `offer.sender`
-
-**Affected Roles**:
-| Role | Can Trigger | Notes |
-|------|------------|-------|
-| Caller | Yes | `cancel_stream_offer` |
-
-**Client Action**:
-Ensure the cancellation request is invoked and authorized by the original offer sender.
-
----
+**Integrator Note**: This error is **recoverable**. The opt-in survives across failures, so once the sender tops up balance and/or bumps allowance, any caller (including the original sender) can re-invoke `renew_stream` without re-registering the opt-in. Treat surfacing this error to the opted-in sender as a strong signal to surface the current `balance`/`allowance` shortfall inline in the UI; do not auto-retry with exponential backoff because the precondition can only be fixed by an explicit on-chain action by the sender.
 
 ## Previously Panicking Paths (Now Structured Errors)
 

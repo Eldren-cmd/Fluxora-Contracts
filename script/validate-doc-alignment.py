@@ -75,7 +75,9 @@ ENTRYPOINT_ALLOWLIST = frozenset({
     "reject_duplicate_ids",
 })
 
-# pub fn names inside #[contractimpl] that are not audit-worthy entrypoints.
+# Entry points that exist inside the #[contractimpl] block but are not part of
+# the audit.md entry-point table — internal lifecycle/admin names shared with
+# other pub surfaces.
 AUDIT_ENTRYPOINT_ALLOWLIST = frozenset({
     "upgrade",
     "compute_keeper_fee_split",
@@ -170,7 +172,7 @@ _RE_CONTRACT_ERROR_BODY = re.compile(
 )
 
 _RE_CONTRACTIMPL_BLOCK = re.compile(
-    r"#\[contractimpl\]\s*\nimpl\s+\w+\s*\{",
+    r"#\[contractimpl\][\s\S]*?impl\s+[A-Za-z_][A-Za-z0-9_]*\s*\{",
     re.MULTILINE,
 )
 
@@ -218,40 +220,23 @@ def extract_audit_table_entrypoints(doc_text: str) -> set:
 
     return set(_RE_AUDIT_TABLE_ROW.findall(section))
 
+
+# Permissive variant: scans the entire doc_text for backtick-enclosed
+# function-style identifiers in markdown table rows. Handles indented rows,
+# dedupes, and ignores dashed header separator lines.
+_RE_AUDIT_TABLE_ROW_PERMISSIVE = re.compile(r"\|\s*`([a-zA-Z0-9_]+)`\s*\|", re.MULTILINE)
+
 def extract_audit_entrypoints_from_doc(doc_text: str) -> set:
-    """Return entrypoint names listed in any markdown table rows.
-
-    Unlike extract_audit_table_entrypoints, this does not require a
-    ## Public entrypoints section header — it simply extracts all
-    backtick-quoted names from table-row-shaped lines.
-    """
-    return set(_RE_AUDIT_TABLE_ROW.findall(doc_text))
-
-
-def check_audit_md_entrypoint_drift(source: str, doc_text: str, audit_doc_path: Path) -> bool:
-    """Check that every contractimpl entrypoint appears in the audit doc table.
-
-    Returns True if any entrypoint is missing (drift detected), False otherwise.
-    Prints MISSING AUDIT DOC: lines for each missing entrypoint.
-    """
-    contractimpl_fns = extract_contractimpl_entrypoints(source)
-    audit_fns = extract_audit_table_entrypoints(doc_text)
-
-    missing = sorted(contractimpl_fns - audit_fns)
-    if not missing:
-        return False
-
-    for ident in missing:
-        try:
-            display = audit_doc_path.relative_to(REPO_ROOT)
-        except ValueError:
-            display = audit_doc_path
-        print(
-            f"MISSING AUDIT DOC: '{ident}' found in contractimpl "
-            f"but not in '{display}' table"
-        )
-    return True
-
+    """Return entrypoint names found anywhere in audit.md (table or backdrop rows)."""
+    if not doc_text:
+        return set()
+    out = set()
+    for name in _RE_AUDIT_TABLE_ROW_PERMISSIVE.findall(doc_text):
+        # Ignore table-separator / dash-only names.
+        if re.fullmatch(r"-+", name):
+            continue
+        out.add(name)
+    return out
 
 def extract_event_symbols(source: str) -> set:
     out: set[str] = set()
@@ -289,6 +274,28 @@ def check_duplicate_discriminants(source: str) -> bool:
 # Validation
 # ---------------------------------------------------------------------------
 
+def check_audit_md_entrypoint_drift(source: str, doc_text: str, audit_doc_path: Path) -> bool:
+    """Compare contract impl entrypoints against audit.md entrypoint rows.
+
+    Returns True when at least one entrypoint is present in #[contractimpl]
+    but absent from docs/audit.md. Prints "MISSING AUDIT DOC:" lines for each
+    missing entrypoint (sorted alphabetically). Stale doc rows (in audit.md but
+    no longer in code) are NOT flagged — this is an additive-only check.
+    """
+    contractimpl = extract_contractimpl_entrypoints(source)
+    audit_table = extract_audit_entrypoints_from_doc(doc_text)
+    missing = sorted(contractimpl - audit_table)
+    if not missing:
+        return False
+    try:
+        display = audit_doc_path.relative_to(REPO_ROOT)
+    except ValueError:
+        display = audit_doc_path
+    for ident in missing:
+        print(f"MISSING AUDIT DOC: '{ident}' found in contractimpl but not in '{display}'")
+    return True
+
+
 def check_missing(identifiers: set, doc_text: str) -> set:
     return {ident for ident in identifiers if ident not in doc_text}
 
@@ -299,15 +306,20 @@ def validate(
     streaming_doc: Path,
     events_doc: Path,
     error_doc: Path,
-    audit_doc: Path = None,
+    audit_doc: Path | None = None,
 ) -> int:
-    """Run all alignment checks. Returns 0 on success, 1 on any drift."""
+    """Run all alignment checks. Returns 0 on success, 1 on any drift.
+
+    ``audit_doc`` is positional-or-keyword. Pass None to skip the
+    audit.md entrypoint drift check entirely.
+    """
     source = contract_path.read_text(encoding="utf-8")
     events_source = events_path.read_text(encoding="utf-8")
     error_source = error_path.read_text(encoding="utf-8")
     streaming_text = streaming_doc.read_text(encoding="utf-8")
     events_text = events_doc.read_text(encoding="utf-8")
     error_text = error_doc.read_text(encoding="utf-8")
+    audit_text = audit_doc.read_text(encoding="utf-8") if audit_doc is not None else ""
 
     checks = [
         (extract_entrypoints(source), streaming_text, streaming_doc, "entrypoint"),
@@ -327,8 +339,6 @@ def validate(
             drift_found = True
 
     if audit_doc is not None:
-        audit_text = audit_doc.read_text(encoding="utf-8")
-
         contractimpl_entrypoints = extract_contractimpl_entrypoints(source)
         audit_table_entrypoints = extract_audit_table_entrypoints(audit_text)
 
@@ -338,7 +348,7 @@ def validate(
             except ValueError:
                 display = audit_doc
             print(
-                f"MISSING AUDIT DOC: '{ident}' (audit entrypoint) found in contractimpl "
+                f"MISSING DOC: '{ident}' (audit entrypoint) found in contractimpl "
                 f"but not in '{display}' table"
             )
             drift_found = True
@@ -349,9 +359,12 @@ def validate(
             except ValueError:
                 display = audit_doc
             print(
-                f"STALE AUDIT DOC: '{ident}' (audit entrypoint) listed in '{display}' "
+                f"STALE DOC: '{ident}' (audit entrypoint) listed in '{display}' "
                 "but not in contractimpl"
             )
+            drift_found = True
+
+        if check_audit_md_entrypoint_drift(source, audit_text, audit_doc):
             drift_found = True
 
         if _VERSION_CONTRADICTION in audit_text:
