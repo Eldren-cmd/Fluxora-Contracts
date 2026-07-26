@@ -391,7 +391,7 @@ pub enum StreamStatus {
     Cancelled = 3,
 }
 
-/// The architectural style of the stream (Linear or CliffOnly).
+/// The architectural style of the stream (Linear, CliffOnly, or CliffSlope).
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StreamKind {
@@ -1114,7 +1114,7 @@ pub struct CreateStreamParams {
     pub memo: Option<soroban_sdk::Bytes>,
     /// Optional structured metadata for indexer consumption.
     pub metadata: Option<soroban_sdk::Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
-    /// The architectural style of the stream (Linear or CliffOnly).
+    /// The architectural style of the stream (Linear, CliffOnly, or CliffSlope).
     pub kind: StreamKind,
     /// If true, the stream cannot be cancelled or shortened. Defaults to false (None).
     pub irrevocable: Option<bool>,
@@ -1122,19 +1122,15 @@ pub struct CreateStreamParams {
     pub witness: Option<Address>,
 }
 
-/// Parameters for creating a payment stream with relative (offset-based) times.
-///
-/// Computes `start_time`, `cliff_time`, and `end_time` by adding offsets to the
-/// current ledger timestamp (`env.ledger().timestamp()`). This eliminates off-chain
-/// calculation errors that lead to `StartTimeInPast` failures.
-///
-/// # Time offsets
-/// - `start_delay`: Seconds to add to current timestamp for stream start
-/// - `cliff_delay`: Seconds to add to current timestamp for cliff time (must be >= start_delay)
-/// - `duration`: Total duration of stream in seconds (end_time = start_time + duration)
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CreateStreamRelativeParams {
+pub struct CreateStreamOptions {
+    /// Optional bounded memo for indexer correlation (e.g. payroll batch ID).
+    /// Maximum `MAX_MEMO_BYTES` (64) bytes. Pass `None` to omit.
+    pub memo: Option<soroban_sdk::Bytes>,
+    /// Optional structured metadata for indexer consumption.
+    pub metadata: Option<soroban_sdk::Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
+    /// The architectural style of the stream (Linear, CliffOnly, or CliffSlope).
     /// Address that will receive streamed tokens for this stream entry.
     pub recipient: Address,
     /// Total amount escrowed for this stream entry.
@@ -2158,20 +2154,22 @@ impl FluxoraStream {
             return Err(ContractError::InvalidParams);
         }
 
-        if kind == StreamKind::Linear {
-            if rate_per_second <= 0 {
-                return Err(ContractError::InvalidParams);
-            }
+        match kind {
+            StreamKind::Linear | StreamKind::CliffSlope => {
+                if rate_per_second <= 0 {
+                    return Err(ContractError::InvalidParams);
+                }
 
-            // Enforce governance-controlled maximum rate per second cap
-            let max_rate = get_max_rate_per_second(env);
-            if rate_per_second > max_rate {
-                return Err(ContractError::InvalidParams);
+                // Enforce governance-controlled maximum rate per second cap.
+                let max_rate = get_max_rate_per_second(env);
+                if rate_per_second > max_rate {
+                    return Err(ContractError::InvalidParams);
+                }
             }
-        } else {
-            // For CliffOnly stream, rate must be 0
-            if rate_per_second != 0 {
-                return Err(ContractError::InvalidParams);
+            StreamKind::CliffOnly => {
+                if rate_per_second != 0 {
+                    return Err(ContractError::InvalidParams);
+                }
             }
         }
 
@@ -2191,16 +2189,31 @@ impl FluxoraStream {
             return Err(ContractError::InvalidParams);
         }
 
-        if kind == StreamKind::Linear {
-            // Validate deposit covers total streamable amount (#34)
-            let duration = (end_time - start_time) as i128;
-            let total_streamable = rate_per_second
-                .checked_mul(duration)
-                .ok_or(ContractError::InvalidParams)?; // Return InvalidParams on overflow as expected by tests
+        match kind {
+            StreamKind::Linear => {
+                // Validate deposit covers the full streamable amount from start to end.
+                let duration = (end_time - start_time) as i128;
+                let total_streamable = rate_per_second
+                    .checked_mul(duration)
+                    .ok_or(ContractError::InvalidParams)?;
 
-            if deposit_amount < total_streamable {
-                return Err(ContractError::InsufficientDeposit);
+                if deposit_amount < total_streamable {
+                    return Err(ContractError::InsufficientDeposit);
+                }
             }
+            StreamKind::CliffSlope => {
+                // CliffSlope accrues only after the cliff, so the deposit must cover the
+                // post-cliff portion of the schedule.
+                let post_cliff_duration = (end_time.saturating_sub(cliff_time)) as i128;
+                let post_cliff_streamable = rate_per_second
+                    .checked_mul(post_cliff_duration)
+                    .ok_or(ContractError::InvalidParams)?;
+
+                if deposit_amount < post_cliff_streamable {
+                    return Err(ContractError::InsufficientDeposit);
+                }
+            }
+            StreamKind::CliffOnly => {}
         }
 
         Ok(())
@@ -2569,56 +2582,73 @@ impl FluxoraStream {
         sender: Address,
         params: CreateStreamParams,
     ) -> Result<u64, ContractError> {
-        Self::create_stream_with_lookback(
+        let withdraw_dust_threshold = params.withdraw_dust_threshold.unwrap_or(0);
+        Self::create_stream_internal(
             env,
             sender,
-            params,
+            params.recipient,
+            params.deposit_amount,
+            params.rate_per_second,
+            params.start_time,
+            params.cliff_time,
+            params.end_time,
+            withdraw_dust_threshold,
+            params.memo,
+            params.kind,
+            params.irrevocable,
+            params.witness,
             None,
         )
     }
 
-    /// Create a stream with an optional per-withdrawal lookback window.
-    ///
-    /// `max_lookback_ledgers` limits each claim to the accrual represented by
-    /// the most recent N five-second ledger windows. It does not alter
-    /// `calculate_accrued`, `deposit_amount`, or `withdrawn_amount`; older
-    /// unclaimed entitlement remains available to later calls.
+    /// Internal helper for stream creation with full parameter set.
+    /// Handles auth, pause check, validation, token pull, and persistence.
     #[allow(clippy::too_many_arguments)]
-    pub fn create_stream_with_lookback(
+    fn create_stream_internal(
         env: Env,
         sender: Address,
-        params: CreateStreamParams,
+        recipient: Address,
+        deposit_amount: i128,
+        rate_per_second: i128,
+        start_time: u64,
+        cliff_time: u64,
+        end_time: u64,
+        withdraw_dust_threshold: i128,
+        memo: Option<soroban_sdk::Bytes>,
+        kind: StreamKind,
+        irrevocable: Option<bool>,
+        witness: Option<Address>,
         max_lookback_ledgers: Option<u32>,
     ) -> Result<u64, ContractError> {
         sender.require_auth();
         require_not_creation_paused(&env)?;
         validate_lookback_window(max_lookback_ledgers)?;
 
-        let mut final_rate = params.rate_per_second;
-        if params.kind == StreamKind::CliffOnly {
+        let mut final_rate = rate_per_second;
+        if kind == StreamKind::CliffOnly {
             final_rate = 0;
         }
 
         Self::validate_stream_params(
             &env,
             &sender,
-            &params.recipient,
-            params.deposit_amount,
+            &recipient,
+            deposit_amount,
             final_rate,
             env.ledger().timestamp(),
-            params.start_time,
-            params.cliff_time,
-            params.end_time,
-            params.kind,
+            start_time,
+            cliff_time,
+            end_time,
+            kind,
         )?;
 
-        pull_token(&env, &sender, params.deposit_amount)?;
+        pull_token(&env, &sender, deposit_amount)?;
 
         let stream_id = Self::persist_new_stream(
             &env,
             sender,
-            params.recipient.clone(),
-            params.deposit_amount,
+            recipient,
+            deposit_amount,
             final_rate,
             params.start_time,
             params.cliff_time,
@@ -2726,8 +2756,8 @@ impl FluxoraStream {
             .ok_or(ContractError::InvalidParams)?;
 
         // Delegate to standard create_stream with computed absolute times
-        Self::create_stream(
-            env,
+        Self::persist_new_stream(
+            &env,
             sender,
             CreateStreamParams {
                 recipient: params.recipient,
@@ -4248,7 +4278,7 @@ impl FluxoraStream {
 
                 stream.withdrawn_amount += withdrawable;
                 let current_ledger = env.ledger().sequence();
-                stream.last_withdraw_ledger = current_ledger;
+                stream.last_withdraw_ledger = current_ledger; // Update withdrawal timestamp
                 let completed_now = (stream.status == StreamStatus::Active
                     || stream.status == StreamStatus::Paused)
                     && stream.withdrawn_amount == stream.deposit_amount;
@@ -4265,14 +4295,13 @@ impl FluxoraStream {
                     .unwrap_or(0);
                 write_total_liabilities(&env, liabilities);
 
-                push_token(&env, &param.destination, withdrawable)?;
+                push_token(&env, &stream.recipient, withdrawable)?;
 
                 env.events().publish(
-                    (symbol_short!("wdraw_to"), param.stream_id),
-                    WithdrawalTo {
+                    (symbol_short!("withdrew"), param.stream_id),
+                    Withdrawal {
                         stream_id: param.stream_id,
                         recipient: stream.recipient.clone(),
-                        destination: param.destination.clone(),
                         amount: withdrawable,
                     },
                 );
@@ -5448,6 +5477,9 @@ impl FluxoraStream {
             is_pooled: None,
             parent_stream_id: Some(stream_id),
             delegation_depth: stream.delegation_depth + 1,
+            claim_owner: None,
+            witness: None,
+            last_rate_change_ledger: 0,
         };
 
         save_stream(&env, &child_stream);
@@ -8248,7 +8280,7 @@ impl FluxoraStream {
     /// # Errors
     /// - `ReservationCountZero` (17): `count` is 0
     /// - `ReservationLimitExceeded` (18): `count > MAX_ID_RESERVATION`
-    /// - `ReservationAlreadyActive` (28): `caller` already has an active reservation
+    /// - `ReservationAlreadyActive` (34): `caller` already has an active reservation
     ///
     /// # Security
     /// - `count` is capped at `MAX_ID_RESERVATION = 100` to prevent counter-inflation attacks.
