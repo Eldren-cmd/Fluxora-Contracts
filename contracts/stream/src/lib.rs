@@ -13,6 +13,7 @@ pub mod types;
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env, Map};
 use storage::*;
 use token_check::verify_token_behavior;
+use crate::types::RecipientShareDelegated;
 
 // ---------------------------------------------------------------------------
 // TTL constants
@@ -444,6 +445,10 @@ pub enum ContractError {
     OfferWrongRecipient = 39,
     /// Caller is not the sender who created this offer.
     OfferWrongSender = 40,
+    /// Delegation would create a cycle (child stream references an ancestor as its delegatee).
+    CyclicDelegation = 41,
+    /// Delegation depth would exceed the maximum allowed nesting level.
+    DelegationDepthExceeded = 42,
 }
 
 #[contracttype]
@@ -956,6 +961,10 @@ pub struct Stream {
     pub withdraw_dust_threshold: i128,
     pub last_pause_toggle_ledger: u32,
     pub last_withdraw_ledger: u32,
+    /// Ledger timestamp of the last rate change (used by rate-cooldown gating).
+    pub last_rate_change_ledger: u32,
+    /// When true, this stream distributes to multiple recipients pro-rata.
+    pub is_pooled: Option<bool>,
     /// Optional structured metadata stored alongside the stream.
     pub metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
     /// Optional bounded memo for indexer correlation (e.g. payroll batch ID).
@@ -969,6 +978,12 @@ pub struct Stream {
     /// Optional compliance witness authorized to cancel via signed attestation.
     /// `None` when not configured (default for backward compatibility).
     pub witness: Option<Address>,
+    /// Delegation depth of this stream in the recipient-share delegation tree
+    /// (0 for a root stream, N for the Nth level of delegated child stream).
+    pub delegation_depth: u32,
+    /// Parent stream id when this stream is a delegated child of another stream.
+    /// `None` for root streams.
+    pub parent_stream_id: Option<u64>,
 }
 
 /// Pagination result for recipient stream listing
@@ -2093,7 +2108,12 @@ impl FluxoraStream {
             last_withdraw_ledger: 0,
             metadata: None,
             witness: witness.clone(),
+            claim_owner: None,
+            irrevocable: None,
+            delegation_depth: 0,
+            parent_stream_id: None,
             last_rate_change_ledger: 0,
+            is_pooled: None,
         };
 
         save_stream(env, &stream);
@@ -2179,7 +2199,12 @@ impl FluxoraStream {
             last_withdraw_ledger: 0,
             metadata: None,
             witness: witness.clone(),
+            claim_owner: None,
+            irrevocable: None,
+            delegation_depth: 0,
+            parent_stream_id: None,
             last_rate_change_ledger: 0,
+            is_pooled: None,
         };
 
         save_stream(env, &stream);
@@ -2629,7 +2654,13 @@ impl FluxoraStream {
             kind,
             last_pause_toggle_ledger: 0,
             last_withdraw_ledger: 0,
+            last_rate_change_ledger: 0,
             metadata: None,
+            claim_owner: None,
+            witness: None,
+            irrevocable: None,
+            delegation_depth: 0,
+            parent_stream_id: None,
             is_pooled: Some(true),
         };
 
@@ -5244,7 +5275,12 @@ impl FluxoraStream {
             kind: stream.kind,
             last_pause_toggle_ledger: 0,
             last_withdraw_ledger: 0,
+            last_rate_change_ledger: 0,
             metadata: stream.metadata.clone(),
+            claim_owner: None,
+            witness: None,
+            irrevocable: None,
+            is_pooled: None,
             parent_stream_id: Some(stream_id),
             delegation_depth: stream.delegation_depth + 1,
         };
@@ -8602,7 +8638,14 @@ impl FluxoraStream {
             kind: offer.kind,
             last_pause_toggle_ledger: 0,
             last_withdraw_ledger: 0,
+            last_rate_change_ledger: 0,
             metadata: offer.metadata.clone(),
+            claim_owner: None,
+            witness: None,
+            irrevocable: None,
+            is_pooled: None,
+            delegation_depth: 0,
+            parent_stream_id: None,
         };
 
         save_stream(&env, &stream);
