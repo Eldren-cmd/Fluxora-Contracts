@@ -84,17 +84,22 @@ impl<'a> TestContext<'a> {
     /// Linear stream: rate=1 raw/s so timestamp == withdrawable (before any prior withdraw).
     fn create_linear_stream(&self, deposit: i128, threshold: i128, end_time: u64) -> u64 {
         self.client().create_stream(
-            &self.sender,
-            &self.recipient,
-            &deposit,
-            &1_i128,
-            &0u64,
-            &0u64,
-            &end_time,
-            &threshold,
-            &None,
-            &StreamKind::Linear,
-        )
+        &self.sender,
+        &CreateStreamParams {
+            recipient: self.recipient.clone(),
+            deposit_amount: deposit,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: end_time,
+            withdraw_dust_threshold: Some(threshold),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
+    )
     }
 }
 
@@ -387,15 +392,20 @@ fn create_rejects_threshold_above_deposit() {
     let oversized = deposit + 1;
     let result = ctx.client().try_create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &deposit,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &oversized,
-        &None,
-        &StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: deposit,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(oversized),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     assert_eq!(
@@ -413,15 +423,20 @@ fn create_rejects_negative_dust_threshold() {
 
     let result = ctx.client().try_create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &-1_i128,
-        &None,
-        &StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(-1_i128),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     assert_eq!(
@@ -441,15 +456,20 @@ fn create_allows_threshold_equal_to_deposit() {
     let threshold = deposit; // threshold == deposit is allowed (boundary case)
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &deposit,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &threshold,
-        &None,
-        &StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: deposit,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(threshold),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     let state = ctx.client().get_stream_state(&stream_id);

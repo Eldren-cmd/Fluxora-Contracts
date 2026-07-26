@@ -527,15 +527,20 @@ fn test_backward_timestamp_skew_cannot_bypass_rate_limit() {
     // Create a stream: deposit=1000, rate=1/s, no cliff, duration=1000
     let stream_id = client.create_stream(
         &sender,
-        &recipient,
-        &1000,
-        &1,
-        &0,
-        &0,
-        &1000,
-        &0,
-        &None,
-        &StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: recipient.clone(),
+            deposit_amount: 1000,
+            rate_per_second: 1,
+            start_time: 0,
+            cliff_time: 0,
+            end_time: 1000,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
     assert!(stream_id > 0, "stream should be created");
     // Advance to ledger 100 to accrue tokens

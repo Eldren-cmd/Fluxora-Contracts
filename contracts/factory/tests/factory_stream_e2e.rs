@@ -92,17 +92,22 @@ impl<'a> FactoryClientWrapper<'a> {
         withdraw_dust_threshold: &i128,
     ) -> u64 {
         self.client.create_stream(
-            sender,
-            recipient,
-            deposit_amount,
-            rate_per_second,
-            start_time,
-            cliff_time,
-            end_time,
-            withdraw_dust_threshold,
-            &None,
-            &fluxora_stream::StreamKind::Linear,
-        )
+        sender,
+        &fluxora_stream::CreateStreamParams {
+            recipient: recipient.clone(),
+            deposit_amount: deposit_amount,
+            rate_per_second: rate_per_second,
+            start_time: start_time,
+            cliff_time: cliff_time,
+            end_time: end_time,
+            withdraw_dust_threshold: Some(withdraw_dust_threshold),
+            memo: fluxora_stream::StreamKind::Linear,
+            metadata: None,
+            kind: None,
+            irrevocable: None,
+            witness: None,
+        },
+    )
     }
 
     fn try_create_stream(
@@ -118,17 +123,22 @@ impl<'a> FactoryClientWrapper<'a> {
     ) -> Result<Result<u64, soroban_sdk::Error>, Result<FactoryError, soroban_sdk::InvokeError>>
     {
         self.client.try_create_stream(
-            sender,
-            recipient,
-            deposit_amount,
-            rate_per_second,
-            start_time,
-            cliff_time,
-            end_time,
-            withdraw_dust_threshold,
-            &None,
-            &fluxora_stream::StreamKind::Linear,
-        )
+        sender,
+        &fluxora_stream::CreateStreamParams {
+            recipient: recipient.clone(),
+            deposit_amount: deposit_amount,
+            rate_per_second: rate_per_second,
+            start_time: start_time,
+            cliff_time: cliff_time,
+            end_time: end_time,
+            withdraw_dust_threshold: Some(withdraw_dust_threshold),
+            memo: fluxora_stream::StreamKind::Linear,
+            metadata: None,
+            kind: None,
+            irrevocable: None,
+            witness: None,
+        },
+    )
     }
 
     fn set_factory_paused(&self, paused: &bool) {
@@ -1205,15 +1215,20 @@ fn test_single_create_stream_memo_over_limit_rejected_by_factory_guard() {
 
     let res = ctx.factory.client.try_create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &DEPOSIT_AMOUNT,
-        &RATE_PER_SECOND,
-        &now,
-        &now,
-        &(now + STREAM_DURATION),
-        &0,
-        &Some(over_limit_memo),
-        &fluxora_stream::StreamKind::Linear,
+        &fluxora_stream::CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: DEPOSIT_AMOUNT,
+            rate_per_second: RATE_PER_SECOND,
+            start_time: now,
+            cliff_time: now,
+            end_time: (now + STREAM_DURATION),
+            withdraw_dust_threshold: Some(0),
+            memo: fluxora_stream::StreamKind::Linear,
+            metadata: None,
+            kind: Some(over_limit_memo),
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     // Must return FactoryError::InvalidMemo from the factory itself
@@ -1244,15 +1259,20 @@ fn test_single_create_stream_exact_max_memo_bytes_accepted() {
 
     let res = ctx.factory.client.try_create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &DEPOSIT_AMOUNT,
-        &RATE_PER_SECOND,
-        &now,
-        &now,
-        &(now + STREAM_DURATION),
-        &0,
-        &Some(exact_memo.clone()),
-        &fluxora_stream::StreamKind::Linear,
+        &fluxora_stream::CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: DEPOSIT_AMOUNT,
+            rate_per_second: RATE_PER_SECOND,
+            start_time: now,
+            cliff_time: now,
+            end_time: (now + STREAM_DURATION),
+            withdraw_dust_threshold: Some(0),
+            memo: fluxora_stream::StreamKind::Linear,
+            metadata: None,
+            kind: Some(exact_memo.clone()),
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     assert!(res.is_ok());

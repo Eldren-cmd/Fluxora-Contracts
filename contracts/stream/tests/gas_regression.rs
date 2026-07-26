@@ -60,17 +60,22 @@ impl<'a> TestContext<'a> {
         let end_time = 1000u64;
 
         self.client.create_stream(
-            &self.sender,
-            &self.recipient,
-            &amount,
-            &rate,
-            &start_time,
-            &cliff_time,
-            &end_time,
-            &0,
-            &None,
-            &StreamKind::Linear,
-        )
+        &self.sender,
+        &CreateStreamParams {
+            recipient: self.recipient.clone(),
+            deposit_amount: amount,
+            rate_per_second: rate,
+            start_time: start_time,
+            cliff_time: cliff_time,
+            end_time: end_time,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
+    )
     }
 }
 
@@ -166,15 +171,20 @@ fn test_keeper_cancel_gas_partial_accrual() {
     ctx.env.ledger().set_timestamp(0);
     let stream_id = ctx.client.create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &10_000_i128,
-        &5_i128,
-        &0u64,
-        &0u64,
-        &1_000u64,
-        &0_i128,
-        &None,
-        &StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 10_000_i128,
+            rate_per_second: 5_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1_000u64,
+            withdraw_dust_threshold: Some(0_i128),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     // Advance past end_time + grace period so the stream is eligible.
@@ -203,15 +213,20 @@ fn test_keeper_cancel_gas_fully_accrued() {
     ctx.env.ledger().set_timestamp(0);
     let stream_id = ctx.client.create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1_000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1_000u64,
-        &0_i128,
-        &None,
-        &StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1_000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1_000u64,
+            withdraw_dust_threshold: Some(0_i128),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     ctx.env.ledger().set_timestamp(1_000 + KEEPER_GRACE + 1);

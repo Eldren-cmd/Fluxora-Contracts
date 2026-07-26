@@ -240,15 +240,20 @@ fn auto_renew_permissionless_preserves_subscription_schedule() {
     env.ledger().set_timestamp(1_000);
     let old_id = client.create_stream(
         &sender,
-        &recipient,
-        &100_i128,
-        &1_i128,
-        &1_000,
-        &1_010,
-        &1_100,
-        &0,
-        &None,
-        &StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: recipient.clone(),
+            deposit_amount: 100_i128,
+            rate_per_second: 1_i128,
+            start_time: 1_000,
+            cliff_time: 1_010,
+            end_time: 1_100,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
     client.set_auto_renew(&old_id, &sender, &true);
 
@@ -295,15 +300,20 @@ fn auto_renew_rejects_insufficient_sender_funding_without_new_stream() {
     env.ledger().set_timestamp(2_000);
     let old_id = client.create_stream(
         &sender,
-        &recipient,
-        &100_i128,
-        &1_i128,
-        &2_000,
-        &2_000,
-        &2_100,
-        &0,
-        &None,
-        &StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: recipient.clone(),
+            deposit_amount: 100_i128,
+            rate_per_second: 1_i128,
+            start_time: 2_000,
+            cliff_time: 2_000,
+            end_time: 2_100,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
     client.set_auto_renew(&old_id, &sender, &true);
     env.ledger().set_timestamp(2_100);

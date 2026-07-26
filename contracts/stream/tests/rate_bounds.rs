@@ -103,16 +103,20 @@ fn test_create_stream_at_zero_rate_fails() {
 
     let result = client.try_create_stream(
         &sender,
-        &recipient,
-        &1000i128,
-        &0i128, // rate = 0
-        &start_time,
-        &start_time,
-        &end_time,
-        &0i128,
-        &None,
-        &StreamKind::Linear,
-        &None,
+        &CreateStreamParams {
+            recipient: recipient.clone(),
+            deposit_amount: 1000i128,
+            rate_per_second: 0i128,
+            start_time: start_time,
+            cliff_time: start_time,
+            end_time: end_time,
+            withdraw_dust_threshold: Some(0i128),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
     assert_eq!(result, Err(Ok(ContractError::InvalidParams)));
 }
@@ -288,16 +292,20 @@ fn test_negative_rate_fails_with_invalid_params() {
 
     let result = client.try_create_stream(
         &sender,
-        &recipient,
-        &1000i128,
-        &-1i128, // negative rate
-        &start_time,
-        &start_time,
-        &end_time,
-        &0i128,
-        &None,
-        &StreamKind::Linear,
-        &None,
+        &CreateStreamParams {
+            recipient: recipient.clone(),
+            deposit_amount: 1000i128,
+            rate_per_second: -1i128,
+            start_time: start_time,
+            cliff_time: start_time,
+            end_time: end_time,
+            withdraw_dust_threshold: Some(0i128),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
     assert_eq!(result, Err(Ok(ContractError::InvalidParams)));
 }
@@ -311,16 +319,20 @@ fn test_rate_at_i128_max_fails_with_invalid_params() {
 
     let result = client.try_create_stream(
         &sender,
-        &recipient,
-        &i128::MAX,
-        &i128::MAX, // exceeds any reasonable max_rate
-        &start_time,
-        &start_time,
-        &end_time,
-        &0i128,
-        &None,
-        &StreamKind::Linear,
-        &None,
+        &CreateStreamParams {
+            recipient: recipient.clone(),
+            deposit_amount: i128::MAX,
+            rate_per_second: i128::MAX,
+            start_time: start_time,
+            cliff_time: start_time,
+            end_time: end_time,
+            withdraw_dust_threshold: Some(0i128),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
     assert!(result.is_err());
 }
@@ -369,48 +381,60 @@ fn test_min_rate_preserves_existing_max_rate_cap() {
     // Rate below 0 should fail with InvalidParams
     let result = client.try_create_stream(
         &sender,
-        &recipient,
-        &50000i128,
-        &0i128,
-        &start_time,
-        &start_time,
-        &end_time,
-        &0i128,
-        &None,
-        &StreamKind::Linear,
-        &None,
+        &CreateStreamParams {
+            recipient: recipient.clone(),
+            deposit_amount: 50000i128,
+            rate_per_second: 0i128,
+            start_time: start_time,
+            cliff_time: start_time,
+            end_time: end_time,
+            withdraw_dust_threshold: Some(0i128),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
     assert_eq!(result, Err(Ok(ContractError::InvalidParams)));
 
     // Rate above max cap should fail with InvalidParams
     let result = client.try_create_stream(
         &sender,
-        &recipient,
-        &600000i128,
-        &600i128,
-        &start_time,
-        &start_time,
-        &end_time,
-        &0i128,
-        &None,
-        &StreamKind::Linear,
-        &None,
+        &CreateStreamParams {
+            recipient: recipient.clone(),
+            deposit_amount: 600000i128,
+            rate_per_second: 600i128,
+            start_time: start_time,
+            cliff_time: start_time,
+            end_time: end_time,
+            withdraw_dust_threshold: Some(0i128),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
     assert_eq!(result, Err(Ok(ContractError::InvalidParams)));
 
     // Rate within [MIN, MAX] should succeed
     let result = client.try_create_stream(
         &sender,
-        &recipient,
-        &300000i128,
-        &300i128,
-        &start_time,
-        &start_time,
-        &end_time,
-        &0i128,
-        &None,
-        &StreamKind::Linear,
-        &None,
+        &CreateStreamParams {
+            recipient: recipient.clone(),
+            deposit_amount: 300000i128,
+            rate_per_second: 300i128,
+            start_time: start_time,
+            cliff_time: start_time,
+            end_time: end_time,
+            withdraw_dust_threshold: Some(0i128),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
     assert!(result.is_ok());
 }

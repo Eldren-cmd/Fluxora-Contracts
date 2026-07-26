@@ -161,15 +161,20 @@ fn event_snapshot_stream_created_has_correct_topics_and_payload() {
 
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &fluxora_stream::StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     let events = ctx.env.events().all();
@@ -235,15 +240,20 @@ fn event_snapshot_stream_created_with_memo() {
 
     let _stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &5000_i128,
-        &2_i128,
-        &0u64,
-        &100u64,
-        &2500u64,
-        &0,
-        &memo,
-        &fluxora_stream::StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 5000_i128,
+            rate_per_second: 2_i128,
+            start_time: 0u64,
+            cliff_time: 100u64,
+            end_time: 2500u64,
+            withdraw_dust_threshold: Some(0),
+            memo: memo,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     let events = ctx.env.events().all();
@@ -288,15 +298,20 @@ fn event_snapshot_withdrawal_has_correct_topics_and_payload() {
 
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &fluxora_stream::StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     ctx.env.ledger().set_timestamp(500);
@@ -348,15 +363,20 @@ fn event_snapshot_no_withdrawal_event_when_amount_zero() {
 
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &500u64, // Cliff at 500
-        &1000u64,
-        &0,
-        &None,
-        &fluxora_stream::StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 500u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     // Try to withdraw before cliff - amount should be 0
@@ -395,15 +415,20 @@ fn event_snapshot_withdrawal_to_has_correct_topics_and_payload() {
 
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &fluxora_stream::StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     let destination = Address::generate(&ctx.env);
@@ -460,15 +485,20 @@ fn event_snapshot_stream_paused_has_correct_topics_and_payload() {
 
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &fluxora_stream::StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     let events_before = ctx.env.events().all().len();
@@ -519,15 +549,20 @@ fn event_snapshot_stream_paused_as_admin_has_administrative_reason() {
 
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &fluxora_stream::StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     let events_before = ctx.env.events().all().len();
@@ -572,15 +607,20 @@ fn event_snapshot_stream_resumed_has_correct_topics() {
 
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &fluxora_stream::StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     ctx.client()
@@ -618,15 +658,20 @@ fn event_snapshot_stream_cancelled_has_correct_topics() {
 
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &fluxora_stream::StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     ctx.env.ledger().set_timestamp(500);
@@ -666,15 +711,20 @@ fn event_snapshot_stream_completed_emitted_after_withdrew() {
 
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &fluxora_stream::StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     // Partial withdrawal first
@@ -720,15 +770,20 @@ fn event_snapshot_stream_closed_has_correct_topics() {
 
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &fluxora_stream::StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     // Complete the stream
@@ -772,15 +827,20 @@ fn event_snapshot_rate_updated_has_correct_topics_and_payload() {
     // Deposit enough to support rate increase from 1/s to 2/s over 1000s.
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &2000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &fluxora_stream::StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 2000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     ctx.env.ledger().set_timestamp(100);
@@ -831,15 +891,20 @@ fn event_snapshot_stream_end_shortened_has_correct_topics_and_payload() {
 
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &fluxora_stream::StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     let events_before = ctx.env.events().all().len();
@@ -889,15 +954,20 @@ fn event_snapshot_stream_end_extended_has_correct_topics_and_payload() {
     // Deposit enough to support extending end_time from 1000 to 2000 at rate 1/s.
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &2000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &fluxora_stream::StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 2000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     let events_before = ctx.env.events().all().len();
@@ -949,15 +1019,20 @@ fn event_snapshot_stream_topped_up_has_correct_topics_and_payload() {
 
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &fluxora_stream::StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     let events_before = ctx.env.events().all().len();
@@ -1006,15 +1081,20 @@ fn event_snapshot_recipient_updated_has_correct_topics_and_payload() {
 
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &fluxora_stream::StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     let new_recipient = Address::generate(&ctx.env);
@@ -1193,15 +1273,20 @@ fn event_snapshot_no_events_on_failed_create_stream() {
     // Try to create stream with insufficient deposit (will fail)
     let result = ctx.client().try_create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &10_i128, // Too small for 1000 seconds at 1 token/sec
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &fluxora_stream::StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 10_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     assert!(
@@ -1238,15 +1323,20 @@ fn event_snapshot_no_events_on_failed_operations() {
 
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &fluxora_stream::StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     // Try to pause an already completed stream (should fail)
@@ -1331,15 +1421,20 @@ fn event_snapshot_health_changed_top_up_heals_underfunded_stream() {
     // Create a stream: deposit=1000, rate=1/s, duration=1000s.
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &fluxora_stream::StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     // Advance to t=100.
@@ -1373,15 +1468,20 @@ fn event_snapshot_health_changed_shorten_heals_underfunded_stream() {
     // Create stream: deposit=1000, rate=1/s, duration=1000s. Funded.
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &fluxora_stream::StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     // Advance to t=100.
@@ -1415,15 +1515,20 @@ fn event_snapshot_health_changed_decrease_rate_heals_underfunded_stream() {
     // Create stream: deposit=10000, rate=10/s, duration=1000s. Funded.
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &10000_i128,
-        &10_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &fluxora_stream::StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 10000_i128,
+            rate_per_second: 10_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     // Advance to t=100.
@@ -1459,15 +1564,20 @@ fn event_snapshot_health_changed_cancel_heals_underfunded_stream() {
     // Create stream: deposit=1000, rate=1/s, duration=1000s.
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &fluxora_stream::StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     // Advance to t=100.
@@ -1501,15 +1611,20 @@ fn event_snapshot_health_changed_not_emitted_when_no_transition() {
     // Create stream: deposit=1000, rate=1/s, duration=1000s. Funded.
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &fluxora_stream::StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     // Top up an already-funded stream. Health stays funded → no event.

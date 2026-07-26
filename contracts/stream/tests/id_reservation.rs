@@ -67,17 +67,22 @@ impl<'a> Ctx<'a> {
         let recipient = Address::generate(&self.env);
         let now = self.env.ledger().timestamp();
         self.client.create_stream(
-            sender,
-            &recipient,
-            &1_000_000i128,
-            &1i128,
-            &(now + 1),
-            &(now + 1),
-            &(now + 1_000_001),
-            &0i128,
-            &None,
-            &StreamKind::Linear,
-        )
+        sender,
+        &CreateStreamParams {
+            recipient: recipient.clone(),
+            deposit_amount: 1_000_000i128,
+            rate_per_second: 1i128,
+            start_time: (now + 1),
+            cliff_time: (now + 1),
+            end_time: (now + 1_000_001),
+            withdraw_dust_threshold: Some(0i128),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
+    )
     }
 }
 

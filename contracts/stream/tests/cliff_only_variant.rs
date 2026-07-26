@@ -66,17 +66,22 @@ impl<'a> Ctx<'a> {
 
     fn create_cliff_slope_stream(&self, deposit: i128, rate: i128, start: u64, cliff: u64, end: u64) -> u64 {
         self.client.create_stream(
-            &self.sender,
-            &self.recipient,
-            &deposit,
-            &rate,
-            &start,
-            &cliff,
-            &end,
-            &0,
-            &None,
-            &StreamKind::CliffSlope,
-        )
+        &self.sender,
+        &CreateStreamParams {
+            recipient: self.recipient.clone(),
+            deposit_amount: deposit,
+            rate_per_second: rate,
+            start_time: start,
+            cliff_time: cliff,
+            end_time: end,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::CliffSlope,
+            irrevocable: None,
+            witness: None,
+        },
+    )
     }
 }
 

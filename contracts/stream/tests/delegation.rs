@@ -20,15 +20,20 @@ fn create_stream(
     let now = env.ledger().timestamp();
     client.create_stream(
         sender,
-        recipient,
-        &deposit,
-        &rate_per_second,
-        &now,
-        &now,
-        &(now + 1000),
-        &0,
-        &None,
-        &StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: recipient.clone(),
+            deposit_amount: deposit,
+            rate_per_second: rate_per_second,
+            start_time: now,
+            cliff_time: now,
+            end_time: (now + 1000),
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     )
 }
 

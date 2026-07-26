@@ -70,15 +70,20 @@ impl<'a> Ctx<'a> {
 fn create_stream(ctx: &Ctx<'_>, deposit: i128, rate: i128, start: u64, end: u64) -> u64 {
     ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &deposit,
-        &rate,
-        &start,
-        &start, // cliff == start
-        &end,
-        &0_i128,
-        &None,
-        &StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: deposit,
+            rate_per_second: rate,
+            start_time: start,
+            cliff_time: start,
+            end_time: end,
+            withdraw_dust_threshold: Some(0_i128),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     )
 }
 

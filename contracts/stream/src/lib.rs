@@ -2383,59 +2383,48 @@ impl FluxoraStream {
     ///   - `deposit_amount = 1000`, `rate = 1`, `start = 0`, `cliff = 0`, `end = 1000`
     /// - Vesting stream: 12000 tokens over 12 months, 6-month cliff
     ///   - `deposit_amount = 12000`, `rate = 1`, `start = 0`, `cliff = 15552000`, `end = 31104000`
-    #[allow(clippy::too_many_arguments)]
     pub fn create_stream(
         env: Env,
         sender: Address,
-        recipient: Address,
-        deposit_amount: i128,
-        rate_per_second: i128,
-        start_time: u64,
-        cliff_time: u64,
-        end_time: u64,
-        withdraw_dust_threshold: i128,
-        memo: Option<soroban_sdk::Bytes>,
-        kind: StreamKind,
-        irrevocable: Option<bool>,
-        witness: Option<Address>,
+        params: CreateStreamParams,
     ) -> Result<u64, ContractError> {
         sender.require_auth();
         require_not_creation_paused(&env)?;
 
-        let mut final_rate = rate_per_second;
-        if kind == StreamKind::CliffOnly {
+        let mut final_rate = params.rate_per_second;
+        if params.kind == StreamKind::CliffOnly {
             final_rate = 0;
         }
 
         Self::validate_stream_params(
             &env,
             &sender,
-            &recipient,
-            deposit_amount,
+            &params.recipient,
+            params.deposit_amount,
             final_rate,
             env.ledger().timestamp(),
-            start_time,
-            cliff_time,
-            end_time,
-            kind,
+            params.start_time,
+            params.cliff_time,
+            params.end_time,
+            params.kind,
         )?;
 
-        pull_token(&env, &sender, deposit_amount)?;
+        pull_token(&env, &sender, params.deposit_amount)?;
 
         Self::persist_new_stream(
             &env,
             sender,
-            recipient,
-            deposit_amount,
+            params.recipient,
+            params.deposit_amount,
             final_rate,
-            start_time,
-            cliff_time,
-            end_time,
-            withdraw_dust_threshold,
-            memo,
-            kind,
-            irrevocable,
-            witness,
+            params.start_time,
+            params.cliff_time,
+            params.end_time,
+            params.withdraw_dust_threshold.unwrap_or(0),
+            params.memo,
+            params.kind,
+            params.irrevocable,
+            params.witness,
         )
     }
 
@@ -2530,26 +2519,24 @@ impl FluxoraStream {
             .checked_add(params.duration)
             .ok_or(ContractError::InvalidParams)?;
 
-        let mut final_rate = params.rate_per_second;
-        if params.kind == StreamKind::CliffOnly {
-            final_rate = 0;
-        }
-
         // Delegate to standard create_stream with computed absolute times
         Self::create_stream(
             env,
             sender,
-            params.recipient,
-            params.deposit_amount,
-            final_rate,
-            start_time,
-            cliff_time,
-            end_time,
-            params.withdraw_dust_threshold.unwrap_or(0),
-            params.memo,
-            params.kind,
-            params.irrevocable,
-            None,
+            CreateStreamParams {
+                recipient: params.recipient,
+                deposit_amount: params.deposit_amount,
+                rate_per_second: params.rate_per_second,
+                start_time,
+                cliff_time,
+                end_time,
+                withdraw_dust_threshold: params.withdraw_dust_threshold,
+                memo: params.memo,
+                metadata: params.metadata,
+                kind: params.kind,
+                irrevocable: params.irrevocable,
+                witness: None,
+            },
         )
     }
 
@@ -2995,6 +2982,7 @@ impl FluxoraStream {
                 memo: rel.memo,
                 metadata: rel.metadata,
                 kind: rel.kind,
+                irrevocable: rel.irrevocable,
                 witness: None,
             });
         }
@@ -5698,6 +5686,8 @@ impl FluxoraStream {
             stream.withdraw_dust_threshold,
             stream.memo.clone(),
             stream.kind,
+            stream.irrevocable,
+            stream.witness.clone(),
         )?;
         set_auto_renew_enabled(&env, new_stream_id, true);
 
@@ -8372,20 +8362,10 @@ impl FluxoraStream {
     /// - Deposit is fully escrowed; no partial-fill risk.
     /// - Offer ID is taken from the same global counter as stream IDs, ensuring
     ///   globally unique identifiers with no collision with active streams.
-    #[allow(clippy::too_many_arguments)]
     pub fn create_stream_offer(
         env: Env,
         sender: Address,
-        recipient: Address,
-        deposit_amount: i128,
-        rate_per_second: i128,
-        start_time: u64,
-        cliff_time: u64,
-        end_time: u64,
-        withdraw_dust_threshold: i128,
-        memo: Option<soroban_sdk::Bytes>,
-        kind: StreamKind,
-        metadata: Option<soroban_sdk::Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
+        params: CreateStreamParams,
         expiry_time: Option<u64>,
     ) -> Result<u64, ContractError> {
         sender.require_auth();
@@ -8401,43 +8381,44 @@ impl FluxoraStream {
         }
 
         // For CliffOnly, rate must be 0.
-        let final_rate = if kind == StreamKind::CliffOnly {
+        let final_rate = if params.kind == StreamKind::CliffOnly {
             0
         } else {
-            rate_per_second
+            params.rate_per_second
         };
 
         // Reuse stream parameter validation (same rules as create_stream).
         Self::validate_stream_params(
             &env,
             &sender,
-            &recipient,
-            deposit_amount,
+            &params.recipient,
+            params.deposit_amount,
             final_rate,
             now,
-            start_time,
-            cliff_time,
-            end_time,
-            kind,
+            params.start_time,
+            params.cliff_time,
+            params.end_time,
+            params.kind,
         )?;
 
         // Validate memo length.
-        if let Some(ref m) = memo {
+        if let Some(ref m) = params.memo {
             if m.len() as usize > MAX_MEMO_BYTES {
                 return Err(ContractError::InvalidParams);
             }
         }
 
+        let withdraw_dust_threshold = params.withdraw_dust_threshold.unwrap_or(0);
         // Validate dust threshold.
         if withdraw_dust_threshold < 0 {
             return Err(ContractError::InvalidDustThreshold);
         }
-        if withdraw_dust_threshold > deposit_amount {
+        if withdraw_dust_threshold > params.deposit_amount {
             return Err(ContractError::InvalidDustThreshold);
         }
 
         // Validate metadata if present.
-        if let Some(ref meta) = metadata {
+        if let Some(ref meta) = params.metadata {
             storage::validate_metadata(meta)?;
         }
 
@@ -8449,26 +8430,26 @@ impl FluxoraStream {
         let offer = StreamOffer {
             offer_id,
             sender: sender.clone(),
-            recipient: recipient.clone(),
-            deposit_amount,
+            recipient: params.recipient.clone(),
+            deposit_amount: params.deposit_amount,
             rate_per_second: final_rate,
-            start_time,
-            cliff_time,
-            end_time,
+            start_time: params.start_time,
+            cliff_time: params.cliff_time,
+            end_time: params.end_time,
             withdraw_dust_threshold,
-            memo: memo.clone(),
-            kind,
-            metadata: metadata.clone(),
+            memo: params.memo.clone(),
+            kind: params.kind,
+            metadata: params.metadata.clone(),
             expiry_time,
             created_at: now,
         };
 
         // Persist offer and update recipient index BEFORE pulling tokens.
         save_stream_offer(&env, &offer);
-        add_offer_to_recipient_pending(&env, &recipient, offer_id);
+        add_offer_to_recipient_pending(&env, &params.recipient, offer_id);
 
         // ── CEI: token transfer ───────────────────────────────────────────────
-        pull_token(&env, &sender, deposit_amount)?;
+        pull_token(&env, &sender, params.deposit_amount)?;
 
         // ── Emit event ────────────────────────────────────────────────────────
         env.events().publish(
@@ -8476,12 +8457,12 @@ impl FluxoraStream {
             StreamOfferCreated {
                 offer_id,
                 sender,
-                recipient,
-                deposit_amount,
+                recipient: params.recipient,
+                deposit_amount: params.deposit_amount,
                 rate_per_second: final_rate,
-                start_time,
-                cliff_time,
-                end_time,
+                start_time: params.start_time,
+                cliff_time: params.cliff_time,
+                end_time: params.end_time,
                 expiry_time,
                 created_at: now,
             },

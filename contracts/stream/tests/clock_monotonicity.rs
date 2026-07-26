@@ -54,17 +54,22 @@ impl<'a> TestContext<'a> {
 
     fn create_stream(&self) -> u64 {
         self.client().create_stream(
-            &self.sender,
-            &self.recipient,
-            &1000_i128,
-            &1_i128,
-            &0u64,
-            &0u64,
-            &1000u64,
-            &0_i128,
-            &None,
-            &fluxora_stream::StreamKind::Linear,
-        )
+        &self.sender,
+        &CreateStreamParams {
+            recipient: self.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0_i128),
+            memo: None,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
+    )
     }
 
     /// Set the ledger to an explicit (sequence, timestamp) pair, decoupling the two axes

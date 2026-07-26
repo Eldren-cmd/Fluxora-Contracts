@@ -38,16 +38,20 @@ fn create_stream_emits_correct_event() {
 
     ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &crate::StreamKind::Linear,
-        &None,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: crate::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     let events = ctx.env.events().all();
@@ -306,16 +310,20 @@ fn withdraw_at_exact_cliff_time_returns_zero() {
     let ctx = TestContext::setup();
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &500u64, // cliff at 500
-        &1000u64,
-        &0,
-        &None,
-        &crate::StreamKind::Linear,
-        &None,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 500u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: crate::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     // At exact cliff time, nothing is withdrawable yet
@@ -331,16 +339,20 @@ fn withdraw_one_second_after_cliff_returns_accrued() {
     let ctx = TestContext::setup();
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &500u64, // cliff at 500
-        &1000u64,
-        &0,
-        &None,
-        &crate::StreamKind::Linear,
-        &None,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 500u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: crate::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     // One second after cliff, 1 token is accrued
@@ -388,16 +400,20 @@ fn cancel_at_exact_start_time_refunds_full_deposit() {
     let ctx = TestContext::setup();
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &crate::StreamKind::Linear,
-        &None,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: crate::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     // At exact start time, nothing is accrued yet
@@ -462,16 +478,20 @@ fn create_stream_max_deposit_fails() {
 
     let result = ctx.client().try_create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &i128::MAX,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &crate::StreamKind::Linear,
-        &None,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: i128::MAX,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: crate::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     assert!(
@@ -488,16 +508,20 @@ fn create_stream_max_rate_fails() {
 
     let result = ctx.client().try_create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &i128::MAX,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0,
-        &None,
-        &crate::StreamKind::Linear,
-        &None,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: i128::MAX,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: crate::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     assert!(
@@ -516,16 +540,20 @@ fn create_stream_rate_duration_overflow_fails() {
     // This should overflow when multiplied
     let result = ctx.client().try_create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1_000_000_000_000_000_000_i128,
-        &1_000_000_000_i128,
-        &0u64,
-        &0u64,
-        &1_000_000_000u64,
-        &0,
-        &None,
-        &crate::StreamKind::Linear,
-        &None,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1_000_000_000_000_000_000_i128,
+            rate_per_second: 1_000_000_000_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1_000_000_000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: crate::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     assert!(
@@ -586,16 +614,20 @@ fn shorten_end_time_overflow_fails() {
     let ctx = TestContext::setup();
     let stream_id = ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1_000_000_000_000_000_000_i128,
-        &1_000_000_000_i128,
-        &0u64,
-        &0u64,
-        &1_000_000_000u64,
-        &0,
-        &None,
-        &crate::StreamKind::Linear,
-        &None,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1_000_000_000_000_000_000_i128,
+            rate_per_second: 1_000_000_000_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1_000_000_000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: crate::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     ctx.env.ledger().set_timestamp(100);
