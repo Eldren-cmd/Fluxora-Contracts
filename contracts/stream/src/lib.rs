@@ -1599,52 +1599,10 @@ fn reconcile_paused_stream_count(env: &Env, previous: StreamStatus, next: Stream
 }
 
 // ---------------------------------------------------------------------------
-// IdReservation storage helpers (issue #584)
+// IdReservation storage helpers — delegated to storage.rs
 // ---------------------------------------------------------------------------
 
-fn load_id_reservation(env: &Env, caller: &Address) -> Option<IdReservation> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::IdReservation(caller.clone()))
-}
-
-fn save_id_reservation(env: &Env, caller: &Address, res: &IdReservation) {
-    let key = DataKey::IdReservation(caller.clone());
-    env.storage().persistent().set(&key, res);
-    env.storage().persistent().extend_ttl(
-        &key,
-        PERSISTENT_LIFETIME_THRESHOLD,
-        PERSISTENT_BUMP_AMOUNT,
-    );
-}
-
-fn remove_id_reservation(env: &Env, caller: &Address) {
-    env.storage()
-        .persistent()
-        .remove(&DataKey::IdReservation(caller.clone()));
-}
-
-/// Determine the next stream ID for `caller`.
-///
-/// If the caller has an active reservation, consume the next ID from it.
-/// When the reservation is fully consumed it is deleted.
-/// Otherwise fall through to the live global counter.
-fn next_stream_id_for(env: &Env, caller: &Address) -> u64 {
-    if let Some(mut res) = load_id_reservation(env, caller) {
-        let id = res.start_id + res.consumed as u64;
-        res.consumed += 1;
-        if res.consumed >= res.count {
-            remove_id_reservation(env, caller);
-        } else {
-            save_id_reservation(env, caller, &res);
-        }
-        id
-    } else {
-        let id = read_stream_count(env);
-        set_stream_count(env, id + 1);
-        id
-    }
-}
+use storage::{load_id_reservation, next_stream_id_for, remove_id_reservation, save_id_reservation};
 
 fn load_stream(env: &Env, stream_id: u64) -> Result<Stream, ContractError> {
     let key = DataKey::Stream(stream_id);
