@@ -276,7 +276,7 @@ fn test_sender_portfolio_health_cursor_boundaries() {
         .client
         .get_sender_portfolio_health(&ctx.sender, &0u64, &MAX_RECIPIENT_PAGE_SIZE);
     // the page may be empty (sender owns none here) but must not error
-    let _ = first.page_stream_ids;
+    let _ = first.stream_ids;
 
     // mid-list walk via next_cursor must terminate (no infinite loop / panic)
     let mut cursor = first.next_cursor;
@@ -296,7 +296,7 @@ fn test_sender_portfolio_health_cursor_boundaries() {
         &MAX_RECIPIENT_PAGE_SIZE,
     );
     assert_eq!(
-        past_end.page_stream_ids.len(),
+        past_end.stream_ids.len(),
         0,
         "past-end cursor must yield an empty page"
     );

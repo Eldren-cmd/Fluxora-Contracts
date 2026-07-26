@@ -8,7 +8,7 @@ use fluxora_stream::{
 use soroban_sdk::{
     testutils::{Address as _, Ledger, LedgerInfo},
     token::{Client as TokenClient, StellarAssetClient},
-    xdr::{AccountId, PublicKey, ScAddress, Uint256},
+    xdr::{AccountId, PublicKey, ScAddress, ToXdr, Uint256},
     Address, Bytes, BytesN, Env, TryIntoVal,
 };
 
@@ -44,21 +44,21 @@ impl TestContext {
 
         let contract_id = env.register_contract(None, FluxoraStream);
         let client = FluxoraStreamClient::new(&env, &contract_id);
-        let token_id = env
-            .register_stellar_asset_contract_v2(Address::generate(&env))
-            .address();
-        let token = TokenClient::new(&env, &token_id);
-
         let admin = Address::generate(&env);
         let sender = Address::generate(&env);
         let recipient = recipient_public_key
             .as_ref()
             .map(|public_key| address_from_pk(&env, public_key))
             .unwrap_or_else(|| Address::generate(&env));
+
+        let token_id = env
+            .register_stellar_asset_contract_v2(recipient.clone())
+            .address();
+        let token = TokenClient::new(&env, &token_id);
+
         client.init(&token_id, &admin);
 
         StellarAssetClient::new(&env, &token_id).mint(&sender, &1_000_000_000);
-        StellarAssetClient::new(&env, &token_id).mint(&recipient, &1);
         token.approve(&sender, &contract_id, &i128::MAX, &100_000);
 
         Self {

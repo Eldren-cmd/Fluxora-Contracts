@@ -466,7 +466,7 @@ pub enum ContractError {
     /// Metadata payload exceeds the allowed size.
     MetadataTooLarge = 32,
     /// Keeper attempted to close a stream before the grace period elapsed.
-    KeeperGracePeriodNotElapsed = 41,
+    KeeperGracePeriodNotElapsed = 42,
     ReservationAlreadyActive = 34,
     /// Withdraw dust threshold is negative or exceeds deposit amount.
     InvalidDustThreshold = 35,
@@ -6199,8 +6199,8 @@ impl FluxoraStream {
             0u32
         } else {
             match streams.binary_search(cursor) {
-                Ok(pos) => pos as usize,  // start AT the cursor stream (inclusive)
-                Err(pos) => pos as usize, // gap: start at the next higher stream
+                Ok(pos) => pos as u32,  // start AT the cursor stream (inclusive)
+                Err(pos) => pos as u32, // gap: start at the next higher stream
             }
         };
 
