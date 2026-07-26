@@ -326,3 +326,85 @@ Stream creators can use the break-even formula to reason about keeper incentives
 - Formal proofs that `keeper_fee + protocol_remainder == gross` (conservation) and
   that `checked_mul(KEEPER_FEE_BPS)` cannot overflow are described in
   [docs/formal-verification.md](formal-verification.md#keeper-fee-conservation-proofs-new).
+
+---
+
+## Stream Persistent-Entry Size
+
+Every `Stream` struct is written to a Soroban **persistent** ledger entry.  Soroban charges
+rent proportional to the serialized byte size of each entry, so unchecked growth of any
+caller-controlled field inflates the per-stream rent cost for the entire protocol.
+
+### Field breakdown (worst case)
+
+| Category | Fields | Approx. XDR bytes |
+|---|---|---|
+| Fixed scalars | `stream_id` (u64), 3 × i128 amounts, 3 × i128 checkpoints, 3 × u32 ledger stamps, `delegation_depth` (u32) | ~120 |
+| Fixed addresses | `sender`, `recipient` (each 36 bytes) | ~72 |
+| Enum fields | `status` (StreamStatus), `kind` (StreamKind) | ~8 |
+| Optional scalars | `cancelled_at` (Option\<u64\>), `is_pooled` (Option\<bool\>), `irrevocable` (Option\<bool\>), `parent_stream_id` (Option\<u64\>) | ~30 |
+| Optional addresses | `claim_owner` (Option\<Address\>), `witness` (Option\<Address\>) | ~74 |
+| **`memo`** (caller-controlled) | `Option<Bytes>` capped at `MAX_MEMO_BYTES` = 256 | **~268** |
+| **`metadata`** (caller-controlled) | `Option<Map<Bytes,Bytes>>` capped at `MAX_METADATA_BYTES` = 512 aggregate + ScMap framing for up to 8 entries | **~680** |
+| ScVal type tags + XDR padding | per-field overhead from Soroban encoding | ~100 |
+| **Structural total** | | **~1 352** |
+
+### Measured baselines
+
+These values are printed by the regression tests in
+`contracts/stream/tests/gas_regression.rs` (run with `--nocapture`).  Update this
+table whenever the constant or test output changes.
+
+| Variant | Serialized bytes | Test name |
+|---|---|---|
+| Baseline (no optional fields) | ~480 | `test_stream_entry_xdr_size_baseline` |
+| Memo only (`MAX_MEMO_BYTES` = 256 B) | ~760 | `test_stream_entry_xdr_size_memo_only` |
+| Metadata only (`MAX_METADATA_BYTES` = 512 B) | ~1 160 | `test_stream_entry_xdr_size_metadata_only` |
+| **Worst case (memo + metadata + all optionals)** | **~1 352** | `test_stream_entry_xdr_size_worst_case` |
+
+> The values above are estimates derived from the field breakdown.  Run
+> `cargo test -p fluxora_stream --test gas_regression -- --nocapture` to capture
+> the exact figures printed by the tests and update this table.
+
+### Ceiling constant
+
+```rust
+pub const MAX_STREAM_ENTRY_BYTES: usize = 4_096;  // lib.rs
+```
+
+The ceiling is **4 096 bytes** — a ~2.9× safety margin above the ~1 352-byte worst-case
+structural total.  The generous margin accounts for:
+
+- Future additive fields that do not require a `CONTRACT_VERSION` bump
+- Soroban ScVal type tags, XDR padding, and length prefixes that vary by SDK version
+- Host-side encoding overhead not directly observable from Rust test code
+
+### Enforcement
+
+The constant is enforced by:
+
+```bash
+cargo test -p fluxora_stream --test gas_regression -- --nocapture
+```
+
+Four tests run and each asserts `serialized_len <= MAX_STREAM_ENTRY_BYTES`:
+
+| Test | What it covers |
+|---|---|
+| `test_stream_entry_xdr_size_worst_case` | All optional fields at maximum size |
+| `test_stream_entry_xdr_size_baseline` | No optional fields (lower bound) |
+| `test_stream_entry_xdr_size_memo_only` | Only `memo` at `MAX_MEMO_BYTES` |
+| `test_stream_entry_xdr_size_metadata_only` | Only `metadata` at `MAX_METADATA_BYTES` |
+
+### How to update the ceiling
+
+If the `Stream` struct gains new fields and the regression test fails:
+
+1. Run `cargo test -p fluxora_stream --test gas_regression -- --nocapture` and note
+   the printed `STREAM_XDR_SIZE: worst_case: N bytes` value.
+2. Add **~25% headroom**, round up to the next 512-byte boundary.
+3. Update `MAX_STREAM_ENTRY_BYTES` in `contracts/stream/src/lib.rs`.
+4. Update the measured-baselines table above with the new figures.
+5. Confirm the `CONTRACT_VERSION` policy in `lib.rs` has been followed for the
+   struct change (additive fields require a version bump).
+6. Include the change in the PR description with an explicit justification.
