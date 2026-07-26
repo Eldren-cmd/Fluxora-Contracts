@@ -215,30 +215,36 @@ def test_main_fails_when_toolchain_missing_channel(monkeypatch, capsys, tmp_path
     assert "::error::" in captured.err
 
 
-def test_main_fails_when_pinned_targets_invalid_type(monkeypatch, capsys, tmp_path):
-    """Test that main() fails when [toolchain].targets is not a list."""
+def test_pinned_targets_raises_on_invalid_type(tmp_path):
+    """Test that pinned_targets() raises ValueError when targets is not a list."""
     bad_toolchain = tmp_path / "rust-toolchain.toml"
     bad_toolchain.write_text('[toolchain]\nchannel = "1.94.1"\ntargets = "not-a-list"\n')
     
-    monkeypatch.setattr(verify_rust_version, "TOOLCHAIN_FILE", bad_toolchain)
-    monkeypatch.setenv("RUSTC_VERSION_OUTPUT", "rustc 1.94.1 (abcdef 2026-01-01)")
-    monkeypatch.setenv("RUSTUP_TARGET_LIST_OUTPUT", "wasm32-unknown-unknown")
-    monkeypatch.setenv("RUSTUP_COMPONENT_LIST_OUTPUT", "rustfmt\nclippy")
-    assert verify_rust_version.main() == 1
-    captured = capsys.readouterr()
-    assert "::error::" in captured.err
+    with pytest.raises(ValueError, match="invalid.*targets"):
+        verify_rust_version.pinned_targets(bad_toolchain)
 
 
-def test_main_fails_when_pinned_components_invalid_type(monkeypatch, capsys, tmp_path):
-    """Test that main() fails when [toolchain].components is not a list."""
+def test_pinned_components_raises_on_invalid_type(tmp_path):
+    """Test that pinned_components() raises ValueError when components is not a list."""
     bad_toolchain = tmp_path / "rust-toolchain.toml"
     bad_toolchain.write_text('[toolchain]\nchannel = "1.94.1"\ncomponents = "not-a-list"\n')
+    
+    with pytest.raises(ValueError, match="invalid.*components"):
+        verify_rust_version.pinned_components(bad_toolchain)
+
+
+def test_main_fails_when_exception_during_loading(monkeypatch, capsys, tmp_path):
+    """Test that main() exits with error code 1 when exception occurs during loading."""
+    bad_toolchain = tmp_path / "rust-toolchain.toml"
+    bad_toolchain.write_text('[toolchain]\nchannel = "1.94.1"\ntargets = "invalid"\n')
     
     monkeypatch.setattr(verify_rust_version, "TOOLCHAIN_FILE", bad_toolchain)
     monkeypatch.setenv("RUSTC_VERSION_OUTPUT", "rustc 1.94.1 (abcdef 2026-01-01)")
     monkeypatch.setenv("RUSTUP_TARGET_LIST_OUTPUT", "wasm32-unknown-unknown")
     monkeypatch.setenv("RUSTUP_COMPONENT_LIST_OUTPUT", "rustfmt\nclippy")
-    assert verify_rust_version.main() == 1
+    
+    result = verify_rust_version.main()
+    assert result == 1
     captured = capsys.readouterr()
     assert "::error::" in captured.err
 
