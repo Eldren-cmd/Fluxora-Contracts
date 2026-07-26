@@ -53,7 +53,7 @@ soroban-env-host = "=21.2.1"
 [[test]]
 name = "bulk_cancel"
 path = "tests/bulk_cancel.rs"
-test = false
+test = true
 
 [[test]]
 name = "chaos"
@@ -73,7 +73,7 @@ test = false
 [[test]]
 name = "factory_policy"
 path = "tests/factory_policy.rs"
-test = false
+test = true
 
 [[test]]
 name = "formal_verification_smoke"
