@@ -103,7 +103,7 @@ required-features = ["testutils"]
 [[test]]
 name = "max_rate_per_second"
 path = "tests/max_rate_per_second.rs"
-test = false
+test = true
 
 [[test]]
 name = "metadata_extension"
