@@ -58,7 +58,7 @@ test = false
 [[test]]
 name = "chaos"
 path = "tests/chaos.rs"
-test = false
+test = true
 
 [[test]]
 name = "cliff_only_variant"
