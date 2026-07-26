@@ -152,7 +152,7 @@ pub enum StreamStatus {
     Cancelled = 3,
 }
 
-/// The architectural style of the stream (Linear or CliffOnly).
+/// The architectural style of the stream (Linear, CliffOnly, or CliffSlope).
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StreamKind {

@@ -62,7 +62,7 @@ test = false
 [[test]]
 name = "cliff_only_variant"
 path = "tests/cliff_only_variant.rs"
-test = false
+test = true
 
 [[test]]
 name = "create_stream_relative"

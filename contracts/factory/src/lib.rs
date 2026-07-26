@@ -838,8 +838,9 @@ impl FluxoraFactory {
     /// Creates a new stream via the FluxoraStream contract after enforcing treasury policies.
     ///
     /// # Parameters
-    /// - `stream_kind`: [`StreamKind::Linear`] for a standard vesting stream or
-    ///   [`StreamKind::CliffOnly`] for a one-shot cliff unlock. Forwarded verbatim
+    /// - `stream_kind`: [`StreamKind::Linear`] for a standard vesting stream,
+    ///   [`StreamKind::CliffOnly`] for a one-shot cliff unlock, or
+    ///   [`StreamKind::CliffSlope`] for post-cliff linear accrual. Forwarded verbatim
     ///   to the stream contract; all policy checks (cap, allowlist, duration) apply
     ///   regardless of kind.
     /// - `memo`: Optional opaque correlation bytes forwarded to the stream contract

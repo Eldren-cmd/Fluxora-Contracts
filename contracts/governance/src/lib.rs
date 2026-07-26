@@ -254,18 +254,17 @@ fn dispatch_call(env: &Env, target: &Address, calldata: &Bytes) -> Result<(), Go
                 (new_contract,).into_val(env),
             );
         }
-    }
-    Ok(())
-
-    CallData::GovSetThreshold(new_threshold) => {
-            set_threshold_internal(env, new_threshold)?;
+        CallData::GovSetThreshold(new_threshold) => {
+            FluxoraGovernance::set_threshold_internal(env, new_threshold)?;
         }
         CallData::GovAddSigner(signer) => {
-            add_signer_internal(env, signer)?;
+            FluxoraGovernance::add_signer_internal(env, signer)?;
         }
         CallData::GovRemoveSigner(signer) => {
-            remove_signer_internal(env, signer)?;
+            FluxoraGovernance::remove_signer_internal(env, signer)?;
         }
+    }
+    Ok(())
 }
 
 const INSTANCE_LIFETIME_THRESHOLD: u32 = 17_280;
@@ -641,10 +640,12 @@ impl FluxoraGovernance {
     /// Proposals that already reached quorum are not retroactively affected:
     /// `approve` stores a [`QuorumInfo::threshold`] snapshot when quorum is
     /// first reached, and `execute` verifies against that snapshot.
-   /// Update the approval threshold. Reachable ONLY via `execute()` -> `dispatch_call`,
-/// i.e. after quorum + 48h timelock — never via a bare admin signature.
-/// See docs/governance.md "Admin Key Compromise" and issue #1136.
-fn set_threshold_internal(env: &Env, new_threshold: u32) -> Result<(), GovernanceError> {
+    ///
+    /// Update the approval threshold. Reachable ONLY via `execute()` ->
+    /// `dispatch_call`, i.e. after quorum + 48h timelock — never via a bare
+    /// admin signature.
+    /// See docs/governance.md "Admin Key Compromise" and issue #1136.
+    fn set_threshold_internal(env: &Env, new_threshold: u32) -> Result<(), GovernanceError> {
     let signers = get_signers(env)?;
     if new_threshold == 0 || new_threshold > signers.len() {
         return Err(GovernanceError::InvalidThreshold);
@@ -1363,19 +1364,21 @@ fn remove_signer_internal(env: &Env, signer: Address) -> Result<(), GovernanceEr
     /// (this crate's own unit tests) — never present in a release or WASM
     /// build. Production callers MUST go through `propose`/`approve`/`execute`
     /// with `CallData::GovSetThreshold` / `GovAddSigner` / `GovRemoveSigner`.
-    #[cfg(test)]
+}
+
+#[cfg(test)]
+#[contractimpl]
+impl FluxoraGovernance {
     pub fn test_only_set_threshold(env: Env, new_threshold: u32) -> Result<(), GovernanceError> {
-        set_threshold_internal(&env, new_threshold)
+        Self::set_threshold_internal(&env, new_threshold)
     }
 
-    #[cfg(test)]
     pub fn test_only_add_signer(env: Env, signer: Address) -> Result<(), GovernanceError> {
-        add_signer_internal(&env, signer)
+        Self::add_signer_internal(&env, signer)
     }
 
-    #[cfg(test)]
     pub fn test_only_remove_signer(env: Env, signer: Address) -> Result<(), GovernanceError> {
-        remove_signer_internal(&env, signer)
+        Self::remove_signer_internal(&env, signer)
     }
 }
 
