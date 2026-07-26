@@ -6269,7 +6269,7 @@ impl FluxoraStream {
         // Find starting position (inclusive cursor semantics — mirrors
         // get_recipient_streams_paginated).
         let start_idx = if cursor == 0 {
-            0usize
+            0u32
         } else {
             match streams.binary_search(cursor) {
                 Ok(pos) => pos,  // start AT the cursor stream (inclusive)
@@ -6277,14 +6277,12 @@ impl FluxoraStream {
             }
         };
 
-        let end_idx = ((start_idx as u32).saturating_add(effective_limit)).min(total as u32);
+        let end_idx = (start_idx.saturating_add(effective_limit)).min(total as u32);
 
-        // Determine next_cursor: the first stream ID NOT returned on this page.
-        let next_cursor = if (end_idx as usize) < total as usize {
-            streams.get(end_idx).unwrap()
-        } else {
-            0u64
-        };
+        let mut next_cursor = 0u64;
+        if (end_idx as usize) < total as usize {
+            next_cursor = streams.get(end_idx).unwrap();
+        }
 
         let now = env.ledger().timestamp();
         let mut underfunded_count: u32 = 0;
@@ -6292,8 +6290,8 @@ impl FluxoraStream {
         let mut healthy_count: u32 = 0;
         let mut page_stream_ids = soroban_sdk::Vec::new(&env);
 
-        for i in start_idx..end_idx as usize {
-            let stream_id = streams.get(i as u32).unwrap();
+        for i in start_idx..end_idx {
+            let stream_id = streams.get(i).unwrap();
             page_stream_ids.push_back(stream_id);
 
             // Load the stream. If it was removed between index write and query
