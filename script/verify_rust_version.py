@@ -13,15 +13,42 @@ from typing import Any
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - Python < 3.11 fallback
-    import tomli as tomllib  # type: ignore[no-redef]
+    try:
+        import tomli as tomllib  # type: ignore[no-redef]
+    except ModuleNotFoundError:
+        tomllib = None  # Fallback parser for environments without tomli
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TOOLCHAIN_FILE = REPO_ROOT / "rust-toolchain.toml"
 
 
+def _parse_toml_simple(text: str) -> dict[str, Any]:
+    toolchain: dict[str, Any] = {}
+    current_section = None
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            current_section = line[1:-1].strip()
+        elif "=" in line and current_section == "toolchain":
+            key, val = line.split("=", 1)
+            key = key.strip()
+            val = val.strip()
+            if val.startswith('"') and val.endswith('"'):
+                val = val[1:-1]
+            elif val.startswith("[") and val.endswith("]"):
+                val = re.findall(r'"([^"]*)"', val)
+            toolchain[key] = val
+    return {"toolchain": toolchain}
+
+
 def _load_toolchain(toolchain_file: Path) -> dict[str, Any]:
-    return tomllib.loads(toolchain_file.read_text(encoding="utf-8"))
+    content = toolchain_file.read_text(encoding="utf-8")
+    if tomllib is not None:
+        return tomllib.loads(content)
+    return _parse_toml_simple(content)
 
 
 def pinned_channel(toolchain_file: Path = TOOLCHAIN_FILE) -> str:

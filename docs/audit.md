@@ -11,6 +11,7 @@ The public entrypoint table below is kept in sync with every `pub fn` on the `Fl
 | Entrypoint | Parameters | Return type | Authorization | Description |
 | --- | --- | --- | --- | --- |
 | `accept_recipient_update` | `env: Env`, `stream_id: u64` | — | Current recipient | Finalize a pending recipient rotation proposed by the sender. |
+| `accept_stream_offer` | `env: Env`, `offer_id: u64` | `u64` | Recipient | Accept a pending stream offer and activate it. |
 | `batch_withdraw` | `env: Env`, `recipient: Address`, `stream_ids: Vec<u64>` | `Vec<BatchWithdrawResult>` | Recipient | Withdraw accrued tokens from multiple streams atomically; duplicate IDs revert the batch. |
 | `batch_withdraw_to` | `env: Env`, `recipient: Address`, `withdrawals: Vec<WithdrawToParam>` | `Vec<BatchWithdrawResult>` | Recipient | Batch withdraw with per-stream destination addresses; recipient auth once per batch. |
 | `bulk_cancel_streams` | `env: Env`, `sender: Address`, `stream_ids: Vec<u64>` | — | Sender | Atomically cancel multiple owned streams and refund aggregate unstreamed balance. |
@@ -19,21 +20,26 @@ The public entrypoint table below is kept in sync with every `pub fn` on the `Fl
 | `cancel_recipient_update` | `env: Env`, `stream_id: u64` | — | Sender | Cancel a pending recipient rotation before acceptance. |
 | `cancel_stream` | `env: Env`, `stream_id: u64` | — | Sender | Refund unstreamed tokens to sender; freeze accrual at cancellation time. Active or Paused only. |
 | `cancel_stream_as_admin` | `env: Env`, `stream_id: u64` | — | Admin | Same cancellation semantics as `cancel_stream` with admin authorization. |
+| `cancel_stream_offer` | `env: Env`, `offer_id: u64` | — | Sender | Cancel a pending stream offer and refund deposit to sender. |
 | `clone_stream` | `env: Env`, `stream_id: u64`, `new_recipient: Address`, `start_time: u64`, `end_time: u64`, `deposit: i128`, `force: bool` | `u64` | Source stream sender | Create a new stream copying rate/cliff offset from an existing stream. |
 | `close_cancelled_stream` | `env: Env`, `stream_id: u64` | — | Anyone | Permissionless storage cleanup for Cancelled streams with zero claimable balance. |
 | `close_completed_stream` | `env: Env`, `stream_id: u64` | — | Anyone | Permissionless storage cleanup for Completed streams. |
-| `create_stream` | `env: Env`, `sender: Address`, `recipient: Address`, `deposit_amount: i128`, `rate_per_second: i128`, `start_time: u64`, `cliff_time: u64`, `end_time: u64`, `withdraw_dust_threshold: i128`, `memo: Option<Bytes>`, `kind: StreamKind` | `u64` | Sender | Create a stream, pull deposit into the contract, return new stream ID. |
+| `create_pooled_stream` | `env: Env`, `sender: Address`, `recipients: Vec<(Address, u32)>`, `deposit_amount: i128`, `rate_per_second: i128`, `start_time: u64`, `cliff_time: u64`, `end_time: u64`, `withdraw_dust_threshold: i128`, `memo: Option<Bytes>`, `kind: StreamKind` | `u64` | Sender | Create a multi-recipient pooled stream. |
+| `create_stream` | `env: Env`, `sender: Address`, `params: CreateStreamParams` | `u64` | Sender | Create a stream, pull deposit into the contract, return new stream ID. |
 | `create_stream_from_template` | `env: Env`, `sender: Address`, `template_id: u64`, `recipient: Address`, `deposit_amount: i128`, `rate_per_second: i128`, `withdraw_dust_threshold: i128`, `memo: Option<Bytes>`, `metadata: Option<Map<Bytes, Bytes>>`, `kind: StreamKind` | `u64` | Sender | Create a stream using a registered schedule template plus caller-funded amounts. |
+| `create_stream_offer` | `env: Env`, `sender: Address`, `params: CreateStreamParams`, `expiry_time: Option<u64>` | `u64` | Sender | Create a pending stream offer. |
 | `create_stream_relative` | `env: Env`, `sender: Address`, `params: CreateStreamRelativeParams` | `u64` | Sender | Create a stream with timing expressed relative to the current ledger timestamp. |
 | `create_streams` | `env: Env`, `sender: Address`, `streams: Vec<CreateStreamParams>` | `Vec<u64>` | Sender | Atomically create multiple streams with a single sender authorization and deposit pull. |
 | `create_streams_partial` | `env: Env`, `sender: Address`, `streams: Vec<CreateStreamParams>` | `Vec<CreateStreamResult>` | Sender | Batch create with per-entry success/failure results instead of all-or-nothing semantics. |
 | `create_streams_relative` | `env: Env`, `sender: Address`, `streams_relative: Vec<CreateStreamRelativeParams>` | `Vec<u64>` | Sender | Batch create using relative timing parameters converted to absolute timestamps. |
 | `decrease_rate_per_second` | `env: Env`, `stream_id: u64`, `new_rate_per_second: i128` | — | Sender | Decrease stream rate and refund excess deposit to sender; Active or Paused only. |
+| `delegate_recipient_share` | `env: Env`, `stream_id: u64`, `delegate: Address`, `share_bps: u32` | — | Recipient | Delegate a percentage share of stream yield to another address. |
 | `delegated_withdraw` | `env: Env`, `stream_id: u64`, `relayer: Address`, `recipient_public_key: BytesN<32>`, `nonce: u64`, `deadline: u64`, `expected_minimum_amount: i128`, `signature: BytesN<64>` | `i128` | Relayer + ed25519 sig from recipient | Withdraw on behalf of recipient; signature commits to stream, nonce, deadline, and minimum amount. |
 | `delete_stream_template` | `env: Env`, `owner: Address`, `template_id: u64` | — | Template owner | Delete a schedule template registered by the caller. |
 | `extend_stream_end_time` | `env: Env`, `stream_id: u64`, `new_end_time: u64` | — | Sender | Increase `end_time`; existing deposit must cover extended duration. Active or Paused only. |
 | `get_auto_claim_destination` | `env: Env`, `stream_id: u64` | `Option<Address>` | None (view) | Return the permissionless auto-claim destination registered by the recipient, if any. |
 | `get_auto_claim_status` | `env: Env`, `stream_id: u64` | `AutoClaimStatus` | None (view) | Return whether auto-claim is configured and currently triggerable for the stream. |
+| `get_auto_renew` | `env: Env`, `stream_id: u64` | `bool` | None (view) | Return whether auto-renew is enabled for a stream. |
 | `get_claimable_at` | `env: Env`, `stream_id: u64`, `timestamp: u64` | `i128` | None (view) | Preview withdrawable amount at an arbitrary timestamp without mutating state. |
 | `get_config` | `env: Env` | `Config` | None (view) | Return token and admin addresses from instance storage. |
 | `get_delegated_nonce` | `env: Env`, `recipient: Address` | `u64` | None (view) | Return current replay-protection nonce for delegated withdrawals. |
@@ -44,13 +50,16 @@ The public entrypoint table below is kept in sync with every `pub fn` on the `Fl
 | `get_paused_stream_count` | `env: Env` | `u64` | None (view) | Return count of streams currently in Paused status. |
 | `get_pending_recipient_update` | `env: Env`, `stream_id: u64` | `Option<PendingRecipientUpdate>` | None (view) | Return a pending recipient rotation awaiting acceptance, if any. |
 | `get_protocol_fees_accrued` | `env: Env` | `i128` | None (view) | Return cumulative keeper/protocol fees collected by the contract. |
+| `get_recipient_pending_offers` | `env: Env`, `recipient: Address` | `Vec<u64>` | None (view) | Return pending stream offer IDs for a recipient. |
 | `get_recipient_stream_count` | `env: Env`, `recipient: Address` | `u64` | None (view) | Return number of active stream IDs indexed for a recipient. |
 | `get_recipient_streams` | `env: Env`, `recipient: Address` | `Vec<u64>` | None (view) | Return all stream IDs for a recipient (bounded for large portfolios). |
 | `get_recipient_streams_paginated` | `env: Env`, `recipient: Address`, `cursor: u64`, `limit: u32` | `Page` | None (view) | Cursor-paginated recipient stream export capped at `RECIPIENT_STREAMS_PAGE_LIMIT`. |
+| `get_sender_portfolio_health` | `env: Env`, `sender: Address` | `PortfolioHealth` | None (view) | Return portfolio health metrics for a sender. |
 | `get_stream_count` | `env: Env` | `u64` | None (view) | Return total streams created (`NextStreamId` counter). |
 | `get_stream_health` | `env: Env`, `stream_id: u64` | `StreamHealth` | None (view) | Return underfunding and remaining-balance health metrics for a stream. |
 | `get_stream_memo` | `env: Env`, `stream_id: u64` | `Option<Bytes>` | None (view) | Return immutable memo bytes attached at stream creation. |
 | `get_stream_metadata` | `env: Env`, `stream_id: u64` | `Option<Map<Bytes, Bytes>>` | None (view) | Return immutable metadata map attached at stream creation. |
+| `get_stream_offer` | `env: Env`, `offer_id: u64` | `StreamOffer` | None (view) | Read pending stream offer state. |
 | `get_stream_state` | `env: Env`, `stream_id: u64` | `Stream` | None (view) | Return full on-chain stream state. |
 | `get_stream_template` | `env: Env`, `template_id: u64` | `StreamScheduleTemplate` | None (view) | Read a registered schedule template by ID. |
 | `get_streams_by_id_range` | `env: Env`, `start_id: u64`, `end_id: u64`, `limit: u64` | `Vec<Stream>` | None (view) | Paginated export of streams in an ID range; capped at `MAX_PAGE_SIZE`. |
@@ -64,9 +73,12 @@ The public entrypoint table below is kept in sync with every `pub fn` on the `Fl
 | `pause_stream` | `env: Env`, `stream_id: u64`, `reason: PauseReason` | — | Sender | Set stream status to Paused; Active streams only. |
 | `pause_stream_as_admin` | `env: Env`, `stream_id: u64`, `reason: PauseReason` | — | Admin | Admin override to pause any Active stream. |
 | `reclaim_expired_id_reservation` | `env: Env`, `holder: Address` | — | Anyone | Permissionlessly release an expired ID reservation and reclaim counter space. |
+| `reject_stream_offer` | `env: Env`, `offer_id: u64` | — | Recipient | Reject a pending stream offer and return deposit to sender. |
 | `register_stream_template` | `env: Env`, `owner: Address`, `start_delay: u64`, `cliff_delay: u64`, `duration: u64` | `u64` | Owner | Register a reusable relative schedule template; subject to per-owner and global caps. |
 | `release_id_reservation` | `env: Env`, `caller: Address` | — | Reservation holder | Voluntarily abandon an unconsumed ID reservation. |
+| `renew_stream` | `env: Env`, `stream_id: u64` | `u64` | Sender | Renew an eligible stream. |
 | `reserve_stream_ids` | `env: Env`, `caller: Address`, `count: u32`, `expiry: Option<u64>` | `Vec<u64>` | Caller | Pre-allocate contiguous stream IDs for off-chain orchestration. |
+| `set_auto_renew` | `env: Env`, `stream_id: u64`, `enabled: bool` | — | Recipient | Opt in or out of stream auto-renewal. |
 | `resume_protocol` | `env: Env`, `admin: Address` | — | Admin | Resume protocol-level stream creation and clear pause audit trail. |
 | `resume_stream` | `env: Env`, `stream_id: u64` | — | Sender | Set stream status to Active; Paused streams only. |
 | `resume_stream_as_admin` | `env: Env`, `stream_id: u64` | — | Admin | Admin override to resume any Paused stream. |
@@ -79,13 +91,16 @@ The public entrypoint table below is kept in sync with every `pub fn` on the `Fl
 | `shorten_stream_end_time` | `env: Env`, `stream_id: u64`, `new_end_time: u64` | — | Sender | Reduce `end_time` and refund unstreamed tokens to sender; Active or Paused only. |
 | `sweep_excess` | `env: Env`, `recipient: Address` | `i128` | Admin | Recover token balance exceeding tracked liabilities to an admin-chosen address. |
 | `top_up_stream` | `env: Env`, `stream_id: u64`, `funder: Address`, `amount: i128` | — | Funder | Pull additional tokens into stream deposit; Active or Paused only. |
+| `transfer_claim_ownership` | `env: Env`, `stream_id: u64`, `new_owner: Address` | — | Claim Owner | Transfer claim ownership of a stream. |
 | `trigger_auto_claim` | `env: Env`, `stream_id: u64` | `i128` | Anyone | Permissionlessly withdraw to recipient's registered auto-claim destination. |
 | `update_rate` | `env: Env`, `stream_id: u64`, `new_rate_per_second: i128`, `caller: Address` | — | Sender or admin | Update stream rate without deposit adjustment; caller must be sender or admin. |
 | `update_rate_per_second` | `env: Env`, `stream_id: u64`, `new_rate_per_second: i128` | — | Sender | Increase rate forward-only; deposit must cover new rate × duration. |
 | `update_recipient` | `env: Env`, `stream_id: u64`, `new_recipient: Address` | — | Sender | Propose recipient rotation; finalized by `accept_recipient_update`. |
 | `version` | `env: Env` | `u32` | None (view) | Return compile-time contract version (`CONTRACT_VERSION`). |
 | `withdraw` | `env: Env`, `stream_id: u64` | `i128` | Recipient | Transfer accrued-but-not-withdrawn tokens to recipient; may set Completed. |
+| `withdraw_from_pool` | `env: Env`, `stream_id: u64`, `recipient: Address` | `i128` | Recipient | Withdraw accrued yield from a pooled stream. |
 | `withdraw_to` | `env: Env`, `stream_id: u64`, `destination: Address` | `i128` | Recipient | Withdraw accrued tokens to a specified destination address. |
+| `witnessed_cancel_stream` | `env: Env`, `stream_id: u64`, `witness_signature: BytesN<64>` | — | Witness | Cancel stream via signed attestation from compliance witness. |
 
 ---
 

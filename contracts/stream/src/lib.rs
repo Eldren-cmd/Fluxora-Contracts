@@ -431,19 +431,19 @@ pub enum ContractError {
     /// Rate limit exceeded for withdrawals.
     WithdrawalTooFrequent = 33,
     /// Keeper attempted to close a stream before the grace period elapsed.
-    KeeperGracePeriodNotElapsed = 34,
+    KeeperGracePeriodNotElapsed = 35,
     /// Withdraw dust threshold is negative or exceeds deposit amount.
-    InvalidDustThreshold = 35,
+    InvalidDustThreshold = 36,
     /// The sender cannot fund an auto-renewal with the available balance and allowance.
-    AutoRenewFundingUnavailable = 36,
+    AutoRenewFundingUnavailable = 37,
     /// Stream offer not found (accepted, rejected, cancelled, or never existed).
-    OfferNotFound = 37,
+    OfferNotFound = 38,
     /// Stream offer has expired (`current_time > offer.expiry_time`).
-    OfferExpired = 38,
+    OfferExpired = 39,
     /// Caller is not the intended recipient of this offer.
-    OfferWrongRecipient = 39,
+    OfferWrongRecipient = 40,
     /// Caller is not the sender who created this offer.
-    OfferWrongSender = 40,
+    OfferWrongSender = 41,
 }
 
 #[contracttype]

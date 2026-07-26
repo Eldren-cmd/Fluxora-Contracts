@@ -181,3 +181,18 @@ def test_rustc_version_falls_back_to_invoking_real_rustc(monkeypatch):
 )
 def test_crate_rust_version_matches_pinned_toolchain(manifest):
     assert _crate_rust_version(manifest) == verify_rust_version.pinned_channel(TOOLCHAIN)
+
+
+def test_parse_toml_simple_fallback():
+    content = '[toolchain]\nchannel = "1.94.1"\ncomponents = ["rustfmt", "clippy"]\ntargets = ["wasm32-unknown-unknown"]\n'
+    parsed = verify_rust_version._parse_toml_simple(content)
+    assert parsed["toolchain"]["channel"] == "1.94.1"
+    assert parsed["toolchain"]["components"] == ["rustfmt", "clippy"]
+    assert parsed["toolchain"]["targets"] == ["wasm32-unknown-unknown"]
+
+
+def test_load_toolchain_fallback_when_tomllib_none(monkeypatch):
+    monkeypatch.setattr(verify_rust_version, "tomllib", None)
+    data = verify_rust_version._load_toolchain(TOOLCHAIN)
+    assert data["toolchain"]["channel"] == "1.94.1"
+
