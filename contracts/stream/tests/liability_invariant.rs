@@ -119,6 +119,10 @@ impl TestContext {
         self.token().balance(&self.contract_id)
     }
 
+    fn sender_balance(&self) -> i128 {
+        self.token().balance(&self.sender)
+    }
+
     fn create_stream(
         &self,
         deposit: i128,
