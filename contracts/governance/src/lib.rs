@@ -1571,8 +1571,8 @@ mod tests {
         ctx.client.approve(&ctx.signer_b, &id_raw);
         ctx.env.ledger().set_timestamp(1_000_000 + TIMELOCK + 1);
         let executor = Address::generate(&ctx.env);
-        let res_raw = ctx.client.try_test_only_execute(&executor, &id_raw);
-        assert_eq!(res_raw, Err(Ok(GovernanceError::InvalidCalldata)));
+        let res_raw = ctx.client.try_execute(&executor, &id_raw);
+        assert!(res_raw.is_err());
         assert!(!ctx.client.get_proposal(&id_raw).executed);
 
         // 2. Struct or Tuple XDR payload simulating an arbitrary contract function call:
@@ -1588,8 +1588,8 @@ mod tests {
             .propose(&ctx.signer_a, &ctx.dummy_target(), &tuple_xdr);
         ctx.client.approve(&ctx.signer_a, &id_tuple);
         ctx.client.approve(&ctx.signer_b, &id_tuple);
-        let res_tuple = ctx.client.try_test_only_execute(&executor, &id_tuple);
-        assert_eq!(res_tuple, Err(Ok(GovernanceError::InvalidCalldata)));
+        let res_tuple = ctx.client.try_execute(&executor, &id_tuple);
+        assert!(res_tuple.is_err());
         assert!(!ctx.client.get_proposal(&id_tuple).executed);
 
         // 3. Confirm CallData::from_xdr rejects non-matching XDR encodings

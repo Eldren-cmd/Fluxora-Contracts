@@ -14,7 +14,7 @@ use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Add
 use storage::*;
 use token_check::verify_token_behavior;
 use types::{ClaimOwnershipTransferred, RecipientShareDelegated, MAX_POOL_RECIPIENTS};
-pub use reject_duplicate_ids;
+
 
 // ---------------------------------------------------------------------------
 // TTL constants
