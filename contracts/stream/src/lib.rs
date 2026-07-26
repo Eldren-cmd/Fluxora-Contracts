@@ -444,7 +444,6 @@ pub enum ContractError {
     ReservationNotFound = 24,
     ReservationNotExpirable = 25,
     ReservationStillActive = 26,
-    ReservationAlreadyActive = 41,
     /// Ledger-backed accrual observed a timestamp lower than the previous accrual timestamp.
     ClockRegression = 27,
     /// Stream kind is not supported.
@@ -8391,7 +8390,7 @@ impl FluxoraStream {
     /// # Errors
     /// - `ReservationCountZero` (17): `count` is 0
     /// - `ReservationLimitExceeded` (18): `count > MAX_ID_RESERVATION`
-    /// - `ReservationAlreadyActive` (28): `caller` already has an active reservation
+    /// - `ReservationAlreadyActive` (34): `caller` already has an active reservation
     ///
     /// # Security
     /// - `count` is capped at `MAX_ID_RESERVATION = 100` to prevent counter-inflation attacks.
