@@ -194,7 +194,7 @@ test = false
 [[test]]
 name = "event_snapshots_suite"
 path = "tests/event_snapshots_suite.rs"
-test = false
+test = true
 
 [[test]]
 name = "governance_integration"
