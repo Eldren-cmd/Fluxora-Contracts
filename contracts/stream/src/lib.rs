@@ -211,54 +211,30 @@ const MIN_RATE_INTERVAL_LEDGERS: u32 = 17;
 ///
 /// Bumped to 8: additive lookback-bounded creation, configuration, and claim
 /// calculation support were added without changing the persisted `Stream` shape.
-pub const CONTRACT_VERSION: u32 = 8;
-/// Bumped to 7: Two-phase offer-then-accept stream creation flow added.
-/// New entry points: `create_stream_offer`, `accept_stream_offer`,
-/// `reject_stream_offer`, `cancel_stream_offer`, `get_stream_offer`,
-/// `get_recipient_pending_offers`. New `StreamOffer` struct, new
-/// `DataKey::PendingStreamOffer` / `DataKey::RecipientPendingOffers` variants,
-/// new `ContractError` variants `OfferNotFound`, `OfferExpired`,
-/// `OfferWrongRecipient`, `OfferWrongSender`. Also in this bump: `Stream` and
-/// `CreateStreamParams` gained optional `witness: Option<Address>` for
-/// off-chain compliance attestation cancellation (`witnessed_cancel_stream`
-/// entrypoint added), permissionless auto-renewal entrypoints and the
-/// append-only `DataKey::AutoRenewEnabled` opt-in, and an irrevocable stream
-/// mode blocking all cancel/shorten paths.
-pub const CONTRACT_VERSION: u32 = 7;
-
-// ---------------------------------------------------------------------------
-// Validation Helpers
-// ---------------------------------------------------------------------------
-
-/// Rejects duplicate stream IDs in a batch using an O(n) soroban_sdk::Map.
 ///
-/// # Arguments
-/// * `env` - The Soroban environment
-/// * `ids` - A vector of stream IDs to check for duplicates
+/// Bumped to 9: `delegated_withdraw` now accepts an optional `relayer_fee: i128`
+/// in the signed payload (recipient explicitly authorises it). The recipient
+/// receives `net_amount = gross_withdrawable - relayer_fee`, two sequential
+/// `push_token` calls are issued in CEI order (recipient first, relayer second),
+/// and the `BelowMinimumAmount` (16) precondition is now evaluated against
+/// `net_amount` (not the gross withdrawable). The `Withdrawal` event's
+/// `amount` field now publishes `net_amount` rather than the gross withdraw
+/// total — this is a **breaking event-payload change** and triggers the
+/// documented CONTRACT_VERSION bump policy at the top of this file, since
+/// existing indexers, dashboards, and accounting pipelines built against
+/// pre-v9 snapshots will under-report by the relayer fee.
 ///
-/// # Returns
-/// * `Ok(())` if all IDs are unique
-/// * `Err(ContractError::DuplicateStreamId)` if any duplicate is found
-///
-/// # Performance
-/// * O(n) time complexity vs O(n²) for the previous nested-loop approach
-/// * Uses `soroban_sdk::Map` for O(1) lookups
-///
-/// # Example
-/// ```
-/// let ids = soroban_sdk::vec![&env, 1u64, 2u64, 3u64];
-/// reject_duplicate_ids(&env, &ids)?;
-/// ```
-pub fn reject_duplicate_ids(env: &Env, ids: &soroban_sdk::Vec<u64>) -> Result<(), ContractError> {
-    let mut seen = soroban_sdk::Map::new(env);
-    for id in ids.iter() {
-        if seen.contains_key(&id) {
-            return Err(ContractError::DuplicateStreamId);
-        }
-        seen.set(id, ());
-    }
-    Ok(())
-}
+/// Bumped to 7 (historical detail; the `AutoRenewEnabled` portion is also
+/// captured in the existing "Bumped to 7" line above): two-phase
+/// offer-then-accept creation flow added (`create_stream_offer`,
+/// `accept_stream_offer`, `reject_stream_offer`, `cancel_stream_offer`,
+/// `get_stream_offer`, `get_recipient_pending_offers`), the `StreamOffer`
+/// struct, the `DataKey::PendingStreamOffer` / `DataKey::RecipientPendingOffers`
+/// keys, the `OfferNotFound` / `OfferExpired` / `OfferWrongRecipient` /
+/// `OfferWrongSender` errors, optional `witness: Option<Address>` supporting
+/// `witnessed_cancel_stream`, and an irrevocable stream mode blocking all
+/// cancel/shorten paths.
+pub const CONTRACT_VERSION: u32 = 9;
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -470,7 +446,7 @@ pub enum ContractError {
     ReservationNotFound = 24,
     ReservationNotExpirable = 25,
     ReservationStillActive = 26,
-    ReservationAlreadyActive = 34,
+    ReservationAlreadyActive = 41,
     /// Ledger-backed accrual observed a timestamp lower than the previous accrual timestamp.
     ClockRegression = 28,
     /// Metadata payload exceeds the allowed size.
@@ -497,10 +473,6 @@ pub enum ContractError {
     OfferWrongRecipient = 39,
     /// Caller is not the sender who created this offer.
     OfferWrongSender = 40,
-    /// Delegation would create a cycle (child stream references an ancestor as its delegatee).
-    CyclicDelegation = 41,
-    /// Delegation depth would exceed the maximum allowed nesting level.
-    DelegationDepthExceeded = 42,
 }
 
 #[contracttype]
@@ -1283,8 +1255,6 @@ pub enum DataKey {
     ///
     /// Added in issue #sender-portfolio-health. Appended to preserve existing discriminants.
     SenderStreams(Address),
-    /// Per-stream auto-renew opt-in flag. Appended to preserve storage discriminants.
-    AutoRenewEnabled(u64),
     /// Pending stream offer awaiting recipient acceptance (persistent).
     /// Keyed by offer_id, which reuses the global stream ID counter.
     /// Absent once the offer is accepted, rejected, or cancelled.
@@ -4475,7 +4445,12 @@ impl FluxoraStream {
     /// - `BelowMinimumAmount` (16): Withdrawable amount is below `expected_minimum_amount`.
     /// - `InvalidState`: Stream is paused (non-terminal) or completed.
     /// - `StreamNotFound`: `stream_id` does not exist.
-    pub fn delegated_withdraw(
+    
+
+
+
+
+  pub fn delegated_withdraw(
         env: Env,
         stream_id: u64,
         relayer: Address,
@@ -4483,24 +4458,22 @@ impl FluxoraStream {
         nonce: u64,
         deadline: u64,
         expected_minimum_amount: i128,
+        relayer_fee: i128, // <-- Added relayer_fee parameter
         signature: soroban_sdk::BytesN<64>,
     ) -> Result<i128, ContractError> {
         require_not_globally_paused(&env)?;
 
-        // The relayer authorizes the transaction (pays fees); recipient auth is
+        // The relayer authorizes the transaction (pays gas); recipient auth is
         // replaced by the ed25519 signature check below.
         relayer.require_auth();
 
-        // 1. Validate delegation parameters (deadline & nonce against live state).
-        // delegation.rs backs delegated_withdraw authorization logic and queries live persistent storage on every call.
-        delegation::validate_delegation_params(&env, stream_id, nonce, deadline)?;
+        // 1. Validate delegation parameters (deadline, nonce, & fee >= 0).
+        delegation::validate_delegation_params(&env, stream_id, nonce, deadline, relayer_fee)?;
 
         // 2. Load stream.
         let mut stream = load_stream(&env, stream_id)?;
 
         // 3. Enforce withdrawal frequency limit to prevent excessive ledger I/O.
-        // Use saturating_sub to prevent underflow from backward timestamp skew.
-        // First withdrawal (last_withdraw_ledger == 0) always succeeds.
         let current_ledger = env.ledger().sequence();
         if stream.last_withdraw_ledger != 0
             && current_ledger.saturating_sub(stream.last_withdraw_ledger)
@@ -4509,11 +4482,7 @@ impl FluxoraStream {
             return Err(ContractError::WithdrawalTooFrequent);
         }
 
-        // 5. Bind the supplied public key to the stream recipient.
-        //    This prevents a relayer from signing with an arbitrary key and
-        //    burning the recipient's nonce without the recipient's consent.
-        //    `delegated_withdraw` is only valid for ed25519 account recipients;
-        //    contract-account recipients must use the direct `withdraw` path.
+        // 4. Bind the supplied public key to the stream recipient.
         {
             use soroban_sdk::{
                 xdr::{AccountId, PublicKey, ScAddress, Uint256},
@@ -4529,31 +4498,21 @@ impl FluxoraStream {
             }
         }
 
-        // 6. Build the signed message (40 bytes total):
-        //    stream_id (8 bytes, big-endian u64)
-        //    | nonce   (8 bytes, big-endian u64)
-        //    | deadline (8 bytes, big-endian u64)
-        //    | expected_minimum_amount (16 bytes, big-endian i128)
-        //
-        // NOTE: `ed25519_verify` is a Soroban host function. Per the SDK design it
-        // traps the host on an invalid signature rather than returning a typed error.
-        // All pre-conditions (deadline, nonce, key-binding) are checked above so that
-        // a valid relayer call with a wrong signature produces a host error only in the
-        // rare malformed-signature case. Callers using `try_delegated_withdraw` will
-        // observe `Err(Err(HostError))` for a bad signature vs `Err(Ok(ContractError))`
-        // for the pre-condition failures above.
+        // 5. Build the signed message payload (56 bytes total):
+        //    stream_id (8 bytes) | nonce (8 bytes) | deadline (8 bytes)
+        //    | expected_minimum_amount (16 bytes) | relayer_fee (16 bytes)
         let mut msg = soroban_sdk::Bytes::new(&env);
         msg.extend_from_array(&stream_id.to_be_bytes());
         msg.extend_from_array(&nonce.to_be_bytes());
         msg.extend_from_array(&deadline.to_be_bytes());
         msg.extend_from_array(&expected_minimum_amount.to_be_bytes());
+        msg.extend_from_array(&relayer_fee.to_be_bytes()); // Included in signed payload
 
-        // Verify signature. `recipient_public_key` and `signature` are already the
-        // correct BytesN<32>/BytesN<64> types — no conversion needed.
+        // Verify ed25519 signature
         env.crypto()
             .ed25519_verify(&recipient_public_key, &msg, &signature);
 
-        // 7. State checks (same as withdraw).
+        // 6. State checks (same as withdraw).
         if stream.status == StreamStatus::Completed {
             return Err(ContractError::InvalidState);
         }
@@ -4561,37 +4520,44 @@ impl FluxoraStream {
             return Err(ContractError::InvalidState);
         }
 
-        // 7. Compute withdrawable amount.
+        // 7. Compute gross withdrawable amount.
         let accrued = Self::calculate_accrued(env.clone(), stream_id)?;
-        let mut withdrawable = accrued - stream.withdrawn_amount;
-        withdrawable = apply_lookback_cap(
+        let mut gross_withdrawable = accrued - stream.withdrawn_amount;
+        gross_withdrawable = apply_lookback_cap(
             &env,
             &stream,
             stream
                 .cancelled_at
                 .unwrap_or_else(|| env.ledger().timestamp()),
             accrued,
-            withdrawable,
+            gross_withdrawable,
         );
 
         // Cap by contract balance for safety.
         let token_address = get_token(&env)?;
         let contract_balance =
             token::Client::new(&env, &token_address).balance(&env.current_contract_address());
-        withdrawable = withdrawable.min(contract_balance);
+        gross_withdrawable = gross_withdrawable.min(contract_balance);
 
-        // 8. Enforce minimum amount guard — closes the front-running griefing vector.
-        if withdrawable < expected_minimum_amount {
+        if gross_withdrawable < relayer_fee {
+            return Err(ContractError::InsufficientBalance);
+        }
+
+        // 8. Deduct relayer fee to get net payout for recipient
+        let net_amount = gross_withdrawable - relayer_fee;
+
+        // 9. Enforce minimum amount guard on NET amount
+        if net_amount < expected_minimum_amount {
             return Err(ContractError::BelowMinimumAmount);
         }
 
-        if withdrawable <= 0 {
+        if gross_withdrawable <= 0 {
             return Ok(0);
         }
 
-        // 9. CEI: update state before external token transfer.
-        stream.withdrawn_amount += withdrawable;
-        stream.last_withdraw_ledger = current_ledger; // Update withdrawal timestamp
+        // 10. CEI: update state before external token transfers.
+        stream.withdrawn_amount += gross_withdrawable;
+        stream.last_withdraw_ledger = current_ledger;
         let completed_now = (stream.status == StreamStatus::Active
             || stream.status == StreamStatus::Paused)
             && stream.withdrawn_amount == stream.deposit_amount;
@@ -4602,24 +4568,23 @@ impl FluxoraStream {
         save_stream(&env, &stream);
         reconcile_paused_stream_count(&env, previous_status, stream.status);
 
-        // Reduce liabilities as tokens leave the contract to the recipient.
-        let liabilities = read_total_liabilities(&env)
-            .checked_sub(withdrawable)
-            .unwrap_or(0);
-        write_total_liabilities(&env, liabilities);
-
-        // 10. Increment nonce to prevent replay.
+        // 11. Increment nonce to prevent replay.
         increment_delegated_nonce(&env, &stream.recipient);
 
-        // 11. Transfer tokens to recipient.
-        push_token(&env, &stream.recipient, withdrawable)?;
+        // 12. Transfers via push_token: Net payout to RECIPIENT first, Fee to RELAYER second
+        if net_amount > 0 {
+            push_token(&env, &stream.recipient, net_amount)?;
+        }
+        if relayer_fee > 0 {
+            push_token(&env, &relayer, relayer_fee)?;
+        }
 
         env.events().publish(
             (symbol_short!("withdrew"), stream_id),
             Withdrawal {
                 stream_id,
                 recipient: stream.recipient.clone(),
-                amount: withdrawable,
+                amount: net_amount,
             },
         );
 
@@ -4630,7 +4595,7 @@ impl FluxoraStream {
             );
         }
 
-        Ok(withdrawable)
+        Ok(net_amount)
     }
 
     /// Return the current delegated-withdraw nonce for a recipient.

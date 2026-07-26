@@ -38,6 +38,7 @@ treasury tooling) can use this reference to handle protocol exceptions correctly
 | `ReservationNotFound` | 24 | No ID reservation exists for the specified holder | `release_id_reservation`, `reclaim_expired_id_reservation` |
 | `ReservationStillActive` | 25 | Reservation has not yet expired and cannot be reclaimed | `reclaim_expired_id_reservation` |
 | `ReservationNotExpirable` | 26 | Reservation has no expiry and cannot be reclaimed | `reclaim_expired_id_reservation` |
+| `ReservationAlreadyActive` | 41 | A reservation is already active for this caller | `reserve_stream_ids` |
 | `PauseReasonTooLong` | 27 | Pause reason string exceeds `MAX_PAUSE_REASON_BYTES` | `pause_protocol` |
 | `ClockRegression` | 28 | Ledger-backed accrual observed a timestamp lower than the previous accrual timestamp | `calculate_accrued`, `get_withdrawable`, `withdraw`, `withdraw_to`, `batch_withdraw`, `batch_withdraw_to`, rate changes, `cancel_stream`, auto-claim paths |
 | `MetadataTooLarge` | 29 | Stream metadata exceeds size limits | `create_stream`, `create_streams`, `create_streams_partial` |
@@ -46,12 +47,11 @@ treasury tooling) can use this reference to handle protocol exceptions correctly
 | `WithdrawalTooFrequent` | 33 | Withdrawal attempted before minimum interval elapsed | `withdraw`, `delegated_withdraw`, `batch_withdraw` |
 | `ReservationAlreadyActive` | 34 | A reservation is already active for this caller | `reserve_stream_ids` |
 | `InvalidDustThreshold` | 35 | Withdraw dust threshold is negative or exceeds deposit amount | `create_stream`, `create_streams`, `create_streams_partial`, `create_stream_relative`, `create_stream_from_template` |
-| `AutoRenewFundingUnavailable` | 36 | The sender cannot fund an auto-renewal with the available balance and allowance | `trigger_auto_claim` |
-| `OfferNotFound` | 37 | Stream offer not found (accepted, rejected, cancelled, or never existed) | `accept_stream_offer`, `reject_stream_offer`, `cancel_stream_offer` |
-| `OfferExpired` | 38 | Stream offer has expired (`current_time > offer.expiry_time`) | `accept_stream_offer`, `reject_stream_offer` |
+| `AutoRenewFundingUnavailable` | 36 | The sender cannot fund an auto-renewal with the available balance and allowance | `renew_stream` |
+| `OfferNotFound` | 37 | Stream offer not found (accepted, rejected, cancelled, or never existed) | `accept_stream_offer`, `reject_stream_offer`, `cancel_stream_offer`, `get_stream_offer` |
+| `OfferExpired` | 38 | Stream offer `expiry_time` has passed at acceptance | `accept_stream_offer` |
 | `OfferWrongRecipient` | 39 | Caller is not the intended recipient of this offer | `accept_stream_offer`, `reject_stream_offer` |
-| `OfferWrongSender` | 40 | Caller is not the sender who created this offer | `cancel_stream_offer` |
-| `KeeperGracePeriodNotElapsed` | 41 | Keeper cancellation grace period has not elapsed | `keeper_cancel` |
+| `OfferWrongSender` | 40 | Caller is not the original sender who created this offer | `cancel_stream_offer` |
 
 Non-error enum values used by stream creation and accrual:
 
@@ -733,6 +733,48 @@ match client.try_create_stream(..., &withdraw_dust_threshold, ...) {
 **Integrator Note**: The dust threshold enforces a minimum withdrawable amount to prevent dust accumulation. The threshold must be in the range `[0, deposit_amount]`. When `withdraw_dust_threshold == deposit_amount`, withdrawals are only allowed when the full deposit is withdrawable (e.g., at stream end or after final drain).
 
 ---
+
+### AutoRenewFundingUnavailable (36)
+
+**Definition**: The sender on a stream opted-in to auto-renewal via `set_auto_renew` does not currently have sufficient token balance or allowance to fund a fresh deposit for the renewal.
+
+**Trigger Conditions**:
+
+| Condition | Detection |
+|-----------|-----------|
+| `token.balance(stream.sender) < stream.deposit_amount` | Token client balance read returns less than the required deposit |
+| `token.allowance(stream.sender, contract_address) < stream.deposit_amount` | Token client allowance read returns less than the required deposit |
+
+Either condition causes `renew_stream` to revert before any state mutation or token transfer is attempted, preserving CEI ordering.
+
+**Affected Roles**:
+
+| Role | Can Trigger | Notes |
+|------|------------|-------|
+| Anyone | Yes | `renew_stream` is permissionless once a sender has opted the stream in via `set_auto_renew` |
+| Sender | Yes | Same path; the renewal precondition involves reading the sender's own balance and allowance |
+| Admin | No | Admin cannot pre-fund another sender's renewal balance/allowance through this path |
+
+**Client Action**:
+
+```rust
+match client.try_renew_stream(&stream_id) {
+    Ok(new_stream_id) => { /* success — fresh deposit wired and old stream archived */ }
+    Err(ContractError::AutoRenewFundingUnavailable) => {
+        // The opted-in sender (or topology: anyone triggering the renewal on their behalf)
+        // must refill balance OR increase allowance before retrying.
+        let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+        let balance    = token_client.balance(&stream.sender);
+        let allowance  = token_client.allowance(&stream.sender, &env.current_contract_address());
+        // Notify the sender with the shortfall; expose both numbers for fast UI display.
+    }
+    Err(e) => { /* handle other errors */ }
+}
+```
+
+**Success Semantics**: Returns the newly created `stream_id` from the renewal transaction; the old stream transitions to `Completed` and a `StreamRenewed` event is emitted correlating the two IDs.
+
+**Integrator Note**: This error is **recoverable**. The opt-in survives across failures, so once the sender tops up balance and/or bumps allowance, any caller (including the original sender) can re-invoke `renew_stream` without re-registering the opt-in. Treat surfacing this error to the opted-in sender as a strong signal to surface the current `balance`/`allowance` shortfall inline in the UI; do not auto-retry with exponential backoff because the precondition can only be fixed by an explicit on-chain action by the sender.
 
 ## Previously Panicking Paths (Now Structured Errors)
 

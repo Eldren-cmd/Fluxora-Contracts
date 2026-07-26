@@ -16,8 +16,8 @@ When changing the contract:
 - Update snapshot tests if externally visible behavior changes
 - No behavior change required for doc-only updates
 
-**Entrypoint index (validator):** `accept_recipient_update`, `batch_withdraw_to`, `bulk_cancel_streams`, `bulk_resume_streams_as_admin`, `cancel_recipient_update`, `close_cancelled_stream`, `close_completed_stream`, `compute_keeper_fee_split`, `create_stream_with_lookback`, `delete_stream_template`, `get_auto_renew`, `get_global_emergency_paused`, `get_lookback_window`, `get_paused_stream_count`, `get_pending_recipient_update`, `get_protocol_fees_accrued`, `get_recipient_stream_count`, `get_stream_health`, `get_stream_memo`, `get_stream_template`, `global_resume`, `keeper_cancel`, `renew_stream`, `set_auto_renew`, `set_contract_paused`, `set_global_emergency_paused`, `set_lookback_window`, `version`, `migration_v5_to_v6`, `set_max_rate_per_second`.
-**Entrypoint index (validator):** `accept_recipient_update`, `batch_withdraw_to`, `bulk_cancel_streams`, `bulk_resume_streams_as_admin`, `cancel_recipient_update`, `delete_stream_template`, `get_auto_renew`, `get_global_emergency_paused`, `get_keeper_fee_split`, `get_pending_recipient_update`, `get_recipient_stream_count`, `get_stream_health`, `get_stream_memo`, `get_stream_template`, `global_resume`, `keeper_cancel`, `renew_stream`, `set_auto_renew`, `set_contract_paused`, `set_global_emergency_paused`, `version`, `migration_v5_to_v6`, `set_max_rate_per_second`.
+**Entrypoint index (validator):** `accept_recipient_update`, `batch_withdraw_to`, `bulk_cancel_streams`, `bulk_resume_streams_as_admin`, `cancel_recipient_update`, `close_cancelled_stream`, `close_completed_stream`, `compute_keeper_fee_split`, `create_stream_with_lookback`, `delete_stream_template`, `get_auto_renew`, `get_global_emergency_paused`, `get_lookback_window`, `get_paused_stream_count`, `get_pending_recipient_update`, `get_protocol_fees_accrued`, `get_recipient_stream_count`, `get_stream_health`, `get_stream_memo`, `get_stream_template`, `get_total_liabilities`, `global_resume`, `keeper_cancel`, `renew_stream`, `set_auto_renew`, `set_contract_paused`, `set_global_emergency_paused`, `set_lookback_window`, `version`, `migration_v5_to_v6`, `set_max_rate_per_second`.
+**Entrypoint index (validator):** `accept_recipient_update`, `batch_withdraw_to`, `bulk_cancel_streams`, `bulk_resume_streams_as_admin`, `cancel_recipient_update`, `delete_stream_template`, `get_auto_renew`, `get_global_emergency_paused`, `get_keeper_fee_split`, `get_pending_recipient_update`, `get_recipient_stream_count`, `get_stream_health`, `get_stream_memo`, `get_stream_template`, `get_total_liabilities`, `global_resume`, `keeper_cancel`, `renew_stream`, `set_auto_renew`, `set_contract_paused`, `set_global_emergency_paused`, `version`, `migration_v5_to_v6`, `set_max_rate_per_second`.
 **Entrypoint index (validator):** `accept_recipient_update`, `batch_withdraw_to`, `bulk_cancel_streams`, `bulk_resume_streams_as_admin`, `cancel_recipient_update`, `close_cancelled_stream`, `close_completed_stream`, `compute_keeper_fee_split`, `delete_stream_template`, `get_auto_renew`, `get_global_emergency_paused`, `get_keeper_fee_split`, `get_paused_stream_count`, `get_pending_recipient_update`, `get_protocol_fees_accrued`, `get_recipient_stream_count`, `get_stream_health`, `get_stream_memo`, `get_stream_template`, `get_total_liabilities`, `global_resume`, `keeper_cancel`, `migration_v5_to_v6`, `renew_stream`, `set_auto_renew`, `set_contract_paused`, `set_global_emergency_paused`, `set_max_rate_per_second`, `version`.
 
 ## Externally Visible Assurances
@@ -374,6 +374,7 @@ The `keeper_cancel` entrypoint allows any third-party keeper to cancel an expire
 - The contract does **not** retain a protocol split of this fee. The entire fee is transferred directly to the keeper.
 - The view function `get_protocol_fees_accrued` (added in #623) tracks the cumulative total of keeper fees *paid out* of the contract, rather than an internal sweepable balance.
 - **Accounting Invariant**: The contract's token balance must securely cover all remaining liabilities. Since the keeper fee is transferred entirely to the keeper and leaves the contract, the tracked total in `get_protocol_fees_accrued` is strictly monotone and safely independent of the contract's real-time asset/liability ratio.
+- **Total Liabilities View**: The auth-free view function `get_total_liabilities` returns the sum of every stream's remaining (not-yet-withdrawn) balance, sourced from the instance-stored `DataKey::TotalLiabilities` counter. Integrators can cross-check it against the contract's token balance to confirm solvency: a positive gap represents a healthy buffer above the aggregate outstanding payout obligation; a negative gap would indicate under-collateralisation and warrants operator investigation. This view is read-only, requires no parameters, and recomputes lazily on each call.
 
 ### Clone Semantics
 
@@ -1379,13 +1380,38 @@ message = stream_id            (u64,  8 bytes, big-endian)
         | nonce                (u64,  8 bytes, big-endian)
         | deadline             (u64,  8 bytes, big-endian)
         | expected_minimum_amount (i128, 16 bytes, big-endian)
+        | relayer_fee          (i128, 16 bytes, big-endian)
 ```
 
-Total: 40 bytes.
+Total: 40 bytes (v8) / 56 bytes from `CONTRACT_VERSION = 9` (adds the 16-byte `relayer_fee` row).
 
 #### `expected_minimum_amount` — front-running protection
 
 Without this field, a relayer could delay the transaction until the accrued amount is much smaller than the recipient expected (e.g. after a rate decrease or near stream end), constituting a griefing vector. By committing to a minimum, the call reverts with `BelowMinimumAmount` (16) if `withdrawable < expected_minimum_amount`. Pass `0` to accept any positive amount.
+
+#### `expected_minimum_amount` is evaluated against the recipient's **net** amount (`CONTRACT_VERSION = 9`)
+
+Starting from `CONTRACT_VERSION = 9`, `delegated_withdraw` accepts an optional
+signed `relayer_fee: i128` that the recipient authorises as part of the
+signature payload (16 extra bytes appended in big-endian — see the layout table
+above). The contract computes `gross_withdrawable` and
+`net_amount = gross_withdrawable - relayer_fee`, then enforces
+`expected_minimum_amount <= net_amount` (not `expected_minimum_amount <= gross_withdrawable`).
+
+What this means for integrators:
+
+| Scenario | Pre-v9 semantics (gross) | v9 semantics (net = gross − relayer_fee) |
+|----------|--------------------------|------------------------------------------|
+| `expected_minimum_amount = 10`, accrued `= 100`, `relayer_fee = 5` | success (100 ≥ 10) | success (recipient receives 95, relayer 5) |
+| `expected_minimum_amount = 96`, accrued `= 100`, `relayer_fee = 5` | success (100 ≥ 96) | revert with `BelowMinimumAmount` (16) — recipient expected 96 but only receives 95 |
+| `expected_minimum_amount = 99`, accrued `= 100`, `relayer_fee = 5` | success (100 ≥ 99) | revert with `BelowMinimumAmount` (16) — recipient expected 99, net is 95 |
+| `expected_minimum_amount = 0`, accrued `= 100`, `relayer_fee = 50` | success | success (recipient 50, relayer 50) — `0` still means "any positive net" |
+
+The relayer receives `relayer_fee` only when `gross_withdrawable >= relayer_fee`;
+otherwise the whole call reverts with `BelowMinimumAmount` before any token
+transfer is attempted (CEI: recipient's net is evaluated first, then
+`push_token` to recipient, then `push_token` to relayer — two sequential
+calls inside `delegated_withdraw`, in that order).
 
 #### Nonce — replay protection
 
@@ -2162,80 +2188,7 @@ Withdrawals from a pooled stream are independent. When a recipient calls `withdr
 
 **Rounding:** The calculation uses strict integer math (`checked_mul` followed by `checked_div`), rounding down on remainders to avoid over-withdrawing the pool's deposit.
 
----
 
-## Balance Conservation Invariants (Property-Based Testing)
+## Additional view entrypoints (v9+)
 
-### Overview
-
-The protocol's core financial-safety property is token conservation: no
-operation may create or destroy tokens, and the contract must always hold
-enough balance to cover every outstanding stream liability. The
-operation-sequence space (pause/resume, rate changes, top-ups,
-shorten/extend, cancel, withdraw — in any order, at any time) is too large
-to enumerate by hand, so this property is verified with a dedicated
-property-based test harness rather than unit tests alone.
-
-### Core invariant
-
-```
-sender_balance + recipient_balance + contract_balance == initial_mint
-```
-
-Equivalently, per stream:
-
-```
-contract_balance_for_stream == deposit_amount - withdrawn_amount - refunded_amount
-```
-
-### Test harness: `contracts/stream/tests/balance_conservation.rs`
-
-The harness uses `proptest` to generate randomized sequences of mutating
-operations — `Withdraw`, `TopUp`, `DecreaseRate`, `IncreaseRate`, `Shorten`,
-`Extend`, `Pause`, `Resume`, `Cancel` — against both `Linear` and `CliffOnly`
-streams, and asserts after every step that:
-
-1. **Global balance conservation** — `sender + recipient + contract` token
-   balance is constant across the whole sequence.
-2. **Contract solvency** — contract balance equals
-   `total_deposited - total_withdrawn - total_refunded`.
-3. **Accrual boundedness** — `0 <= calculate_accrued <= deposit_amount`.
-4. **Accrual monotonicity** — `calculate_accrued` never decreases as time
-   advances.
-5. **Withdrawal bound** — `0 <= withdrawn_amount <= deposit_amount` and
-   `accrued >= withdrawn`.
-6. **Rate-decrease entitlement preservation** — a successful
-   `decrease_rate_per_second` checkpoint never reduces the same-timestamp
-   withdrawable amount (see §2, Accrual Formula, above).
-7. **`CliffOnly` unsupported-operation guard** — `top_up_stream`,
-   `decrease_rate_per_second`, `update_rate_per_second`,
-   `shorten_stream_end_time`, and `extend_stream_end_time` all return
-   `ContractError::UnsupportedStreamKind` for `CliffOnly` streams.
-
-The randomized property (`prop_random_op_sequences_preserve_invariants`,
-256 cases by default) is paired with deterministic regression tests for
-specific historical scenarios: `regression_rate_decrease_preserves_entitlement`,
-`regression_cliff_only_unsupported_mutations`,
-`regression_completed_stream_accrual_is_deterministic`, and
-`regression_immediate_cancel_refunds_full_deposit`.
-
-### Running the tests
-
-```bash
-# Standard run (256 proptest cases)
-cargo test -p fluxora_stream --features testutils --test balance_conservation
-
-# Deeper local coverage before an audit or release
-PROPTEST_CASES=10000 cargo test -p fluxora_stream --features testutils --test balance_conservation
-```
-
-### Security note for auditors
-
-Balance conservation is the single most important property to verify here —
-a violation means either token minting/burning or a double-spend. Property
-testing complements, but does not replace, the formal Kani proofs on the
-accrual math in `contracts/stream/src/accrual.rs` (`#[cfg(kani)] mod
-kani_proofs`) or a full manual audit. `sweep_excess` (see
-[Admin Recovery](#admin-recovery-sweep_excess) above) is the only entrypoint
-that can move tokens not backed by a stream liability, and it requires admin
-authorization.
+This contract also exposes: `get_sender_portfolio_health` (paginated aggregate health report for a sender's stream portfolio) and `witnessed_cancel_stream` (compliance-attested cancellation that requires an ed25519 witness signature).

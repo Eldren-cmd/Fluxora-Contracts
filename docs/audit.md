@@ -11,8 +11,12 @@ The public entrypoint table below is kept in sync with every `pub fn` on the `Fl
 | Entrypoint | Parameters | Return type | Authorization | Description |
 | --- | --- | --- | --- | --- |
 | `accept_recipient_update` | `env: Env`, `stream_id: u64` | — | Current recipient | Finalize a pending recipient rotation proposed by the sender. |
-| `accept_stream_offer` | `env: Env`, `recipient: Address`, `offer_id: u64` | `u64` | Recipient | Accept a pending stream offer; activates it as a live stream with re-anchored timing. |
-| `batch_withdraw_to` | `env: Env`, `recipient: Address`, `withdrawals: Vec<WithdrawToParam>` | `Vec<BatchWithdrawResult>` | Recipient | Batch withdraw with per-stream destination addresses; recipient auth once per batch. |
+| `batch_withdraw_to` | env: Env, recipient: Address, withdrawals: Vec<WithdrawToParam> | Vec<BatchWithdrawResult> | Recipient | Withdraw multiple accrued tokens in a single batched call, each to a specified destination, returning per-row net amounts. |
+| `batch_withdraw` | `env: Env`, `recipient: Address`, `stream_ids: Vec<u64>` | `Vec<BatchWithdrawResult>` | Recipient | Withdraw accrued tokens from multiple streams atomically; duplicate IDs revert the batch. |
+| `withdraw` | env: Env, stream_id: u64 | i128 | Recipient | Transfer accrued-but-not-withdrawn tokens to recipient; may set Completed. |
+| `withdraw_from_pool` | env: Env, stream_id: u64, caller: Address | i128 | Pool participant | Withdraw the caller's pro-rata share from a pooled stream once accrued. |
+| `withdraw_to` | env: Env, stream_id: u64, destination: Address | i128 | Recipient | Withdraw accrued tokens to a specified destination address. |
+| `witnessed_cancel_stream` | env: Env, stream_id: u64, witness_public_key: BytesN<32>, deadline: u64, witness_signature: BytesN<64> | — | Sender + ed25519-witnessed attestor | Cancel a stream attested off-chain by a compliance watchtower via an ed25519 signature whose pubkey is recorded on the stream. |
 | `bulk_cancel_streams` | `env: Env`, `sender: Address`, `stream_ids: Vec<u64>` | — | Sender | Atomically cancel multiple owned streams and refund aggregate unstreamed balance. |
 | `bulk_resume_streams_as_admin` | `env: Env`, `stream_ids: Vec<u64>` | — | Admin | Atomically resume multiple paused streams; all-or-nothing validation. |
 | `calculate_accrued` | `env: Env`, `stream_id: u64` | `i128` | None (view) | Total accrued amount at current ledger time; clamped to deposit. |
@@ -93,17 +97,28 @@ The public entrypoint table below is kept in sync with every `pub fn` on the `Fl
 | `shorten_stream_end_time` | `env: Env`, `stream_id: u64`, `new_end_time: u64` | — | Sender | Reduce `end_time` and refund unstreamed tokens to sender; Active or Paused only. |
 | `sweep_excess` | `env: Env`, `recipient: Address` | `i128` | Admin | Recover token balance exceeding tracked liabilities to an admin-chosen address. |
 | `top_up_stream` | `env: Env`, `stream_id: u64`, `funder: Address`, `amount: i128` | — | Funder | Pull additional tokens into stream deposit; Active or Paused only. |
-| `transfer_claim_ownership` | `env: Env`, `stream_id: u64`, `current_owner: Address`, `new_owner: Address` | — | Current owner | Transfer claim ownership to a new address; decoupled from recipient. |
+| `transfer_claim_ownership` | env: Env, stream_id: u64, current_owner: Address, new_owner: Address | — | Current claim owner (or recipient if unset) | Transfer the authorised claim owner for a stream to a new address without affecting recipient entitlement. |
 | `trigger_auto_claim` | `env: Env`, `stream_id: u64` | `i128` | Anyone | Permissionlessly withdraw to recipient's registered auto-claim destination. |
 | `update_rate` | `env: Env`, `stream_id: u64`, `new_rate_per_second: i128`, `caller: Address` | — | Sender or admin | Update stream rate without deposit adjustment; caller must be sender or admin. |
 | `update_rate_per_second` | `env: Env`, `stream_id: u64`, `new_rate_per_second: i128` | — | Sender | Increase rate forward-only; deposit must cover new rate × duration. |
 | `update_recipient` | `env: Env`, `stream_id: u64`, `new_recipient: Address` | — | Sender | Propose recipient rotation; finalized by `accept_recipient_update`. |
 | `version` | `env: Env` | `u32` | None (view) | Return compile-time contract version (`CONTRACT_VERSION`). |
-| `witnessed_cancel_stream` | `env: Env`, `stream_id: u64`, `witness_public_key: BytesN<32>`, `deadline: u64`, `witness_signature: BytesN<64>` | — | Witness (ed25519 sig) | Cancel a stream using a witness signature; replaces on-chain sender auth. |
-| `withdraw` | `env: Env`, `stream_id: u64` | `i128` | Recipient | Transfer accrued-but-not-withdrawn tokens to recipient; may set Completed. |
-| `withdraw_from_pool` | `env: Env`, `stream_id: u64`, `caller: Address` | `i128` | Pool recipient | Withdraw pro-rata share of accrued amount from a pooled stream. |
-| `withdraw_to` | `env: Env`, `stream_id: u64`, `destination: Address` | `i128` | Recipient | Withdraw accrued tokens to a specified destination address. |
 
+| `accept_stream_offer` | env: Env, offer_id: u64 | u64 | Recipient | Accept a pending stream offer. |
+| `cancel_stream_offer` | env: Env, offer_id: u64 | — | Sender | Cancel a pending stream offer before acceptance. |
+| `create_pooled_stream` | env: Env, sender: Address, params: CreateStreamParams | u64 | Sender | Create a stream that distributes to a participant pool. |
+| `create_stream_offer` | env: Env, sender: Address, recipient: Address, params: CreateStreamParams | u64 | Sender | Create a stream offer that requires recipient acceptance. |
+| `create_stream_with_lookback` | env: Env, sender: Address, params: CreateStreamParams | u64 | Sender | Create a stream enforcing a claim lookback window. |
+| `delegate_recipient_share` | env: Env, stream_id: u64, delegate: Address, share_bps: u32 | — | Recipient | Delegate a share of future recipient yield to another address. |
+| `get_auto_renew` | env: Env, stream_id: u64 | bool | Anyone (view) | Return whether auto-renew is currently enabled for a stream. |
+| `get_lookback_window` | env: Env | u32 | Anyone (view) | Return the protocol-wide claim lookback window setting. |
+| `get_recipient_pending_offers` | env: Env, recipient: Address | Vec<u64> | Anyone (view) | Return all pending stream offers for a given recipient. |
+| `get_sender_portfolio_health` | env: Env, sender: Address, cursor: u64 | PortfolioHealthPage | Anyone (view) | Return an aggregated health report for a sender's streams. |
+| `get_stream_offer` | env: Env, offer_id: u64 | StreamOffer | Anyone (view) | Return the state of a single stream offer. |
+| `reject_stream_offer` | env: Env, offer_id: u64 | — | Recipient | Reject a pending stream offer. |
+| `renew_stream` | env: Env, stream_id: u64 | u64 | Anyone | Permissionlessly renew an eligible auto-renew stream. |
+| `set_auto_renew` | env: Env, stream_id: u64, enabled: bool | — | Sender | Toggle the auto-renew opt-in flag for a stream. |
+| `set_lookback_window` | env: Env, window_ledgers: u32 | — | Admin | Set the protocol-wide claim lookback window. |
 ---
 
 ## Types (reference)
@@ -164,7 +179,6 @@ Auditors can use these as a checklist; the implementation is intended to preserv
 
 13. **Reentrancy Guard**
 
-All token-transfer paths (`withdraw`, `withdraw_to`, `batch_withdraw`, `cancel_stream`) are protected by an explicit `DataKey::ReentrancyLock` guard. If a cross-contract callback (e.g., via a custom token hook) attempts to re-enter any of these functions while a transfer is in progress, the call will revert with `ContractError::InvalidState`.
 
 14. **Contract balance consistency**  
     Deposit is pulled in `create_stream`; refunds and withdrawals only move amounts derived from that deposit (unstreamed to sender, accrued to recipient). No minting or arbitrary transfers.
