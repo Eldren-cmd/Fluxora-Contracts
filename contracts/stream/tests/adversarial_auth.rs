@@ -2,7 +2,7 @@ extern crate std;
 
 use ed25519_dalek::{Signer, SigningKey};
 use fluxora_stream::{
-    ContractError, FluxoraStream, FluxoraStreamClient, PauseReason, StreamStatus,
+    ContractError, CreateStreamParams, FluxoraStream, FluxoraStreamClient, PauseReason, StreamStatus,
 };
 use soroban_sdk::{
     testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
@@ -94,48 +94,39 @@ impl<'a> Ctx<'a> {
 
     /// Create a standard 1000-unit stream (rate 1/s, 0..1000s, no cliff).
     fn create_stream(&self) -> u64 {
+        let seq = self.env.ledger().sequence();
+        self.env.ledger().set_sequence_number(seq + 10);
         self.env.ledger().set_timestamp(0);
+        let params = CreateStreamParams {
+            recipient: self.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: fluxora_stream::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        };
         self.env.mock_auths(&[MockAuth {
             address: &self.sender,
             invoke: &MockAuthInvoke {
                 contract: &self.contract_id,
                 fn_name: "create_stream",
-                args: (
-                    &self.sender,
-                    &self.recipient,
-                    1000_i128,
-                    1_i128,
-                    0u64,
-                    0u64,
-                    1000u64,
-                    0i128,
-                    Option::<soroban_sdk::Bytes>::None,
-                )
-                    .into_val(&self.env),
+                args: (&self.sender, params.clone()).into_val(&self.env),
                 sub_invokes: &[],
             },
         }]);
-        self.client().create_stream(
-            &self.sender,
-            &CreateStreamParams {
-                recipient: self.recipient.clone(),
-                deposit_amount: 1000_i128,
-                rate_per_second: 1_i128,
-                start_time: 0u64,
-                cliff_time: 0u64,
-                end_time: 1000u64,
-                withdraw_dust_threshold: Some(0),
-                memo: None,
-                metadata: None,
-                kind: fluxora_stream::StreamKind::Linear,
-                irrevocable: None,
-                witness: None,
-            },
-        )
+        self.client().create_stream(&self.sender, &params)
     }
 
     /// Pause a stream as the sender (helper to reach Paused state).
     fn pause_as_sender(&self, stream_id: u64) {
+        let seq = self.env.ledger().sequence();
+        self.env.ledger().set_sequence_number(seq + 10);
         self.env.mock_auths(&[MockAuth {
             address: &self.sender,
             invoke: &MockAuthInvoke {

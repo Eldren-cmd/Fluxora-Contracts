@@ -72,7 +72,7 @@ ENTRYPOINT_ALLOWLIST = frozenset({
     "require_not_globally_paused",
     # Kani formal-proof harness helper — not a contract ABI entrypoint.
     "compute_keeper_fee_split",
-    "upgrade",
+    "reject_duplicate_ids",
 })
 
 # `#[contracterror]`-shaped variants that belong to other enums in the same file.
@@ -164,11 +164,11 @@ _RE_CONTRACT_ERROR_BODY = re.compile(
 )
 
 _RE_CONTRACTIMPL_BLOCK = re.compile(
-    r"#\[contractimpl\](?:\s|\n)*impl(?:\s+[A-Za-z0-9_]+)?\s*\{",
+    r"#\[contractimpl\]\s*\nimpl\s+FluxoraStream\s*\{",
     re.MULTILINE,
 )
 
-_RE_AUDIT_TABLE_ROW = re.compile(r"^\s*\| `([^`]+)`\s+\|", re.MULTILINE)
+_RE_AUDIT_TABLE_ROW = re.compile(r"^\| `([^`]+)`\s+\|", re.MULTILINE)
 
 _VERSION_CONTRADICTION = "There is no `version` entrypoint"
 
@@ -177,7 +177,7 @@ def extract_entrypoints(source: str) -> set:
     return names - ENTRYPOINT_ALLOWLIST
 
 def extract_contractimpl_entrypoints(source: str) -> set:
-    """Return pub fn names declared inside a #[contractimpl] block."""
+    """Return pub fn names declared inside the FluxoraStream #[contractimpl] block."""
     match = _RE_CONTRACTIMPL_BLOCK.search(source)
     if not match:
         return set()
@@ -203,8 +203,7 @@ def extract_audit_table_entrypoints(doc_text: str) -> set:
     """Return entrypoint names listed in the docs/audit.md public entrypoints table."""
     section_start = doc_text.find("## Public entrypoints")
     if section_start == -1:
-        # Fallback: scan full doc if '## Public entrypoints' header is omitted in test stubs
-        return set(_RE_AUDIT_TABLE_ROW.findall(doc_text))
+        return set()
 
     section = doc_text[section_start:]
     table_end = section.find("\n---")
@@ -212,8 +211,6 @@ def extract_audit_table_entrypoints(doc_text: str) -> set:
         section = section[:table_end]
 
     return set(_RE_AUDIT_TABLE_ROW.findall(section))
-
-extract_audit_entrypoints_from_doc = extract_audit_table_entrypoints
 
 def extract_event_symbols(source: str) -> set:
     out: set[str] = set()
@@ -254,24 +251,6 @@ def check_duplicate_discriminants(source: str) -> bool:
 def check_missing(identifiers: set, doc_text: str) -> set:
     return {ident for ident in identifiers if ident not in doc_text}
 
-def check_audit_md_entrypoint_drift(source: str, doc_text: str, audit_doc_path: Path) -> bool:
-    """Return True if any contractimpl entrypoints are missing from the audit table."""
-    contractimpl_entrypoints = extract_contractimpl_entrypoints(source)
-    audit_table_entrypoints = extract_audit_table_entrypoints(doc_text)
-    drift = False
-    for ident in sorted(contractimpl_entrypoints - audit_table_entrypoints):
-        try:
-            display = audit_doc_path.relative_to(REPO_ROOT)
-        except ValueError:
-            display = audit_doc_path
-        print(
-            f"MISSING AUDIT DOC: '{ident}' (audit entrypoint) found in contractimpl "
-            f"but not in '{display}' table"
-        )
-        drift = True
-    return drift
-
-
 def validate(
     contract_path: Path,
     events_path: Path,
@@ -279,7 +258,7 @@ def validate(
     streaming_doc: Path,
     events_doc: Path,
     error_doc: Path,
-    audit_doc: Path | None = None,
+    audit_doc: Path,
 ) -> int:
     """Run all alignment checks. Returns 0 on success, 1 on any drift."""
     source = contract_path.read_text(encoding="utf-8")
@@ -288,6 +267,7 @@ def validate(
     streaming_text = streaming_doc.read_text(encoding="utf-8")
     events_text = events_doc.read_text(encoding="utf-8")
     error_text = error_doc.read_text(encoding="utf-8")
+    audit_text = audit_doc.read_text(encoding="utf-8")
 
     checks = [
         (extract_entrypoints(source), streaming_text, streaming_doc, "entrypoint"),
@@ -306,30 +286,37 @@ def validate(
             print(f"MISSING DOC: '{ident}' ({kind}) found in code but not in '{display}'")
             drift_found = True
 
-    if audit_doc is not None:
-        audit_text = audit_doc.read_text(encoding="utf-8")
-        if check_audit_md_entrypoint_drift(source, audit_text, audit_doc):
-            drift_found = True
+    contractimpl_entrypoints = extract_contractimpl_entrypoints(source)
+    audit_table_entrypoints = extract_audit_table_entrypoints(audit_text)
 
-        contractimpl_entrypoints = extract_contractimpl_entrypoints(source)
-        audit_table_entrypoints = extract_audit_table_entrypoints(audit_text)
-        for ident in sorted(audit_table_entrypoints - contractimpl_entrypoints):
-            try:
-                display = audit_doc.relative_to(REPO_ROOT)
-            except ValueError:
-                display = audit_doc
-            print(
-                f"STALE DOC: '{ident}' (audit entrypoint) listed in '{display}' "
-                "but not in contractimpl"
-            )
-            drift_found = True
+    for ident in sorted(contractimpl_entrypoints - audit_table_entrypoints):
+        try:
+            display = audit_doc.relative_to(REPO_ROOT)
+        except ValueError:
+            display = audit_doc
+        print(
+            f"MISSING DOC: '{ident}' (audit entrypoint) found in contractimpl "
+            f"but not in '{display}' table"
+        )
+        drift_found = True
 
-        if _VERSION_CONTRADICTION in audit_text:
-            print(
-                "AUDIT CONTRADICTION: docs/audit.md contains the deprecated "
-                f"'{_VERSION_CONTRADICTION}' sentence"
-            )
-            drift_found = True
+    for ident in sorted(audit_table_entrypoints - contractimpl_entrypoints):
+        try:
+            display = audit_doc.relative_to(REPO_ROOT)
+        except ValueError:
+            display = audit_doc
+        print(
+            f"STALE DOC: '{ident}' (audit entrypoint) listed in '{display}' "
+            "but not in contractimpl"
+        )
+        drift_found = True
+
+    if _VERSION_CONTRADICTION in audit_text:
+        print(
+            "AUDIT CONTRADICTION: docs/audit.md contains the deprecated "
+            f"'{_VERSION_CONTRADICTION}' sentence"
+        )
+        drift_found = True
 
     if check_duplicate_discriminants(error_source):
         drift_found = True

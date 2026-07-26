@@ -454,8 +454,26 @@ fn test_min_rate_preserves_existing_max_rate_cap() {
 #[test]
 fn test_update_rate_per_second_throttle_enforced() {
     let (env, contract_id, sender, recipient, _token) = setup();
+    env.ledger().set_sequence_number(100);
     let client = FluxoraStreamClient::new(&env, &contract_id);
-    let stream_id = create_stream_with_rate(&env, &client, &sender, &recipient, 100i128);
+    let start_time = env.ledger().timestamp() + 10;
+    let stream_id = client.create_stream(
+        &sender,
+        &CreateStreamParams {
+            recipient: recipient.clone(),
+            deposit_amount: 1_000_000i128,
+            rate_per_second: 100i128,
+            start_time,
+            cliff_time: start_time,
+            end_time: start_time + 1000,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
+    );
 
     // Initial rate is 100. Stream creation sets last_rate_change_ledger = 0.
     // The first update works because last_rate_change_ledger is 0.
@@ -481,10 +499,11 @@ fn test_update_rate_per_second_throttle_enforced() {
 #[test]
 fn test_decrease_rate_per_second_throttle_enforced() {
     let (env, contract_id, sender, recipient, _token) = setup();
+    env.ledger().set_sequence_number(100);
     let client = FluxoraStreamClient::new(&env, &contract_id);
     let stream_id = create_stream_with_rate(&env, &client, &sender, &recipient, 1000i128);
 
-    // First decrease works (last_rate_change_ledger = 0)
+    // First decrease works
     let res = client.try_decrease_rate_per_second(&stream_id, &500i128);
     assert_eq!(res, Ok(Ok(())));
 

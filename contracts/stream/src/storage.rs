@@ -525,7 +525,7 @@ pub(crate) fn load_delegated_nonce(env: &Env, recipient: &Address) -> u64 {
     env.storage().persistent().get(&key).unwrap_or(0u64)
 }
 
-pub(crate) fn increment_delegated_nonce(env: &Env, recipient: &Address) {
+pub fn increment_delegated_nonce(env: &Env, recipient: &Address) {
     let current = load_delegated_nonce(env, recipient);
     let key = DataKey::DelegatedWithdrawNonce(recipient.clone());
     env.storage().persistent().set(&key, &(current + 1));

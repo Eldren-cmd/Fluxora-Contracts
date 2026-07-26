@@ -11,12 +11,18 @@ use soroban_sdk::{
 fn create_stream(
     env: &Env,
     client: &FluxoraStreamClient,
+    token_id: &Address,
     sender: &Address,
     recipient: &Address,
     rate_per_second: i128,
 ) -> u64 {
     let deposit = rate_per_second * 1000;
     let now = env.ledger().timestamp();
+    let sac = soroban_sdk::token::StellarAssetClient::new(env, token_id);
+    sac.mint(sender, &deposit);
+    let token = soroban_sdk::token::Client::new(env, token_id);
+    token.approve(sender, &client.address, &deposit, &100_000);
+
     client.create_stream(
         sender,
         &CreateStreamParams {
@@ -57,7 +63,7 @@ fn test_delegate_recipient_share_success() {
     let recipient1 = Address::generate(&env);
     let recipient2 = Address::generate(&env);
 
-    let stream_id = create_stream(&env, &client, &sender, &recipient1, 10000);
+    let stream_id = create_stream(&env, &client, &token_id, &sender, &recipient1, 10000);
 
     let share_bps = 5000; // 50%
     let child_id =
@@ -83,10 +89,8 @@ fn test_delegate_recipient_share_depth_limit() {
 
     let contract_id = env.register_contract(None, fluxora_stream::FluxoraStream {});
     let client = FluxoraStreamClient::new(&env, &contract_id);
-    client.init(
-        &env.register_stellar_asset_contract(Address::generate(&env)),
-        &Address::generate(&env),
-    );
+    let token_id = env.register_stellar_asset_contract(Address::generate(&env));
+    client.init(&token_id, &Address::generate(&env));
 
     let sender = Address::generate(&env);
     let r1 = Address::generate(&env);
@@ -95,7 +99,7 @@ fn test_delegate_recipient_share_depth_limit() {
     let r4 = Address::generate(&env);
     let r5 = Address::generate(&env);
 
-    let id1 = create_stream(&env, &client, &sender, &r1, 10000);
+    let id1 = create_stream(&env, &client, &token_id, &sender, &r1, 10000);
 
     // Depth 1
     let id2 = client.delegate_recipient_share(&id1, &r1, &5000, &r2);
@@ -120,17 +124,15 @@ fn test_delegate_recipient_share_cyclic() {
 
     let contract_id = env.register_contract(None, fluxora_stream::FluxoraStream {});
     let client = FluxoraStreamClient::new(&env, &contract_id);
-    client.init(
-        &env.register_stellar_asset_contract(Address::generate(&env)),
-        &Address::generate(&env),
-    );
+    let token_id = env.register_stellar_asset_contract(Address::generate(&env));
+    client.init(&token_id, &Address::generate(&env));
 
     let sender = Address::generate(&env);
     let r1 = Address::generate(&env);
     let r2 = Address::generate(&env);
     let r3 = Address::generate(&env);
 
-    let id1 = create_stream(&env, &client, &sender, &r1, 10000);
+    let id1 = create_stream(&env, &client, &token_id, &sender, &r1, 10000);
     let id2 = client.delegate_recipient_share(&id1, &r1, &5000, &r2);
     let id3 = client.delegate_recipient_share(&id2, &r2, &5000, &r3);
 

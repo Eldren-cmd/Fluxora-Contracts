@@ -29,7 +29,7 @@
 extern crate std;
 
 use fluxora_stream::{
-    ContractPauseChanged, DataKey, FluxoraStream, FluxoraStreamClient, PauseReason, RateUpdated,
+    ContractPauseChanged, CreateStreamParams, DataKey, FluxoraStream, FluxoraStreamClient, PauseReason, RateUpdated,
     RecipientUpdated, Stream, StreamCreated, StreamEndExtended, StreamEndShortened,
     StreamHealthChanged, StreamPaused, StreamToppedUp, Withdrawal, WithdrawalTo,
 };
@@ -504,7 +504,7 @@ fn event_snapshot_stream_paused_has_correct_topics_and_payload() {
     let events_before = ctx.env.events().all().len();
     // Bump ledger sequence past MIN_PAUSE_INTERVAL_LEDGERS so the first
     // pause toggle does not trip PauseCooldownActive.
-    ctx.env.ledger().set_sequence(17);
+    ctx.env.ledger().set_sequence_number(17);
     ctx.client()
         .pause_stream(&stream_id, &PauseReason::Operational);
 
@@ -569,7 +569,7 @@ fn event_snapshot_stream_paused_as_admin_has_administrative_reason() {
     );
 
     let events_before = ctx.env.events().all().len();
-    ctx.env.ledger().set_sequence(17);
+    ctx.env.ledger().set_sequence_number(17);
     ctx.client()
         .pause_stream_as_admin(&stream_id, &PauseReason::Administrative);
 
@@ -629,10 +629,10 @@ fn event_snapshot_stream_resumed_has_correct_topics() {
 
     // Pause at sequence 17 (past cooldown), then resume at sequence 34
     // (17 ledgers later) so the resume toggle also clears the cooldown.
-    ctx.env.ledger().set_sequence(17);
+    ctx.env.ledger().set_sequence_number(17);
     ctx.client()
         .pause_stream(&stream_id, &PauseReason::Operational);
-    ctx.env.ledger().set_sequence(34);
+    ctx.env.ledger().set_sequence_number(34);
 
     let events_before = ctx.env.events().all().len();
     ctx.client().resume_stream(&stream_id);
