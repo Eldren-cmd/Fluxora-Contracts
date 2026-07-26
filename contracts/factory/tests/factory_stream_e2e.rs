@@ -1488,4 +1488,109 @@ fn test_direct_stream_call_bypasses_minimum_duration() {
     assert_eq!(ctx.factory.get_factory_stream_count(), 0);
 }
 
+// ---------------------------------------------------------------------------
+// Non-positive deposit rejection
+// ---------------------------------------------------------------------------
+
+/// Factory must reject a stream with deposit_amount == 0.
+#[test]
+fn test_create_stream_zero_deposit_rejected() {
+    let ctx = Ctx::setup();
+    let now = ctx.now();
+
+    let res = ctx.factory.client.try_create_stream(
+        &ctx.sender,
+        &fluxora_stream::CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 0,
+            rate_per_second: RATE_PER_SECOND,
+            start_time: now,
+            cliff_time: now,
+            end_time: now + STREAM_DURATION,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
+    );
+    assert_eq!(res, Err(Ok(FactoryError::InvalidCap)));
+}
+
+/// Factory must reject a stream with negative deposit_amount.
+#[test]
+fn test_create_stream_negative_deposit_rejected() {
+    let ctx = Ctx::setup();
+    let now = ctx.now();
+
+    let res = ctx.factory.client.try_create_stream(
+        &ctx.sender,
+        &fluxora_stream::CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: -1,
+            rate_per_second: RATE_PER_SECOND,
+            start_time: now,
+            cliff_time: now,
+            end_time: now + STREAM_DURATION,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
+    );
+    assert_eq!(res, Err(Ok(FactoryError::InvalidCap)));
+}
+
+/// Factory must reject a batch containing ANY entry with non-positive deposit,
+/// even if another entry has a legitimate deposit. The batch must be atomically
+/// rejected (no partial state changes).
+#[test]
+fn test_create_streams_negative_deposit_rejected() {
+    let ctx = Ctx::setup();
+    let now = ctx.now();
+
+    // One valid stream + one with negative deposit
+    let mut streams = Vec::new(&ctx.env);
+    streams.push_back(fluxora_stream::CreateStreamParams {
+        recipient: ctx.recipient.clone(),
+        deposit_amount: DEPOSIT_AMOUNT,
+        rate_per_second: RATE_PER_SECOND,
+        start_time: now,
+        cliff_time: now,
+        end_time: now + STREAM_DURATION,
+        withdraw_dust_threshold: Some(0),
+        memo: None,
+        metadata: None,
+        kind: StreamKind::Linear,
+        irrevocable: None,
+        witness: None,
+    });
+    streams.push_back(fluxora_stream::CreateStreamParams {
+        recipient: ctx.recipient.clone(),
+        deposit_amount: -1,
+        rate_per_second: RATE_PER_SECOND,
+        start_time: now,
+        cliff_time: now,
+        end_time: now + STREAM_DURATION,
+        withdraw_dust_threshold: Some(0),
+        memo: None,
+        metadata: None,
+        kind: StreamKind::Linear,
+        irrevocable: None,
+        witness: None,
+    });
+
+    let sender_balance_before = ctx.token.balance(&ctx.sender);
+    let factory_count_before = ctx.factory.get_factory_stream_count();
+
+    let res = ctx.factory.client.try_create_streams(&ctx.sender, &streams);
+    assert_eq!(res, Err(Ok(FactoryError::InvalidCap)));
+
+    // Atomic rejection: no streams created, sender balance untouched
+    assert_eq!(ctx.factory.get_factory_stream_count(), factory_count_before);
+    assert_eq!(ctx.token.balance(&ctx.sender), sender_balance_before);
+}
 

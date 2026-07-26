@@ -89,7 +89,7 @@ The factory exposes read-only views so UIs, operators, and indexers can inspect 
 
 | View | Returns | Notes |
 |------|---------|-------|
-| `get_factory_config()` | `FactoryConfig { admin, stream_contract, max_deposit, min_duration, batch_cap_enforced }` | Reads all instance policy fields. Returns `FactoryError::NotInitialized` before `init`. |
+| `get_factory_config()` | `FactoryConfig { admin, stream_contract, max_deposit, min_duration, batch_cap_enforced, creation_paused, min_rate_per_second, max_rate_per_second }` | Reads all instance policy fields. Returns every field tracked by `FactoryPolicy` plus `admin`, matching the single-call completeness of `load_policy`. Returns `FactoryError::NotInitialized` before `init`. |
 | `is_allowlisted(recipient)` | `bool` | Returns `true` only when the recipient currently has an allowlist entry. Missing entries return `false`. |
 
 These views are permissionless and do not mutate factory state.

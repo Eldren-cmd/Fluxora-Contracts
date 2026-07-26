@@ -53,27 +53,27 @@ soroban-env-host = "=21.2.1"
 [[test]]
 name = "bulk_cancel"
 path = "tests/bulk_cancel.rs"
-test = false
+test = true
 
 [[test]]
 name = "chaos"
 path = "tests/chaos.rs"
-test = false
+test = true
 
 [[test]]
 name = "cliff_only_variant"
 path = "tests/cliff_only_variant.rs"
-test = false
+test = true
 
 [[test]]
 name = "create_stream_relative"
 path = "tests/create_stream_relative.rs"
-test = false
+test = true
 
 [[test]]
 name = "factory_policy"
 path = "tests/factory_policy.rs"
-test = false
+test = true
 
 [[test]]
 name = "formal_verification_smoke"
@@ -96,6 +96,11 @@ path = "tests/id_range.rs"
 test = false
 
 [[test]]
+name = "metadata_limits_900"
+path = "tests/metadata_limits_900.rs"
+test = true
+
+[[test]]
 name = "keeper_cancel"
 path = "tests/keeper_cancel.rs"
 required-features = ["testutils"]
@@ -103,7 +108,7 @@ required-features = ["testutils"]
 [[test]]
 name = "max_rate_per_second"
 path = "tests/max_rate_per_second.rs"
-test = false
+test = true
 
 [[test]]
 name = "metadata_extension"
@@ -148,7 +153,7 @@ test = false
 [[test]]
 name = "upgrade_path"
 path = "tests/upgrade_path.rs"
-test = false
+test = true
 
 [[test]]
 name = "withdrawal_frequency"

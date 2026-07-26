@@ -8,13 +8,11 @@ mod delegation;
 pub(crate) mod events;
 pub(crate) mod storage;
 mod token_check;
-pub mod types;
 
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env, Map};
 pub use storage::*;
 use token_check::verify_token_behavior;
-use crate::types::{ClaimOwnershipTransferred, RecipientShareDelegated, MAX_POOL_RECIPIENTS};
-pub use types::ContractError;
+pub use reject_duplicate_ids;
 // conflict resolved by Hermes agent on 2026-07-26
 
 // ---------------------------------------------------------------------------
@@ -384,7 +382,7 @@ pub enum StreamStatus {
     Cancelled = 3,
 }
 
-/// The architectural style of the stream (Linear or CliffOnly).
+/// The architectural style of the stream (Linear, CliffOnly, or CliffSlope).
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StreamKind {
@@ -396,6 +394,92 @@ pub enum StreamKind {
     CliffSlope = 2,
 }
 
+#[soroban_sdk::contracterror]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum ContractError {
+    StreamNotFound = 1,
+    InvalidState = 2,
+    InvalidParams = 3,
+    /// Global emergency pause is active; stream creation is blocked.
+    ContractPaused = 4,
+    /// Start time is before the current ledger timestamp.
+    StartTimeInPast = 5,
+    /// Arithmetic overflow in stream calculations (e.g. deposit total).
+    ArithmeticOverflow = 6,
+    /// Caller is not authorized to perform this operation.
+    Unauthorized = 7,
+    /// Contract is already initialized.
+    AlreadyInitialised = 8,
+    /// Token balance or allowance is insufficient (emulated check if possible, otherwise caught by token client).
+    InsufficientBalance = 9,
+    /// Deposit amount does not cover the total streamable amount.
+    InsufficientDeposit = 10,
+    /// Stream is already in Paused state.
+    StreamAlreadyPaused = 11,
+    /// Stream is not in Paused state (e.g. trying to resume an Active stream).
+    StreamNotPaused = 12,
+    /// Stream is in a terminal state (Completed or Cancelled) and cannot be modified.
+    StreamTerminalState = 13,
+    /// Duplicate stream IDs were supplied to a batch operation.
+    DuplicateStreamId = 14,
+    /// Delegated withdrawal signature is invalid or expired.
+    InvalidSignature = 15,
+    /// Accrued amount is below the expected minimum specified in the signed payload.
+    BelowMinimumAmount = 16,
+    /// `reserve_stream_ids` was called with `count = 0`.
+    ReservationCountZero = 17,
+    /// `reserve_stream_ids` was called with `count > MAX_ID_RESERVATION`.
+    ReservationLimitExceeded = 18,
+    /// Delegated withdrawal signature deadline has expired.
+    SignatureDeadlineExpired = 19,
+    /// Template not found.
+    TemplateNotFound = 20,
+    /// Template limit exceeded (per-owner or global).
+    TemplateLimitExceeded = 21,
+    /// Caller not authorized to delete template.
+    TemplateUnauthorized = 22,
+    /// Pause reason string exceeds `MAX_PAUSE_REASON_BYTES`.
+    PauseReasonTooLong = 23,
+    ReservationNotFound = 24,
+    ReservationNotExpirable = 25,
+    ReservationStillActive = 26,
+    /// Ledger-backed accrual observed a timestamp lower than the previous accrual timestamp.
+    ClockRegression = 27,
+    /// Stream kind is not supported.
+    UnsupportedStreamKind = 28,
+    /// Rate update exceeds the configured rate cap.
+    RateCapExceeded = 29,
+    /// Operation blocked by a pause cooldown.
+    PauseCooldownActive = 30,
+    /// Rate limit exceeded for withdrawals.
+    WithdrawalTooFrequent = 31,
+    /// Metadata payload exceeds the allowed size.
+    MetadataTooLarge = 32,
+    /// Keeper attempted to close a stream before the grace period elapsed.
+    KeeperGracePeriodNotElapsed = 42,
+    ReservationAlreadyActive = 34,
+    /// Withdraw dust threshold is negative or exceeds deposit amount.
+    InvalidDustThreshold = 35,
+    /// Rate update cooldown is active.
+    RateCooldownActive = 36,
+    /// The sender cannot fund an auto-renewal with the available balance and allowance.
+    AutoRenewFundingUnavailable = 37,
+    /// Stream offer not found (accepted, rejected, cancelled, or never existed).
+    OfferNotFound = 38,
+    /// Stream offer has expired (`current_time > offer.expiry_time`).
+    OfferExpired = 39,
+    /// Caller is not the intended recipient of this offer.
+    OfferWrongRecipient = 40,
+    /// Caller is not the sender who created this offer.
+    OfferWrongSender = 41,
+    /// Delegation cycle detected.
+    CyclicDelegation = 43,
+    /// Maximum delegation depth exceeded.
+    DelegationDepthExceeded = 44,
+    /// The token contract did not expose the expected SEP-41 interface during init.
+    TokenVerificationFailed = 88,
+}
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -535,6 +619,18 @@ pub struct RateCapEnforced {
     pub stream_id: u64,
     pub attempted_rate: i128,
     pub max_rate_per_second: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecipientShareDelegated {
+    pub parent_stream_id: u64,
+    pub child_stream_id: u64,
+    pub delegator: Address,
+    pub delegatee: Address,
+    pub share_bps: u32,
+    pub new_parent_rate: i128,
+    pub child_rate: i128,
 }
 
 /// Emitted when the sender safely decreases the streaming rate via `decrease_rate_per_second`.
@@ -1009,7 +1105,7 @@ pub struct CreateStreamParams {
     pub memo: Option<soroban_sdk::Bytes>,
     /// Optional structured metadata for indexer consumption.
     pub metadata: Option<soroban_sdk::Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
-    /// The architectural style of the stream (Linear or CliffOnly).
+    /// The architectural style of the stream (Linear, CliffOnly, or CliffSlope).
     pub kind: StreamKind,
     /// If true, the stream cannot be cancelled or shortened. Defaults to false (None).
     pub irrevocable: Option<bool>,
@@ -1017,19 +1113,15 @@ pub struct CreateStreamParams {
     pub witness: Option<Address>,
 }
 
-/// Parameters for creating a payment stream with relative (offset-based) times.
-///
-/// Computes `start_time`, `cliff_time`, and `end_time` by adding offsets to the
-/// current ledger timestamp (`env.ledger().timestamp()`). This eliminates off-chain
-/// calculation errors that lead to `StartTimeInPast` failures.
-///
-/// # Time offsets
-/// - `start_delay`: Seconds to add to current timestamp for stream start
-/// - `cliff_delay`: Seconds to add to current timestamp for cliff time (must be >= start_delay)
-/// - `duration`: Total duration of stream in seconds (end_time = start_time + duration)
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CreateStreamRelativeParams {
+pub struct CreateStreamOptions {
+    /// Optional bounded memo for indexer correlation (e.g. payroll batch ID).
+    /// Maximum `MAX_MEMO_BYTES` (64) bytes. Pass `None` to omit.
+    pub memo: Option<soroban_sdk::Bytes>,
+    /// Optional structured metadata for indexer consumption.
+    pub metadata: Option<soroban_sdk::Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
+    /// The architectural style of the stream (Linear, CliffOnly, or CliffSlope).
     /// Address that will receive streamed tokens for this stream entry.
     pub recipient: Address,
     /// Total amount escrowed for this stream entry.
@@ -2053,20 +2145,22 @@ impl FluxoraStream {
             return Err(ContractError::InvalidParams);
         }
 
-        if kind == StreamKind::Linear {
-            if rate_per_second <= 0 {
-                return Err(ContractError::InvalidParams);
-            }
+        match kind {
+            StreamKind::Linear | StreamKind::CliffSlope => {
+                if rate_per_second <= 0 {
+                    return Err(ContractError::InvalidParams);
+                }
 
-            // Enforce governance-controlled maximum rate per second cap
-            let max_rate = get_max_rate_per_second(env);
-            if rate_per_second > max_rate {
-                return Err(ContractError::InvalidParams);
+                // Enforce governance-controlled maximum rate per second cap.
+                let max_rate = get_max_rate_per_second(env);
+                if rate_per_second > max_rate {
+                    return Err(ContractError::InvalidParams);
+                }
             }
-        } else {
-            // For CliffOnly stream, rate must be 0
-            if rate_per_second != 0 {
-                return Err(ContractError::InvalidParams);
+            StreamKind::CliffOnly => {
+                if rate_per_second != 0 {
+                    return Err(ContractError::InvalidParams);
+                }
             }
         }
 
@@ -2086,16 +2180,31 @@ impl FluxoraStream {
             return Err(ContractError::InvalidParams);
         }
 
-        if kind == StreamKind::Linear {
-            // Validate deposit covers total streamable amount (#34)
-            let duration = (end_time - start_time) as i128;
-            let total_streamable = rate_per_second
-                .checked_mul(duration)
-                .ok_or(ContractError::InvalidParams)?; // Return InvalidParams on overflow as expected by tests
+        match kind {
+            StreamKind::Linear => {
+                // Validate deposit covers the full streamable amount from start to end.
+                let duration = (end_time - start_time) as i128;
+                let total_streamable = rate_per_second
+                    .checked_mul(duration)
+                    .ok_or(ContractError::InvalidParams)?;
 
-            if deposit_amount < total_streamable {
-                return Err(ContractError::InsufficientDeposit);
+                if deposit_amount < total_streamable {
+                    return Err(ContractError::InsufficientDeposit);
+                }
             }
+            StreamKind::CliffSlope => {
+                // CliffSlope accrues only after the cliff, so the deposit must cover the
+                // post-cliff portion of the schedule.
+                let post_cliff_duration = (end_time.saturating_sub(cliff_time)) as i128;
+                let post_cliff_streamable = rate_per_second
+                    .checked_mul(post_cliff_duration)
+                    .ok_or(ContractError::InvalidParams)?;
+
+                if deposit_amount < post_cliff_streamable {
+                    return Err(ContractError::InsufficientDeposit);
+                }
+            }
+            StreamKind::CliffOnly => {}
         }
 
         Ok(())
@@ -2114,8 +2223,7 @@ impl FluxoraStream {
         withdraw_dust_threshold: i128,
         memo: Option<soroban_sdk::Bytes>,
         kind: StreamKind,
-        irrevocable: Option<bool>,
-        witness: Option<Address>,
+        metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
     ) -> Result<u64, ContractError> {
         // Validate memo length before allocating a stream ID.
         if let Some(ref m) = memo {
@@ -2124,12 +2232,9 @@ impl FluxoraStream {
             }
         }
 
-        // Validate withdraw_dust_threshold: must be in range [0, deposit_amount]
-        if withdraw_dust_threshold < 0 {
-            return Err(ContractError::InvalidDustThreshold);
-        }
-        if withdraw_dust_threshold > deposit_amount {
-            return Err(ContractError::InvalidDustThreshold);
+        // Validate metadata size bounds before allocating a stream ID.
+        if let Some(ref md) = metadata {
+            validate_metadata(md)?;
         }
 
         let stream_id = next_stream_id_for(env, &sender);
@@ -2152,15 +2257,7 @@ impl FluxoraStream {
             withdraw_dust_threshold,
             last_pause_toggle_ledger: 0,
             last_withdraw_ledger: 0,
-            last_rate_change_ledger: 0,
-            is_pooled: None,
-            metadata: None,
-            memo: memo.clone(),
-            kind,
-            irrevocable,
-            witness: witness.clone(),
-            delegation_depth: 0,
-            parent_stream_id: None,
+            metadata: metadata.clone(),
         };
 
         save_stream(env, &stream);
@@ -2189,7 +2286,7 @@ impl FluxoraStream {
                 end_time,
                 withdraw_dust_threshold,
                 memo,
-                metadata: None,
+                metadata,
             },
         );
 
@@ -2214,13 +2311,17 @@ impl FluxoraStream {
         withdraw_dust_threshold: i128,
         memo: Option<soroban_sdk::Bytes>,
         kind: StreamKind,
-        irrevocable: Option<bool>,
-        witness: Option<Address>,
+        metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
     ) -> Result<u64, ContractError> {
         if let Some(ref m) = memo {
             if m.len() as usize > MAX_MEMO_BYTES {
                 return Err(ContractError::InvalidParams);
             }
+        }
+
+        // Validate metadata size bounds before allocating a stream ID.
+        if let Some(ref md) = metadata {
+            validate_metadata(md)?;
         }
 
         let stream_id = next_stream_id_for(env, &sender);
@@ -2242,16 +2343,7 @@ impl FluxoraStream {
             withdraw_dust_threshold,
             last_pause_toggle_ledger: 0,
             last_withdraw_ledger: 0,
-            last_rate_change_ledger: 0,
-            is_pooled: None,
-            metadata: None,
-            memo: memo.clone(),
-            kind,
-            claim_owner: None,
-            irrevocable,
-            witness: witness.clone(),
-            delegation_depth: 0,
-            parent_stream_id: None,
+            metadata: metadata.clone(),
         };
 
         save_stream(env, &stream);
@@ -2276,7 +2368,7 @@ impl FluxoraStream {
                 end_time,
                 withdraw_dust_threshold,
                 memo,
-                metadata: None,
+                metadata,
             },
         );
 
@@ -2476,7 +2568,7 @@ impl FluxoraStream {
             params.irrevocable,
             params.witness,
             None,
-        )
+        );
     }
 
     /// Internal helper for stream creation with full parameter set.
@@ -2534,42 +2626,8 @@ impl FluxoraStream {
             withdraw_dust_threshold,
             memo,
             kind,
-            irrevocable,
-            witness,
-        )?;
-        set_max_lookback_ledgers(&env, stream_id, max_lookback_ledgers)?;
-        Ok(stream_id)
-    }
-
-    /// Create a stream with an optional per-withdrawal lookback window.
-    ///
-    /// `max_lookback_ledgers` limits each claim to the accrual represented by
-    /// the most recent N five-second ledger windows. It does not alter
-    /// `calculate_accrued`, `deposit_amount`, or `withdrawn_amount`; older
-    /// unclaimed entitlement remains available to later calls.
-    pub fn create_stream_with_lookback(
-        env: Env,
-        sender: Address,
-        params: CreateStreamParams,
-        max_lookback_ledgers: Option<u32>,
-    ) -> Result<u64, ContractError> {
-        let withdraw_dust_threshold = params.withdraw_dust_threshold.unwrap_or(0);
-        Self::create_stream_internal(
-            env,
-            sender,
-            params.recipient,
-            params.deposit_amount,
-            params.rate_per_second,
-            params.start_time,
-            params.cliff_time,
-            params.end_time,
-            withdraw_dust_threshold,
-            params.memo,
-            params.kind,
-            params.irrevocable,
-            params.witness,
-            max_lookback_ledgers,
-        )
+            None,
+        );
     }
 
     /// Create a new payment stream with relative (offset-based) timing.
@@ -2664,8 +2722,8 @@ impl FluxoraStream {
             .ok_or(ContractError::InvalidParams)?;
 
         // Delegate to standard create_stream with computed absolute times
-        Self::create_stream(
-            env,
+        Self::persist_new_stream(
+            &env,
             sender,
             CreateStreamParams {
                 recipient: params.recipient,
@@ -2681,7 +2739,7 @@ impl FluxoraStream {
                 irrevocable: params.irrevocable,
                 witness: None,
             },
-        )
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2986,8 +3044,7 @@ impl FluxoraStream {
                 params.withdraw_dust_threshold.unwrap_or(0),
                 params.memo.clone(),
                 params.kind,
-                params.irrevocable,
-                params.witness.clone(),
+                params.metadata.clone(),
             )?;
             created_ids.push_back(stream_id);
 
@@ -3222,10 +3279,9 @@ impl FluxoraStream {
                 params.cliff_time,
                 params.end_time,
                 params.withdraw_dust_threshold.unwrap_or(0),
-                params.memo,
+                params.memo.clone(),
                 params.kind,
-                params.irrevocable,
-                params.witness,
+                params.metadata.clone(),
             );
 
             match stream_id {
@@ -5389,6 +5445,9 @@ impl FluxoraStream {
             is_pooled: None,
             parent_stream_id: Some(stream_id),
             delegation_depth: stream.delegation_depth + 1,
+            claim_owner: None,
+            witness: None,
+            last_rate_change_ledger: 0,
         };
 
         save_stream(&env, &child_stream);
@@ -6092,7 +6151,7 @@ impl FluxoraStream {
                 kind,
                 irrevocable,
             },
-        )
+        );
     }
 
     /// Read a schedule template by id (permissionless view).
@@ -8127,13 +8186,7 @@ impl FluxoraStream {
             source.withdraw_dust_threshold,
             source.memo.clone(),
             source.kind,
-            source.irrevocable,
-            source.witness.clone(),
-        )?;
-        set_max_lookback_ledgers(
-            &env,
-            new_stream_id,
-            max_lookback_ledgers(&env, stream_id),
+            source.metadata.clone(),
         )?;
 
         // ── 9. Emit clone-specific event for indexer correlation ──────────────
@@ -8195,7 +8248,7 @@ impl FluxoraStream {
     /// # Errors
     /// - `ReservationCountZero` (17): `count` is 0
     /// - `ReservationLimitExceeded` (18): `count > MAX_ID_RESERVATION`
-    /// - `ReservationAlreadyActive` (28): `caller` already has an active reservation
+    /// - `ReservationAlreadyActive` (34): `caller` already has an active reservation
     ///
     /// # Security
     /// - `count` is capped at `MAX_ID_RESERVATION = 100` to prevent counter-inflation attacks.

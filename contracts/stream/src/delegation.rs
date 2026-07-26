@@ -8,7 +8,7 @@ use crate::{load_delegated_nonce, load_stream, ContractError};
 ///
 /// Prepended to the signed payload so a witness attestation cannot be replayed
 /// as a `delegated_withdraw` signature (which uses a distinct byte layout).
-pub(crate) const WITNESSED_CANCEL_DOMAIN: &[u8] = b"fluxora_witnessed_cancel";
+pub(crate) const WITNESSED_CANCEL_DOMAIN: &[u8; 24] = b"fluxora_witnessed_cancel";
 
 /// Validate the deadline for a witnessed cancellation attestation.
 ///
