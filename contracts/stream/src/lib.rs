@@ -15,6 +15,7 @@ use storage::*;
 use token_check::verify_token_behavior;
 pub use reject_duplicate_ids;
 use crate::types::RecipientShareDelegated;
+// conflict resolved by Hermes agent on 2026-07-26
 
 // ---------------------------------------------------------------------------
 // TTL constants
