@@ -2547,7 +2547,7 @@ impl FluxoraStream {
             memo,
             kind,
             None,
-        )
+        );
     }
 
     /// Create a stream with an optional per-withdrawal lookback window.
@@ -2608,7 +2608,7 @@ impl FluxoraStream {
             memo,
             kind,
             None,
-        )
+        );
     }
 
     /// Create a new payment stream with relative (offset-based) timing.
@@ -2720,7 +2720,7 @@ impl FluxoraStream {
                 irrevocable: params.irrevocable,
                 witness: None,
             },
-        )
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -6284,7 +6284,7 @@ impl FluxoraStream {
                 kind,
                 irrevocable,
             },
-        )
+        );
     }
 
     /// Read a schedule template by id (permissionless view).
