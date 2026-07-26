@@ -180,6 +180,16 @@ const MIN_RATE_INTERVAL_LEDGERS: u32 = 17;
 ///   integrators will not detect the incompatibility until a runtime failure occurs.
 ///   Code review and CI checks on this constant are the primary safeguard.
 ///
+/// # Version-bump checklist
+///
+/// When incrementing this constant, the following documents MUST also be updated:
+/// - `docs/ABI_STABILITY.md` — version header, error code table (Section 2.2),
+///   event table (Section 2.3), DataKey discriminant table (Section 2.4),
+///   and frozen enum discriminants (Section 5).
+/// - `docs/upgrade.md` — append version history row, update CONTRACT_VERSION heading,
+///   and update DataKey variant count.
+/// - `docs/storage.md` — update DataKey discriminant table (Section 1).
+///
 /// Bumped to 2: `Stream` struct gained `checkpointed_amount: i128` and `checkpointed_at: u64`
 /// for safe rate-decrease support (see `decrease_rate_per_second`).
 ///
