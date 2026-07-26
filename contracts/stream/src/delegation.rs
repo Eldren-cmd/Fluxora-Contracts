@@ -427,4 +427,3 @@ mod tests {
         assert_eq!(result, Err(ContractError::InvalidParams));
     }
 }
-}

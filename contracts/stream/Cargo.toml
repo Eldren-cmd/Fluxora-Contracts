@@ -68,7 +68,7 @@ test = false
 [[test]]
 name = "create_stream_relative"
 path = "tests/create_stream_relative.rs"
-test = false
+test = true
 
 [[test]]
 name = "factory_policy"

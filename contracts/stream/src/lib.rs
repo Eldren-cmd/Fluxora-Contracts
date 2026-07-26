@@ -2608,7 +2608,7 @@ impl FluxoraStream {
             memo,
             kind,
             None,
-        )
+        );
     }
 
     /// Create a new payment stream with relative (offset-based) timing.
