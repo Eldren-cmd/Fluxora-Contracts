@@ -38,24 +38,20 @@ treasury tooling) can use this reference to handle protocol exceptions correctly
 | `ReservationNotFound` | 24 | No ID reservation exists for the specified holder | `release_id_reservation`, `reclaim_expired_id_reservation` |
 | `ReservationStillActive` | 25 | Reservation has not yet expired and cannot be reclaimed | `reclaim_expired_id_reservation` |
 | `ReservationNotExpirable` | 26 | Reservation has no expiry and cannot be reclaimed | `reclaim_expired_id_reservation` |
-| `ClockRegression` | 27 | Ledger-backed accrual observed a timestamp lower than the previous accrual timestamp | `calculate_accrued`, `get_withdrawable`, `withdraw`, `withdraw_to`, `batch_withdraw`, `batch_withdraw_to`, rate changes, `cancel_stream`, auto-claim paths |
-| `UnsupportedStreamKind` | 28 | Stream kind does not support this operation (e.g., rate changes on CliffOnly) | `update_rate_per_second`, `decrease_rate_per_second` |
-| `RateCapExceeded` | 29 | Rate per second exceeds the configured maximum | `create_stream`, `update_rate_per_second` |
-| `PauseCooldownActive` | 30 | Stream pause cooldown period is still active | `pause_stream` |
-| `WithdrawalTooFrequent` | 31 | Withdrawal attempted before minimum interval elapsed | `withdraw`, `delegated_withdraw`, `batch_withdraw` |
-| `MetadataTooLarge` | 32 | Stream metadata exceeds size limits | `create_stream`, `create_streams`, `create_streams_partial` |
-| `KeeperGracePeriodNotElapsed` | 33 | Keeper cancellation grace period has not elapsed | `keeper_cancel` |
+| `PauseReasonTooLong` | 27 | Pause reason string exceeds `MAX_PAUSE_REASON_BYTES` | `pause_protocol` |
+| `ClockRegression` | 28 | Ledger-backed accrual observed a timestamp lower than the previous accrual timestamp | `calculate_accrued`, `get_withdrawable`, `withdraw`, `withdraw_to`, `batch_withdraw`, `batch_withdraw_to`, rate changes, `cancel_stream`, auto-claim paths |
+| `MetadataTooLarge` | 29 | Stream metadata exceeds size limits | `create_stream`, `create_streams`, `create_streams_partial` |
+| `RateCapExceeded` | 30 | Rate per second exceeds the configured maximum | `create_stream`, `update_rate_per_second` |
+| `PauseCooldownActive` | 32 | Stream pause cooldown period is still active | `pause_stream` |
+| `WithdrawalTooFrequent` | 33 | Withdrawal attempted before minimum interval elapsed | `withdraw`, `delegated_withdraw`, `batch_withdraw` |
 | `ReservationAlreadyActive` | 34 | A reservation is already active for this caller | `reserve_stream_ids` |
 | `InvalidDustThreshold` | 35 | Withdraw dust threshold is negative or exceeds deposit amount | `create_stream`, `create_streams`, `create_streams_partial`, `create_stream_relative`, `create_stream_from_template` |
-| `RateCooldownActive` | 36 | Rate change attempted too soon after a previous rate change | `update_rate_per_second`, `decrease_rate_per_second` |
-| `AutoRenewFundingUnavailable` | 37 | The sender cannot fund an auto-renewal with the available balance and allowance | `trigger_auto_claim`, auto-renew paths |
-| `OfferNotFound` | 38 | Stream offer not found (accepted, rejected, cancelled, or never existed) | `accept_stream_offer`, `reject_stream_offer`, `cancel_stream_offer`, `get_stream_offer` |
-| `OfferExpired` | 39 | Stream offer has expired (`current_time > offer.expiry_time`) | `accept_stream_offer` |
-| `OfferWrongRecipient` | 40 | Caller is not the intended recipient of this offer | `accept_stream_offer`, `reject_stream_offer` |
-| `OfferWrongSender` | 41 | Caller is not the sender who created this offer | `cancel_stream_offer` |
-| `CyclicDelegation` | 43 | Cyclic delegation detected in delegation chain | `delegate_recipient_share` |
-| `DelegationDepthExceeded` | 44 | Delegation depth limit exceeded | `delegate_recipient_share` |
-| `TokenVerificationFailed` | 88 | Token contract does not expose the expected SEP-41 interface during init | `init` |
+| `AutoRenewFundingUnavailable` | 36 | The sender cannot fund an auto-renewal with the available balance and allowance | `trigger_auto_claim` |
+| `OfferNotFound` | 37 | Stream offer not found (accepted, rejected, cancelled, or never existed) | `accept_stream_offer`, `reject_stream_offer`, `cancel_stream_offer` |
+| `OfferExpired` | 38 | Stream offer has expired (`current_time > offer.expiry_time`) | `accept_stream_offer`, `reject_stream_offer` |
+| `OfferWrongRecipient` | 39 | Caller is not the intended recipient of this offer | `accept_stream_offer`, `reject_stream_offer` |
+| `OfferWrongSender` | 40 | Caller is not the sender who created this offer | `cancel_stream_offer` |
+| `KeeperGracePeriodNotElapsed` | 41 | Keeper cancellation grace period has not elapsed | `keeper_cancel` |
 
 Non-error enum values used by stream creation and accrual:
 

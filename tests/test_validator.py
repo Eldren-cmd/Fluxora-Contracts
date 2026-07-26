@@ -514,7 +514,7 @@ class TestValidate:
 """,
         )
         vda.validate(*paths)
-        assert "STALE DOC:" in capsys.readouterr().out
+        assert "STALE AUDIT DOC:" in capsys.readouterr().out
 
     def test_fails_on_missing_entrypoint(self, tmp_path):
         paths = _write_files(
