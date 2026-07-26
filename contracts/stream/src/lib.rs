@@ -466,7 +466,7 @@ pub enum ContractError {
     /// Rate limit exceeded for withdrawals.
     WithdrawalTooFrequent = 33,
     /// Keeper attempted to close a stream before the grace period elapsed.
-    KeeperGracePeriodNotElapsed = 34,
+    KeeperGracePeriodNotElapsed = 41,
     /// Withdraw dust threshold is negative or exceeds deposit amount.
     InvalidDustThreshold = 35,
     /// The sender cannot fund an auto-renewal with the available balance and allowance.
