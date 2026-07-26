@@ -1829,39 +1829,30 @@ impl MockVaultContract {
     ) -> u64 {
         let client = fluxora_stream::FluxoraStreamClient::new(&env, &stream_contract);
         client.create_stream(
-        &env.current_contract_address(),
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: deposit_amount,
-            rate_per_second: rate_per_second,
-            start_time: start_time,
-            cliff_time: cliff_time,
-            end_time: end_time,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: fluxora_stream::types::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    )
+            &env.current_contract_address(),
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: deposit_amount,
+                rate_per_second: rate_per_second,
+                start_time: start_time,
+                cliff_time: cliff_time,
+                end_time: end_time,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: fluxora_stream::types::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        )
     }
 
-    pub fn vault_top_up_stream(
-        env: Env,
-        stream_contract: Address,
-        stream_id: u64,
-        amount: i128,
-    ) {
+    pub fn vault_top_up_stream(env: Env, stream_contract: Address, stream_id: u64, amount: i128) {
         let client = fluxora_stream::FluxoraStreamClient::new(&env, &stream_contract);
         client.top_up_stream(&stream_id, &amount)
     }
 
-    pub fn vault_cancel_stream(
-        env: Env,
-        stream_contract: Address,
-        stream_id: u64,
-    ) {
+    pub fn vault_cancel_stream(env: Env, stream_contract: Address, stream_id: u64) {
         let client = fluxora_stream::FluxoraStreamClient::new(&env, &stream_contract);
         client.cancel_stream(&stream_id)
     }
@@ -1880,7 +1871,9 @@ fn test_contract_owned_vault_sender() {
     let stream_client = FluxoraStreamClient::new(&env, &contract_id);
 
     let token_admin = Address::generate(&env);
-    let token_id = env.register_stellar_asset_contract_v2(token_admin).address();
+    let token_id = env
+        .register_stellar_asset_contract_v2(token_admin)
+        .address();
     let token = TokenClient::new(&env, &token_id);
 
     let admin = Address::generate(&env);
@@ -1918,7 +1911,7 @@ fn test_contract_owned_vault_sender() {
 
     let state_after = stream_client.get_stream_state(&stream_id);
     assert_eq!(state_after.status, StreamStatus::Cancelled);
-    
+
     // Vault gets its refund
     let final_balance = token.balance(&vault_id);
     // Initial 100_000 - 15_000 (deposit + topup) + 10_000 (refund for remaining 1000s * 10/s) = 95_000

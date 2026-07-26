@@ -116,22 +116,22 @@ impl<'a> Ctx<'a> {
             },
         }]);
         self.client().create_stream(
-        &self.sender,
-        &CreateStreamParams {
-            recipient: self.recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: fluxora_stream::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    )
+            &self.sender,
+            &CreateStreamParams {
+                recipient: self.recipient.clone(),
+                deposit_amount: 1000_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: fluxora_stream::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        )
     }
 
     /// Pause a stream as the sender (helper to reach Paused state).
@@ -1278,22 +1278,22 @@ mod delegated_withdraw_adversarial {
         fn create_stream(&self) -> u64 {
             self.env.ledger().set_timestamp(0);
             self.client().create_stream(
-        &self.sender,
-        &CreateStreamParams {
-            recipient: self.recipient_kp.address.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: fluxora_stream::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    )
+                &self.sender,
+                &CreateStreamParams {
+                    recipient: self.recipient_kp.address.clone(),
+                    deposit_amount: 1000_i128,
+                    rate_per_second: 1_i128,
+                    start_time: 0u64,
+                    cliff_time: 0u64,
+                    end_time: 1000u64,
+                    withdraw_dust_threshold: Some(0),
+                    memo: None,
+                    metadata: None,
+                    kind: fluxora_stream::StreamKind::Linear,
+                    irrevocable: None,
+                    witness: None,
+                },
+            )
         }
 
         fn sign(&self, stream_id: u64, dest: &Address, nonce: u64, deadline: u64) -> BytesN<64> {
@@ -1542,22 +1542,22 @@ impl<'a> DelegatedCtx<'a> {
 
         // Stream: 1000 tokens, rate 1/s, 0..1000s, no cliff.
         let stream_id = client.create_stream(
-        &sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: fluxora_stream::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: 1000_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: fluxora_stream::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         DelegatedCtx {
             env,

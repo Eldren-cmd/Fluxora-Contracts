@@ -60,22 +60,22 @@ impl<'a> TestContext<'a> {
         let end_time = 1000u64;
 
         self.client.create_stream(
-        &self.sender,
-        &CreateStreamParams {
-            recipient: self.recipient.clone(),
-            deposit_amount: amount,
-            rate_per_second: rate,
-            start_time: start_time,
-            cliff_time: cliff_time,
-            end_time: end_time,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    )
+            &self.sender,
+            &CreateStreamParams {
+                recipient: self.recipient.clone(),
+                deposit_amount: amount,
+                rate_per_second: rate,
+                start_time: start_time,
+                cliff_time: cliff_time,
+                end_time: end_time,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        )
     }
 }
 

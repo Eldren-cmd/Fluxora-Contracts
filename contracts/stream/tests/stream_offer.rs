@@ -125,7 +125,9 @@ fn offer_accept_creates_active_stream() {
 
     // Pending offers index is cleared.
     assert_eq!(
-        ctx.client.get_recipient_pending_offers(&ctx.recipient).len(),
+        ctx.client
+            .get_recipient_pending_offers(&ctx.recipient)
+            .len(),
         0
     );
 
@@ -157,7 +159,9 @@ fn offer_reject_refunds_sender() {
 
     // Pending offers cleared.
     assert_eq!(
-        ctx.client.get_recipient_pending_offers(&ctx.recipient).len(),
+        ctx.client
+            .get_recipient_pending_offers(&ctx.recipient)
+            .len(),
         0
     );
 
@@ -184,7 +188,9 @@ fn offer_cancel_by_sender_refunds_deposit() {
     assert_eq!(ctx.token.balance(&ctx.sender), balance_before + 1_000);
     assert_eq!(ctx.client.get_recipient_streams(&ctx.recipient).len(), 0);
     assert_eq!(
-        ctx.client.get_recipient_pending_offers(&ctx.recipient).len(),
+        ctx.client
+            .get_recipient_pending_offers(&ctx.recipient)
+            .len(),
         0
     );
     assert_eq!(
@@ -222,7 +228,9 @@ fn accept_after_expiry_returns_offer_expired() {
     // Advance past expiry.
     ctx.env.ledger().set_timestamp(expiry + 1);
 
-    let err = ctx.client.try_accept_stream_offer(&ctx.recipient, &offer_id);
+    let err = ctx
+        .client
+        .try_accept_stream_offer(&ctx.recipient, &offer_id);
     assert_eq!(err, Err(Ok(ContractError::OfferExpired)));
 
     // Offer still exists — sender can still cancel.
@@ -323,9 +331,7 @@ fn accept_with_wrong_recipient_fails() {
     let offer_id = ctx.make_offer();
 
     let impostor = Address::generate(&ctx.env);
-    let err = ctx
-        .client
-        .try_accept_stream_offer(&impostor, &offer_id);
+    let err = ctx.client.try_accept_stream_offer(&impostor, &offer_id);
     assert_eq!(err, Err(Ok(ContractError::OfferWrongRecipient)));
 
     // Offer still pending.
@@ -338,9 +344,7 @@ fn reject_with_wrong_recipient_fails() {
     let offer_id = ctx.make_offer();
 
     let impostor = Address::generate(&ctx.env);
-    let err = ctx
-        .client
-        .try_reject_stream_offer(&impostor, &offer_id);
+    let err = ctx.client.try_reject_stream_offer(&impostor, &offer_id);
     assert_eq!(err, Err(Ok(ContractError::OfferWrongRecipient)));
 
     // Offer still pending.
@@ -353,9 +357,7 @@ fn cancel_with_wrong_sender_fails() {
     let offer_id = ctx.make_offer();
 
     let impostor = Address::generate(&ctx.env);
-    let err = ctx
-        .client
-        .try_cancel_stream_offer(&impostor, &offer_id);
+    let err = ctx.client.try_cancel_stream_offer(&impostor, &offer_id);
     assert_eq!(err, Err(Ok(ContractError::OfferWrongSender)));
 
     // Offer still pending.
@@ -373,7 +375,9 @@ fn double_accept_second_returns_not_found() {
 
     ctx.client.accept_stream_offer(&ctx.recipient, &offer_id);
 
-    let err = ctx.client.try_accept_stream_offer(&ctx.recipient, &offer_id);
+    let err = ctx
+        .client
+        .try_accept_stream_offer(&ctx.recipient, &offer_id);
     assert_eq!(err, Err(Ok(ContractError::OfferNotFound)));
 }
 
@@ -423,9 +427,9 @@ fn accept_re_anchors_start_time_when_past() {
         &ctx.recipient,
         &1_000_i128,
         &1_i128,
-        &(now + 10),   // start_time = now+10
-        &(now + 10),   // cliff = now+10 (offset 0)
-        &(now + 1_010),// end = now+1010  (duration = 1000)
+        &(now + 10),    // start_time = now+10
+        &(now + 10),    // cliff = now+10 (offset 0)
+        &(now + 1_010), // end = now+1010  (duration = 1000)
         &0_i128,
         &None,
         &StreamKind::Linear,
@@ -614,7 +618,9 @@ fn create_offer_blocked_when_creation_paused() {
     let cid2 = env2.register_contract(None, FluxoraStream);
     let c2 = FluxoraStreamClient::new(&env2, &cid2);
     let token_admin2 = Address::generate(&env2);
-    let tok2 = env2.register_stellar_asset_contract_v2(token_admin2).address();
+    let tok2 = env2
+        .register_stellar_asset_contract_v2(token_admin2)
+        .address();
     let adm2 = Address::generate(&env2);
     let snd2 = Address::generate(&env2);
     let rcp2 = Address::generate(&env2);
@@ -784,10 +790,7 @@ fn deposit_held_in_contract_until_resolved() {
 
     // After rejection, deposit leaves the contract.
     ctx.client.reject_stream_offer(&ctx.recipient, &offer_id);
-    assert_eq!(
-        ctx.token.balance(&ctx.contract_id),
-        contract_balance_before
-    );
+    assert_eq!(ctx.token.balance(&ctx.contract_id), contract_balance_before);
 }
 
 #[test]

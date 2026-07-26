@@ -160,86 +160,86 @@ impl<'a> TestContext<'a> {
     pub(crate) fn create_default_stream(&self) -> u64 {
         self.env.ledger().set_timestamp(0);
         self.client().create_stream(
-        &self.sender,
-        &CreateStreamParams {
-            recipient: self.recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    )
+            &self.sender,
+            &CreateStreamParams {
+                recipient: self.recipient.clone(),
+                deposit_amount: 1000_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        )
     }
 
     /// Create a stream with a cliff at t=500 out of 1000s.
     pub(crate) fn create_cliff_stream(&self) -> u64 {
         self.env.ledger().set_timestamp(0);
         self.client().create_stream(
-        &self.sender,
-        &CreateStreamParams {
-            recipient: self.recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 500u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    )
+            &self.sender,
+            &CreateStreamParams {
+                recipient: self.recipient.clone(),
+                deposit_amount: 1000_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 500u64,
+                end_time: 1000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        )
     }
 
     pub(crate) fn create_max_rate_stream(&self) -> u64 {
         self.env.ledger().set_timestamp(0);
         self.client().create_stream(
-        &self.sender,
-        &CreateStreamParams {
-            recipient: self.recipient.clone(),
-            deposit_amount: (i128::MAX - 1),
-            rate_per_second: ((i128::MAX - 1) / 3),
-            start_time: 0,
-            cliff_time: 0u64,
-            end_time: 3,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    )
+            &self.sender,
+            &CreateStreamParams {
+                recipient: self.recipient.clone(),
+                deposit_amount: (i128::MAX - 1),
+                rate_per_second: ((i128::MAX - 1) / 3),
+                start_time: 0,
+                cliff_time: 0u64,
+                end_time: 3,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        )
     }
 
     pub(crate) fn create_half_max_rate_stream(&self) -> u64 {
         self.env.ledger().set_timestamp(0);
         self.client().create_stream(
-        &self.sender,
-        &CreateStreamParams {
-            recipient: self.recipient.clone(),
-            deposit_amount: 42535295865117307932921825928971026400_i128,
-            rate_per_second: (42535295865117307932921825928971026400_i128 / 100),
-            start_time: 0,
-            cliff_time: 0u64,
-            end_time: 100,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    )
+            &self.sender,
+            &CreateStreamParams {
+                recipient: self.recipient.clone(),
+                deposit_amount: 42535295865117307932921825928971026400_i128,
+                rate_per_second: (42535295865117307932921825928971026400_i128 / 100),
+                start_time: 0,
+                cliff_time: 0u64,
+                end_time: 100,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        )
     }
 }
 
@@ -1018,22 +1018,22 @@ fn test_create_stream_multiple_loop() {
     let mut stream_vec = Vec::new(&ctx.env);
     loop {
         let stream_id = ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 10_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 10u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 10_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 10u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         counter += 1;
 
@@ -1521,12 +1521,11 @@ fn test_create_stream_deposit_one_valid() {
             start_time: 0u64,
             cliff_time: 0u64,
             end_time: 1u64,
-            withdraw_dust_threshold: Some(),
-            memo: so rate * duration = 1 == deposit
-        &0,
+            withdraw_dust_threshold: Some(&0),
+            memo: None,
             metadata: None,
-            kind: None,
-            irrevocable: crate::StreamKind::Linear,
+            kind: crate::StreamKind::Linear,
+            irrevocable: None,
             witness: None,
         },
     );
@@ -2023,12 +2022,11 @@ fn test_create_stream_deposit_less_than_total_panics() {
             start_time: 0u64,
             cliff_time: 0u64,
             end_time: 1000u64,
-            withdraw_dust_threshold: Some(),
-            memo: so total = 1000 tokens needed
-        &0,
+            withdraw_dust_threshold: Some(&0),
+            memo: None,
             metadata: None,
-            kind: None,
-            irrevocable: crate::StreamKind::Linear,
+            kind: crate::StreamKind::Linear,
+            irrevocable: None,
             witness: None,
         },
     );
@@ -2072,12 +2070,12 @@ fn test_create_stream_deposit_greater_than_total_succeeds() {
             start_time: 0u64,
             cliff_time: 0u64,
             end_time: 1000u64,
-            withdraw_dust_threshold: Some(),
-            memo: total needed = 1000
-        &0,
+            withdraw_dust_threshold: Some(&0),
+            memo: None,
             metadata: None,
-            kind: None,
-            irrevocable: crate::StreamKind::Linear,
+            kind: crate::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
             witness: None,
         },
     );
@@ -2122,22 +2120,22 @@ fn test_create_stream_transfer_failure_no_state_change() {
     // Attempt to create stream with insufficient balance (should panic)
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 20_000_i128,
-            rate_per_second: 20_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    )
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 20_000_i128,
+                rate_per_second: 20_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        )
     }));
 
     assert!(
@@ -3390,12 +3388,12 @@ fn test_accrued_never_exceeds_deposit_multiple_checks() {
             start_time: 0u64,
             cliff_time: 0u64,
             end_time: 100u64,
-            withdraw_dust_threshold: Some(),
-            memo: 000 at end
-        &0,
+            withdraw_dust_threshold: Some(&0),
+            memo: None,
             metadata: None,
-            kind: None,
-            irrevocable: crate::StreamKind::Linear,
+            kind: crate::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
             witness: None,
         },
     );
@@ -4892,22 +4890,22 @@ fn test_close_completed_stream_recipient_index_sorted_after_close() {
     // Create streams: 0, 1, 2, 3, 4
     for _ in 0..5 {
         ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 100_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 100u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 100_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 100u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
     }
 
     let streams = ctx.client().get_recipient_streams(&ctx.recipient);
@@ -4995,22 +4993,22 @@ fn test_close_completed_stream_count_decreases() {
     // Create three streams
     for _ in 0..3 {
         ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 100_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 100u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 100_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 100u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
     }
 
     assert_eq!(ctx.client().get_recipient_stream_count(&ctx.recipient), 3);
@@ -8369,12 +8367,12 @@ fn test_withdraw_excess_deposit_only_streams_calculated_amount() {
             start_time: 0u64,
             cliff_time: 0u64,
             end_time: 1000u64,
-            withdraw_dust_threshold: Some(),
-            memo: so only 1000 will stream
-        &0,
+            withdraw_dust_threshold: Some(&0),
+            memo: None,
             metadata: None,
-            kind: None,
-            irrevocable: crate::StreamKind::Linear,
+            kind: crate::StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
             witness: None,
         },
     );
@@ -9174,22 +9172,22 @@ fn test_create_stream_returned_id_matches_stored_id() {
 
     for expected_id in 0u64..5 {
         let returned_id = ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 100_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 100u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 100_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 100u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
         let stored = ctx.client().get_stream_state(&returned_id);
 
         assert_eq!(
@@ -9489,22 +9487,22 @@ fn test_stream_ids_are_unique_no_gaps() {
 
     for expected in 0..N {
         let id = ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 10_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 10u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 10_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 10u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
         assert_eq!(id, expected, "stream {expected} must have id {expected}");
         ids.push_back(id);
     }
@@ -13167,22 +13165,22 @@ fn test_recipient_stream_index_many_streams() {
     // Create many streams
     for _ in 0..num_streams {
         ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 100_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 100u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 100_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 100u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
     }
 
     // Verify all streams are in the index
@@ -13776,22 +13774,22 @@ fn test_create_stream_rate_times_duration_overflow_panics_no_state_change() {
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: deposit,
-            rate_per_second: overflow_rate,
-            start_time: start,
-            cliff_time: start,
-            end_time: end,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    )
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: deposit,
+                rate_per_second: overflow_rate,
+                start_time: start,
+                cliff_time: start,
+                end_time: end,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        )
     }));
 
     assert!(
@@ -14792,22 +14790,22 @@ fn test_get_recipient_streams_sorted_after_interleaved_close() {
     // Create streams 0, 1, 2, 3
     for _ in 0..4 {
         ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 1000_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
     }
 
     // Complete and close stream 1 (middle).
@@ -14844,22 +14842,22 @@ fn test_get_recipient_stream_count_matches_list_len() {
     // After 3 creates
     for _ in 0..3 {
         ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 1000_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
     }
     assert_eq!(
         ctx.client().get_recipient_stream_count(&ctx.recipient),
@@ -14902,22 +14900,22 @@ fn test_get_recipient_streams_ids_resolve_to_correct_recipient() {
 
     for _ in 0..5 {
         ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 1000_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
     }
 
     let streams = ctx.client().get_recipient_streams(&ctx.recipient);
@@ -18635,22 +18633,22 @@ fn test_budget_batch_withdraw_10_streams() {
     let mut ids = soroban_sdk::Vec::new(&ctx.env);
     for _ in 0..10 {
         let id = ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 1000_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
         ids.push_back(id);
     }
 
@@ -18688,22 +18686,22 @@ fn test_budget_batch_withdraw_cheaper_than_n_singles() {
     let mut ids = soroban_sdk::Vec::new(&ctx.env);
     for _ in 0..10 {
         let id = ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 1000_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
         ids.push_back(id);
     }
 
@@ -19044,22 +19042,22 @@ mod negative_pause_resume_auth {
         let ctx = TestContext::setup();
         ctx.env.ledger().set_timestamp(0);
         let stream_id = ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 1000,
-            rate_per_second: 1,
-            start_time: 0,
-            cliff_time: 0,
-            end_time: 1000,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 1000,
+                rate_per_second: 1,
+                start_time: 0,
+                cliff_time: 0,
+                end_time: 1000,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
         (ctx, stream_id)
     }
 
@@ -19490,22 +19488,22 @@ mod i128_boundary_streams {
         env.ledger().set_timestamp(0);
 
         let stream_id = client.create_stream(
-        &sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: NEAR_MAX_DEPOSIT,
-            rate_per_second: NEAR_MAX_RATE,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: NEAR_MAX_DEPOSIT,
+                rate_per_second: NEAR_MAX_RATE,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         let state = client.get_stream_state(&stream_id);
         assert_eq!(state.deposit_amount, NEAR_MAX_DEPOSIT);
@@ -19527,22 +19525,22 @@ mod i128_boundary_streams {
         env.ledger().set_timestamp(0);
 
         let stream_id = client.create_stream(
-        &sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: large_deposit,
-            rate_per_second: rate,
-            start_time: 0u64,
-            cliff_time: 500u64,
-            end_time: 1_000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: large_deposit,
+                rate_per_second: rate,
+                start_time: 0u64,
+                cliff_time: 500u64,
+                end_time: 1_000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         let state = client.get_stream_state(&stream_id);
         assert_eq!(state.deposit_amount, large_deposit);
@@ -19559,22 +19557,22 @@ mod i128_boundary_streams {
         env.ledger().set_timestamp(0);
 
         let stream_id = client.create_stream(
-        &sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: NEAR_MAX_DEPOSIT,
-            rate_per_second: NEAR_MAX_RATE,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: NEAR_MAX_DEPOSIT,
+                rate_per_second: NEAR_MAX_RATE,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         let events = env.events().all();
         let last = events.last().unwrap();
@@ -19602,22 +19600,22 @@ mod i128_boundary_streams {
 
         let count_before = client.get_stream_count();
         let result = client.try_create_stream(
-        &sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: deposit,
-            rate_per_second: rate,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 3u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: deposit,
+                rate_per_second: rate,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 3u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         assert_eq!(result, Err(Ok(ContractError::InvalidParams)));
         assert_eq!(
@@ -19645,22 +19643,22 @@ mod i128_boundary_streams {
         env.ledger().set_timestamp(0);
 
         let result = client.try_create_stream(
-        &sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: deposit,
-            rate_per_second: rate,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: duration,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: deposit,
+                rate_per_second: rate,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: duration,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         assert_eq!(result, Err(Ok(ContractError::InsufficientDeposit)));
         assert_eq!(
@@ -19682,22 +19680,22 @@ mod i128_boundary_streams {
         env.ledger().set_timestamp(0);
 
         let stream_id = client.create_stream(
-        &sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: NEAR_MAX_DEPOSIT,
-            rate_per_second: NEAR_MAX_RATE,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: NEAR_MAX_DEPOSIT,
+                rate_per_second: NEAR_MAX_RATE,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         let accrued = client.calculate_accrued(&stream_id);
         assert_eq!(accrued, 0, "nothing accrued at start");
@@ -19711,22 +19709,22 @@ mod i128_boundary_streams {
         env.ledger().set_timestamp(0);
 
         let stream_id = client.create_stream(
-        &sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: NEAR_MAX_DEPOSIT,
-            rate_per_second: NEAR_MAX_RATE,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: NEAR_MAX_DEPOSIT,
+                rate_per_second: NEAR_MAX_RATE,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         env.ledger().set_timestamp(1);
         let accrued = client.calculate_accrued(&stream_id);
@@ -19741,22 +19739,22 @@ mod i128_boundary_streams {
         env.ledger().set_timestamp(0);
 
         let stream_id = client.create_stream(
-        &sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: NEAR_MAX_DEPOSIT,
-            rate_per_second: NEAR_MAX_RATE,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: NEAR_MAX_DEPOSIT,
+                rate_per_second: NEAR_MAX_RATE,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         env.ledger().set_timestamp(u64::MAX / 2);
         let accrued = client.calculate_accrued(&stream_id);
@@ -19773,22 +19771,22 @@ mod i128_boundary_streams {
         env.ledger().set_timestamp(0);
 
         let stream_id = client.create_stream(
-        &sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: large_deposit,
-            rate_per_second: rate,
-            start_time: 0u64,
-            cliff_time: 500u64,
-            end_time: 1_000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: large_deposit,
+                rate_per_second: rate,
+                start_time: 0u64,
+                cliff_time: 500u64,
+                end_time: 1_000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         env.ledger().set_timestamp(499);
         let accrued = client.calculate_accrued(&stream_id);
@@ -19805,22 +19803,22 @@ mod i128_boundary_streams {
         env.ledger().set_timestamp(0);
 
         let stream_id = client.create_stream(
-        &sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: large_deposit,
-            rate_per_second: rate,
-            start_time: 0u64,
-            cliff_time: 500u64,
-            end_time: 1_000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: large_deposit,
+                rate_per_second: rate,
+                start_time: 0u64,
+                cliff_time: 500u64,
+                end_time: 1_000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         env.ledger().set_timestamp(500);
         let accrued = client.calculate_accrued(&stream_id);
@@ -19849,22 +19847,22 @@ mod i128_boundary_streams {
         env.ledger().set_timestamp(0);
 
         let stream_id = client.create_stream(
-        &sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: deposit,
-            rate_per_second: NEAR_MAX_RATE,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: deposit,
+                rate_per_second: NEAR_MAX_RATE,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         // Set time far past end — elapsed is capped at end_time=1, no overflow possible
         env.ledger().set_timestamp(u64::MAX);
@@ -19888,22 +19886,22 @@ mod i128_boundary_streams {
         env.ledger().set_timestamp(0);
 
         let stream_id = client.create_stream(
-        &sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: NEAR_MAX_DEPOSIT,
-            rate_per_second: NEAR_MAX_RATE,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: NEAR_MAX_DEPOSIT,
+                rate_per_second: NEAR_MAX_RATE,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         env.ledger().set_timestamp(1);
         let withdrawn = client.withdraw(&stream_id);
@@ -19925,22 +19923,22 @@ mod i128_boundary_streams {
         env.ledger().set_timestamp(0);
 
         let stream_id = client.create_stream(
-        &sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: NEAR_MAX_DEPOSIT,
-            rate_per_second: NEAR_MAX_RATE,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: NEAR_MAX_DEPOSIT,
+                rate_per_second: NEAR_MAX_RATE,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         env.ledger().set_timestamp(1);
         client.withdraw(&stream_id);
@@ -19975,22 +19973,22 @@ mod i128_boundary_streams {
         env.ledger().set_timestamp(0);
 
         let stream_id = client.create_stream(
-        &sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: large_deposit,
-            rate_per_second: rate,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1_000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: large_deposit,
+                rate_per_second: rate,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1_000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         // First withdrawal at t=400
         env.ledger().set_timestamp(400);
@@ -20030,22 +20028,22 @@ mod i128_boundary_streams {
         env.ledger().set_timestamp(0);
 
         let stream_id = client.create_stream(
-        &sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: large_deposit,
-            rate_per_second: rate,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1_000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: large_deposit,
+                rate_per_second: rate,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1_000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         // Cancel immediately at t=0
         client.cancel_stream(&stream_id);
@@ -20069,22 +20067,22 @@ mod i128_boundary_streams {
         env.ledger().set_timestamp(0);
 
         let stream_id = client.create_stream(
-        &sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: large_deposit,
-            rate_per_second: rate,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1_000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: large_deposit,
+                rate_per_second: rate,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1_000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         env.ledger().set_timestamp(500);
         client.cancel_stream(&stream_id);
@@ -20114,22 +20112,22 @@ mod i128_boundary_streams {
         env.ledger().set_timestamp(0);
 
         let stream_id = client.create_stream(
-        &sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: large_deposit,
-            rate_per_second: rate,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1_000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: large_deposit,
+                rate_per_second: rate,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1_000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         env.ledger().set_timestamp(300);
         client.cancel_stream(&stream_id);
@@ -20155,22 +20153,22 @@ mod i128_boundary_streams {
         env.ledger().set_timestamp(0);
 
         let stream_id = client.create_stream(
-        &sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: large_deposit,
-            rate_per_second: rate,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1_000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: large_deposit,
+                rate_per_second: rate,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1_000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         env.ledger().set_timestamp(700);
         client.cancel_stream(&stream_id);
@@ -20199,22 +20197,22 @@ mod i128_boundary_streams {
         env.ledger().set_timestamp(0);
 
         let stream_id = client.create_stream(
-        &sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: large_deposit,
-            rate_per_second: rate,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1_000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: large_deposit,
+                rate_per_second: rate,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1_000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         // Sender can cancel — must succeed
         env.ledger().set_timestamp(100);
@@ -20235,22 +20233,22 @@ mod i128_boundary_streams {
         env.ledger().set_timestamp(0);
 
         let stream_id = client.create_stream(
-        &sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: large_deposit,
-            rate_per_second: rate,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1_000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: large_deposit,
+                rate_per_second: rate,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1_000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         env.ledger().set_timestamp(500);
         let withdrawn = client.withdraw(&stream_id);
@@ -20273,22 +20271,22 @@ mod i128_boundary_streams {
         env.ledger().set_timestamp(0);
 
         let stream_id = client.create_stream(
-        &sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: large_deposit,
-            rate_per_second: rate,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1_000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: large_deposit,
+                rate_per_second: rate,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1_000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         env.ledger().set_timestamp(200);
         client.pause_stream(&stream_id, &crate::PauseReason::Operational);
@@ -20311,22 +20309,22 @@ mod i128_boundary_streams {
         env.ledger().set_timestamp(0);
 
         let stream_id = client.create_stream(
-        &sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: large_deposit,
-            rate_per_second: rate,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1_000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: large_deposit,
+                rate_per_second: rate,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1_000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         env.ledger().set_timestamp(300);
         client.pause_stream(&stream_id, &crate::PauseReason::Operational);
@@ -20451,22 +20449,22 @@ mod i128_boundary_streams {
         env.ledger().set_timestamp(0);
 
         let stream_id = client.create_stream(
-        &sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: large_deposit,
-            rate_per_second: rate,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1_000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: large_deposit,
+                rate_per_second: rate,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1_000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         // Partial withdrawal at t=300
         env.ledger().set_timestamp(300);
@@ -20563,22 +20561,22 @@ mod recipient_index_stress {
         let mut stream_ids = Vec::new(&ctx.env);
         for _ in 0..10 {
             let id = ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: 100_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 100u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+                &ctx.sender,
+                &CreateStreamParams {
+                    recipient: recipient.clone(),
+                    deposit_amount: 100_i128,
+                    rate_per_second: 1_i128,
+                    start_time: 0u64,
+                    cliff_time: 0u64,
+                    end_time: 100u64,
+                    withdraw_dust_threshold: Some(0),
+                    memo: None,
+                    metadata: None,
+                    kind: crate::StreamKind::Linear,
+                    irrevocable: None,
+                    witness: None,
+                },
+            );
             stream_ids.push_back(id);
         }
 
@@ -20635,22 +20633,22 @@ mod recipient_index_stress {
         let mut ids = Vec::new(&ctx.env);
         for _i in 0..5 {
             let id = ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+                &ctx.sender,
+                &CreateStreamParams {
+                    recipient: ctx.recipient.clone(),
+                    deposit_amount: 1000_i128,
+                    rate_per_second: 1_i128,
+                    start_time: 0u64,
+                    cliff_time: 0u64,
+                    end_time: 1000u64,
+                    withdraw_dust_threshold: Some(0),
+                    memo: None,
+                    metadata: None,
+                    kind: crate::StreamKind::Linear,
+                    irrevocable: None,
+                    witness: None,
+                },
+            );
             ids.push_back(id);
         }
 
@@ -20671,22 +20669,22 @@ mod recipient_index_stress {
 
         // Create a stream
         ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 1000_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         // Range with start > end returns empty
         let streams = ctx.client().get_streams_by_id_range(&5, &1, &10);
@@ -20704,22 +20702,22 @@ mod recipient_index_stress {
         ctx.sac.mint(&ctx.sender, &5_000_i128);
         for _ in 0..150 {
             ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 100_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 100u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+                &ctx.sender,
+                &CreateStreamParams {
+                    recipient: ctx.recipient.clone(),
+                    deposit_amount: 100_i128,
+                    rate_per_second: 1_i128,
+                    start_time: 0u64,
+                    cliff_time: 0u64,
+                    end_time: 100u64,
+                    withdraw_dust_threshold: Some(0),
+                    memo: None,
+                    metadata: None,
+                    kind: crate::StreamKind::Linear,
+                    irrevocable: None,
+                    witness: None,
+                },
+            );
         }
 
         // Request 200, should be capped at MAX_PAGE_SIZE (100)
@@ -20739,22 +20737,22 @@ mod recipient_index_stress {
         // Create 5 streams
         for _ in 0..5 {
             ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 1000,
-            rate_per_second: 1,
-            start_time: 0,
-            cliff_time: 0,
-            end_time: 1000,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+                &ctx.sender,
+                &CreateStreamParams {
+                    recipient: ctx.recipient.clone(),
+                    deposit_amount: 1000,
+                    rate_per_second: 1,
+                    start_time: 0,
+                    cliff_time: 0,
+                    end_time: 1000,
+                    withdraw_dust_threshold: Some(0),
+                    memo: None,
+                    metadata: None,
+                    kind: crate::StreamKind::Linear,
+                    irrevocable: None,
+                    witness: None,
+                },
+            );
         }
 
         // Close stream 2 (make it completed first)
@@ -20778,22 +20776,22 @@ mod recipient_index_stress {
         // Create 10 streams
         for _ in 0..10 {
             ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 100_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 100u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+                &ctx.sender,
+                &CreateStreamParams {
+                    recipient: ctx.recipient.clone(),
+                    deposit_amount: 100_i128,
+                    rate_per_second: 1_i128,
+                    start_time: 0u64,
+                    cliff_time: 0u64,
+                    end_time: 100u64,
+                    withdraw_dust_threshold: Some(0),
+                    memo: None,
+                    metadata: None,
+                    kind: crate::StreamKind::Linear,
+                    irrevocable: None,
+                    witness: None,
+                },
+            );
         }
 
         // Use u64::MAX for open-ended range with limit 5
@@ -20810,22 +20808,22 @@ mod recipient_index_stress {
         ctx.env.ledger().set_timestamp(0);
 
         ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 1000_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         let streams = ctx.client().get_streams_by_id_range(&0, &10, &0);
         assert_eq!(streams.len(), 0, "Zero limit should return empty");
@@ -20841,22 +20839,22 @@ mod recipient_index_stress {
         // Create 10 streams for this recipient
         for _ in 0..10 {
             ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+                &ctx.sender,
+                &CreateStreamParams {
+                    recipient: recipient.clone(),
+                    deposit_amount: 1000_i128,
+                    rate_per_second: 1_i128,
+                    start_time: 0u64,
+                    cliff_time: 0u64,
+                    end_time: 1000u64,
+                    withdraw_dust_threshold: Some(0),
+                    memo: None,
+                    metadata: None,
+                    kind: crate::StreamKind::Linear,
+                    irrevocable: None,
+                    witness: None,
+                },
+            );
         }
 
         // Page 1: cursor=0, limit=3
@@ -20910,22 +20908,22 @@ mod recipient_index_stress {
         ctx.sac.mint(&ctx.sender, &5_000_i128);
         for _ in 0..150 {
             ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: 100,
-            rate_per_second: 1,
-            start_time: 0,
-            cliff_time: 100,
-            end_time: 100,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+                &ctx.sender,
+                &CreateStreamParams {
+                    recipient: recipient.clone(),
+                    deposit_amount: 100,
+                    rate_per_second: 1,
+                    start_time: 0,
+                    cliff_time: 100,
+                    end_time: 100,
+                    withdraw_dust_threshold: Some(0),
+                    memo: None,
+                    metadata: None,
+                    kind: crate::StreamKind::Linear,
+                    irrevocable: None,
+                    witness: None,
+                },
+            );
         }
 
         // Request 200, should be capped at MAX_PAGE_SIZE (100)
@@ -20946,22 +20944,22 @@ mod recipient_index_stress {
 
         let recipient = Address::generate(&ctx.env);
         ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: 1000_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         // Cursor beyond total count
         let result = ctx
@@ -20981,22 +20979,22 @@ mod recipient_index_stress {
 
         let recipient = Address::generate(&ctx.env);
         ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: 1000_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         let result = ctx
             .client()
@@ -21015,43 +21013,43 @@ mod recipient_index_stress {
         // Create 5 streams for recipient1
         for _ in 0..5 {
             ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: recipient1.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+                &ctx.sender,
+                &CreateStreamParams {
+                    recipient: recipient1.clone(),
+                    deposit_amount: 1000_i128,
+                    rate_per_second: 1_i128,
+                    start_time: 0u64,
+                    cliff_time: 0u64,
+                    end_time: 1000u64,
+                    withdraw_dust_threshold: Some(0),
+                    memo: None,
+                    metadata: None,
+                    kind: crate::StreamKind::Linear,
+                    irrevocable: None,
+                    witness: None,
+                },
+            );
         }
 
         // Create 3 streams for recipient2
         for _ in 0..3 {
             ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: recipient2.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+                &ctx.sender,
+                &CreateStreamParams {
+                    recipient: recipient2.clone(),
+                    deposit_amount: 1000_i128,
+                    rate_per_second: 1_i128,
+                    start_time: 0u64,
+                    cliff_time: 0u64,
+                    end_time: 1000u64,
+                    withdraw_dust_threshold: Some(0),
+                    memo: None,
+                    metadata: None,
+                    kind: crate::StreamKind::Linear,
+                    irrevocable: None,
+                    witness: None,
+                },
+            );
         }
 
         // Paginate recipient1
@@ -21077,22 +21075,22 @@ mod recipient_index_stress {
         // Create 5 streams
         for _ in 0..5 {
             ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+                &ctx.sender,
+                &CreateStreamParams {
+                    recipient: recipient.clone(),
+                    deposit_amount: 1000_i128,
+                    rate_per_second: 1_i128,
+                    start_time: 0u64,
+                    cliff_time: 0u64,
+                    end_time: 1000u64,
+                    withdraw_dust_threshold: Some(0),
+                    memo: None,
+                    metadata: None,
+                    kind: crate::StreamKind::Linear,
+                    irrevocable: None,
+                    witness: None,
+                },
+            );
         }
 
         // Close stream 2 (make completed first)
@@ -21131,22 +21129,22 @@ mod recipient_index_stress {
         // Create 25 streams
         for _ in 0..25 {
             ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: 100,
-            rate_per_second: 1,
-            start_time: 0,
-            cliff_time: 100,
-            end_time: 100,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+                &ctx.sender,
+                &CreateStreamParams {
+                    recipient: recipient.clone(),
+                    deposit_amount: 100,
+                    rate_per_second: 1,
+                    start_time: 0,
+                    cliff_time: 100,
+                    end_time: 100,
+                    withdraw_dust_threshold: Some(0),
+                    memo: None,
+                    metadata: None,
+                    kind: crate::StreamKind::Linear,
+                    irrevocable: None,
+                    witness: None,
+                },
+            );
         }
 
         // Simulate full export using pagination
@@ -21186,22 +21184,22 @@ mod recipient_index_stress {
         // Create 3 streams (IDs 0, 1, 2)
         for _ in 0..3 {
             ctx.client().create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+                &ctx.sender,
+                &CreateStreamParams {
+                    recipient: ctx.recipient.clone(),
+                    deposit_amount: 1000_i128,
+                    rate_per_second: 1_i128,
+                    start_time: 0u64,
+                    cliff_time: 0u64,
+                    end_time: 1000u64,
+                    withdraw_dust_threshold: Some(0),
+                    memo: None,
+                    metadata: None,
+                    kind: crate::StreamKind::Linear,
+                    irrevocable: None,
+                    witness: None,
+                },
+            );
         }
 
         // Request range [0, 100] with limit 10 - only 3 exist
@@ -21231,22 +21229,22 @@ mod structured_error_tests {
         let client = FluxoraStreamClient::new(&ctx.env, &ctx.contract_id);
 
         let stream_id = client.create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 1000_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         ctx.env.ledger().set_timestamp(500);
 
@@ -21329,22 +21327,22 @@ mod structured_error_tests {
         ctx.sac.mint(&ctx.sender, &(i128::MAX - 10_000));
 
         let stream_id = client.create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: i128::MAX,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: large_end,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: i128::MAX,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: large_end,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         // new_rate * large_end overflows i128
         let overflow_rate = i128::MAX / (large_end as i128) + 2;
@@ -21366,22 +21364,22 @@ mod structured_error_tests {
         let client = FluxoraStreamClient::new(&ctx.env, &ctx.contract_id);
 
         let stream_id = client.create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 1000_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         ctx.env.ledger().set_timestamp(500);
         client.set_global_emergency_paused(&true);
@@ -21401,22 +21399,22 @@ mod structured_error_tests {
         let client = FluxoraStreamClient::new(&ctx.env, &ctx.contract_id);
 
         let stream_id = client.create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 1000_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         client.set_global_emergency_paused(&true);
 
@@ -21436,22 +21434,22 @@ mod structured_error_tests {
         let client = FluxoraStreamClient::new(&ctx.env, &ctx.contract_id);
 
         let stream_id = client.create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 1000_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         ctx.env.ledger().set_timestamp(500);
         client.set_global_emergency_paused(&true);
@@ -21482,22 +21480,22 @@ mod structured_error_tests {
 
         // Use a generous deposit so the original rate is 5/s and we can decrease to 1/s.
         let stream_id = client.create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: 10_000_i128,
-            rate_per_second: 5_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1_000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: crate::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 10_000_i128,
+                rate_per_second: 5_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1_000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: crate::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         client.set_global_emergency_paused(&true);
 

@@ -96,44 +96,44 @@ impl<'a> Ctx<'a> {
     fn create_default_stream(&self) -> u64 {
         self.env.ledger().set_timestamp(0);
         self.client().create_stream(
-        &self.sender,
-        &CreateStreamParams {
-            recipient: self.recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    )
+            &self.sender,
+            &CreateStreamParams {
+                recipient: self.recipient.clone(),
+                deposit_amount: 1000_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        )
     }
 
     /// Create a stream with a cliff at t=500.
     fn create_cliff_stream(&self) -> u64 {
         self.env.ledger().set_timestamp(0);
         self.client().create_stream(
-        &self.sender,
-        &CreateStreamParams {
-            recipient: self.recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 500u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    )
+            &self.sender,
+            &CreateStreamParams {
+                recipient: self.recipient.clone(),
+                deposit_amount: 1000_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 500u64,
+                end_time: 1000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        )
     }
 }
 
@@ -2291,7 +2291,10 @@ fn clone_correctly_updates_total_liabilities() {
             .get(&DataKey::TotalLiabilities)
             .unwrap_or(0)
     });
-    assert_eq!(initial_liabilities, 1000, "initial liabilities must equal source deposit");
+    assert_eq!(
+        initial_liabilities, 1000,
+        "initial liabilities must equal source deposit"
+    );
 
     // Perform clone with new deposit of 1000
     let new_deposit = 1000_i128;
@@ -2307,13 +2310,24 @@ fn clone_correctly_updates_total_liabilities() {
 
     // Verify source is untouched
     let source_after = ctx.client().get_stream_state(&source_id);
-    assert_eq!(source_after, source_before, "source stream must remain unchanged");
+    assert_eq!(
+        source_after, source_before,
+        "source stream must remain unchanged"
+    );
 
     // Verify sender and contract balances
     let sender_balance_after = ctx.token.balance(&ctx.sender);
     let contract_balance_after = ctx.token.balance(&ctx.contract_id);
-    assert_eq!(sender_balance_after, sender_balance_before - new_deposit, "sender balance must decrease by new deposit");
-    assert_eq!(contract_balance_after, contract_balance_before + new_deposit, "contract balance must increase by new deposit");
+    assert_eq!(
+        sender_balance_after,
+        sender_balance_before - new_deposit,
+        "sender balance must decrease by new deposit"
+    );
+    assert_eq!(
+        contract_balance_after,
+        contract_balance_before + new_deposit,
+        "contract balance must increase by new deposit"
+    );
 
     // Verify TotalLiabilities is exactly initial + new_deposit
     let final_liabilities: i128 = ctx.env.as_contract(&cid, || {
@@ -2323,7 +2337,11 @@ fn clone_correctly_updates_total_liabilities() {
             .get(&DataKey::TotalLiabilities)
             .unwrap_or(0)
     });
-    assert_eq!(final_liabilities, initial_liabilities + new_deposit, "liabilities must increase by new deposit");
+    assert_eq!(
+        final_liabilities,
+        initial_liabilities + new_deposit,
+        "liabilities must increase by new deposit"
+    );
 
     // Verify new stream's state
     let new_stream = ctx.client().get_stream_state(&new_id);

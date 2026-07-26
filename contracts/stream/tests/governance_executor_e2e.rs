@@ -267,22 +267,22 @@ impl E2EContext {
         // past end_time and resume fails with StreamTerminalState.
         let duration = duration.max(TIMELOCK * 3);
         self.stream_client.create_stream(
-        &self.sender,
-        &CreateStreamParams {
-            recipient: self.recipient.clone(),
-            deposit_amount: (duration as i128),
-            rate_per_second: 1,
-            start_time: now,
-            cliff_time: now,
-            end_time: (now + duration),
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    )
+            &self.sender,
+            &CreateStreamParams {
+                recipient: self.recipient.clone(),
+                deposit_amount: (duration as i128),
+                rate_per_second: 1,
+                start_time: now,
+                cliff_time: now,
+                end_time: (now + duration),
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        )
     }
 
     /// Propose → approve to quorum → wait timelock → execute.

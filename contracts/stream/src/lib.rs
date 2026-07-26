@@ -1866,9 +1866,11 @@ fn remove_template_id_for_owner(
 fn save_stream_offer(env: &Env, offer: &StreamOffer) {
     let key = DataKey::PendingStreamOffer(offer.offer_id);
     env.storage().persistent().set(&key, offer);
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+    env.storage().persistent().extend_ttl(
+        &key,
+        PERSISTENT_LIFETIME_THRESHOLD,
+        PERSISTENT_BUMP_AMOUNT,
+    );
 }
 
 /// Load a `StreamOffer` by offer ID, bumping its TTL on read.
@@ -1881,9 +1883,11 @@ fn load_stream_offer(env: &Env, offer_id: u64) -> Result<StreamOffer, ContractEr
         .persistent()
         .get(&key)
         .ok_or(ContractError::OfferNotFound)?;
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+    env.storage().persistent().extend_ttl(
+        &key,
+        PERSISTENT_LIFETIME_THRESHOLD,
+        PERSISTENT_BUMP_AMOUNT,
+    );
     Ok(offer)
 }
 
@@ -2563,7 +2567,9 @@ impl FluxoraStream {
 
         let mut total_shares: u32 = 0;
         for (_, share) in recipients.iter() {
-            total_shares = total_shares.checked_add(share).ok_or(ContractError::ArithmeticOverflow)?;
+            total_shares = total_shares
+                .checked_add(share)
+                .ok_or(ContractError::ArithmeticOverflow)?;
         }
         if total_shares == 0 {
             return Err(ContractError::InvalidParams);
@@ -3445,7 +3451,11 @@ impl FluxoraStream {
         Ok(withdrawable)
     }
 
-    pub fn withdraw_from_pool(env: Env, stream_id: u64, caller: Address) -> Result<i128, ContractError> {
+    pub fn withdraw_from_pool(
+        env: Env,
+        stream_id: u64,
+        caller: Address,
+    ) -> Result<i128, ContractError> {
         require_not_globally_paused(&env)?;
         caller.require_auth();
 
@@ -3476,7 +3486,7 @@ impl FluxoraStream {
         }
 
         let global_accrued = Self::calculate_accrued(env.clone(), stream_id)?;
-        
+
         let caller_accrued = (global_accrued as u128)
             .checked_mul(caller_share as u128)
             .and_then(|val| val.checked_div(total_shares as u128))
@@ -3486,7 +3496,8 @@ impl FluxoraStream {
         let mut withdrawable = caller_accrued - caller_withdrawn;
 
         let token_address = get_token(&env)?;
-        let contract_balance = token::Client::new(&env, &token_address).balance(&env.current_contract_address());
+        let contract_balance =
+            token::Client::new(&env, &token_address).balance(&env.current_contract_address());
         withdrawable = withdrawable.min(contract_balance);
 
         if withdrawable <= 0 {
@@ -3502,11 +3513,17 @@ impl FluxoraStream {
 
         stream.withdrawn_amount += withdrawable;
         stream.last_withdraw_ledger = env.ledger().sequence();
-        save_pooled_stream_withdrawn(&env, stream_id, caller.clone(), caller_withdrawn + withdrawable);
+        save_pooled_stream_withdrawn(
+            &env,
+            stream_id,
+            caller.clone(),
+            caller_withdrawn + withdrawable,
+        );
 
-        let completed_now = (stream.status == StreamStatus::Active || stream.status == StreamStatus::Paused)
+        let completed_now = (stream.status == StreamStatus::Active
+            || stream.status == StreamStatus::Paused)
             && stream.withdrawn_amount >= stream.deposit_amount;
-        
+
         let previous_status = stream.status;
         if completed_now {
             stream.status = StreamStatus::Completed;
@@ -3514,7 +3531,9 @@ impl FluxoraStream {
         save_stream(&env, &stream);
         reconcile_paused_stream_count(&env, previous_status, stream.status);
 
-        let liabilities = read_total_liabilities(&env).checked_sub(withdrawable).unwrap_or(0);
+        let liabilities = read_total_liabilities(&env)
+            .checked_sub(withdrawable)
+            .unwrap_or(0);
         write_total_liabilities(&env, liabilities);
 
         push_token(&env, &caller, withdrawable)?;
@@ -3812,7 +3831,10 @@ impl FluxoraStream {
         require_not_globally_paused(&env)?;
         let mut stream = load_stream(&env, stream_id)?;
 
-        let actual_current = stream.claim_owner.clone().unwrap_or(stream.recipient.clone());
+        let actual_current = stream
+            .claim_owner
+            .clone()
+            .unwrap_or(stream.recipient.clone());
         if actual_current != current_owner {
             return Err(ContractError::Unauthorized);
         }
@@ -3834,7 +3856,6 @@ impl FluxoraStream {
 
         Ok(())
     }
-
 
     /// Withdraw accrued tokens from multiple streams in one call (recipient-only).
     ///
@@ -3914,7 +3935,10 @@ impl FluxoraStream {
         for stream_id in stream_ids.iter() {
             let mut stream = load_stream(&env, stream_id)?;
 
-            let current_owner = stream.claim_owner.clone().unwrap_or(stream.recipient.clone());
+            let current_owner = stream
+                .claim_owner
+                .clone()
+                .unwrap_or(stream.recipient.clone());
             if current_owner != recipient {
                 return Err(ContractError::Unauthorized);
             }
@@ -4863,7 +4887,9 @@ impl FluxoraStream {
         }
 
         if stream.last_rate_change_ledger > 0 {
-            let min_ledger = stream.last_rate_change_ledger.saturating_add(MIN_RATE_INTERVAL_LEDGERS);
+            let min_ledger = stream
+                .last_rate_change_ledger
+                .saturating_add(MIN_RATE_INTERVAL_LEDGERS);
             if env.ledger().sequence() < min_ledger {
                 return Err(ContractError::RateCooldownActive);
             }
@@ -5005,7 +5031,9 @@ impl FluxoraStream {
         }
 
         if stream.last_rate_change_ledger > 0 {
-            let min_ledger = stream.last_rate_change_ledger.saturating_add(MIN_RATE_INTERVAL_LEDGERS);
+            let min_ledger = stream
+                .last_rate_change_ledger
+                .saturating_add(MIN_RATE_INTERVAL_LEDGERS);
             if env.ledger().sequence() < min_ledger {
                 return Err(ContractError::RateCooldownActive);
             }
@@ -5195,7 +5223,8 @@ impl FluxoraStream {
             .checked_add(future_accrual_parent)
             .ok_or(ContractError::ArithmeticOverflow)?;
 
-        let child_deposit = stream.deposit_amount
+        let child_deposit = stream
+            .deposit_amount
             .checked_sub(new_deposit_parent)
             .ok_or(ContractError::ArithmeticOverflow)?;
 
@@ -5212,7 +5241,7 @@ impl FluxoraStream {
 
         // Create child stream
         let child_stream_id = next_stream_id_for(&env, &stream.sender);
-        
+
         let child_stream = Stream {
             stream_id: child_stream_id,
             sender: stream.sender.clone(),
@@ -6224,8 +6253,7 @@ impl FluxoraStream {
             };
 
             // Terminal streams don't count toward any health bucket.
-            if stream.status == StreamStatus::Completed
-                || stream.status == StreamStatus::Cancelled
+            if stream.status == StreamStatus::Completed || stream.status == StreamStatus::Cancelled
             {
                 continue;
             }
@@ -8745,10 +8773,7 @@ impl FluxoraStream {
     ///
     /// # Authorization
     /// None — public read-only query.
-    pub fn get_recipient_pending_offers(
-        env: Env,
-        recipient: Address,
-    ) -> soroban_sdk::Vec<u64> {
+    pub fn get_recipient_pending_offers(env: Env, recipient: Address) -> soroban_sdk::Vec<u64> {
         load_recipient_pending_offers(&env, &recipient)
     }
 }

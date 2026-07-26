@@ -95,22 +95,22 @@ impl<'a> Ctx<'a> {
 
     fn create_stream_with_metadata(&self, metadata: Option<Map<Bytes, Bytes>>) -> u64 {
         self.client().create_stream(
-        &self.sender,
-        &CreateStreamParams {
-            recipient: self.recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0_i128),
-            memo: None,
-            metadata: None,
-            kind: metadata,
-            irrevocable: None,
-            witness: None,
-        },
-    )
+            &self.sender,
+            &CreateStreamParams {
+                recipient: self.recipient.clone(),
+                deposit_amount: 1000_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1000u64,
+                withdraw_dust_threshold: Some(0_i128),
+                memo: None,
+                metadata: None,
+                kind: metadata,
+                irrevocable: None,
+                witness: None,
+            },
+        )
     }
 }
 

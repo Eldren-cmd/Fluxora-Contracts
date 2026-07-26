@@ -56,22 +56,22 @@ impl TestContext {
 
     fn create_stream(&self, rate_per_second: i128) -> Result<u64, ContractError> {
         Ok(self.client.create_stream(
-        &self.sender,
-        &CreateStreamParams {
-            recipient: self.recipient.clone(),
-            deposit_amount: 1000,
-            rate_per_second: rate_per_second,
-            start_time: 0,
-            cliff_time: 0,
-            end_time: 1000,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: fluxora_stream::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    ))
+            &self.sender,
+            &CreateStreamParams {
+                recipient: self.recipient.clone(),
+                deposit_amount: 1000,
+                rate_per_second: rate_per_second,
+                start_time: 0,
+                cliff_time: 0,
+                end_time: 1000,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: fluxora_stream::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        ))
     }
 }
 

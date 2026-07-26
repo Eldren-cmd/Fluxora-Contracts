@@ -4,8 +4,8 @@ extern crate std;
 
 use ed25519_dalek::{Signer, SigningKey};
 use fluxora_stream::{
-    ContractError, CreateStreamParams, FluxoraStream, FluxoraStreamClient, StreamEvent,
-    StreamKind, StreamStatus,
+    ContractError, CreateStreamParams, FluxoraStream, FluxoraStreamClient, StreamEvent, StreamKind,
+    StreamStatus,
 };
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger},
@@ -93,42 +93,42 @@ impl<'a> WitnessCtx<'a> {
 
     fn create_stream_with_witness(&self) -> u64 {
         self.client().create_stream(
-        &self.sender,
-        &CreateStreamParams {
-            recipient: self.recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: StreamKind::Linear,
-            irrevocable: Some(self.witness_addr.clone()),
-            witness: None,
-        },
-    )
+            &self.sender,
+            &CreateStreamParams {
+                recipient: self.recipient.clone(),
+                deposit_amount: 1000_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: StreamKind::Linear,
+                irrevocable: Some(self.witness_addr.clone()),
+                witness: None,
+            },
+        )
     }
 
     fn create_stream_without_witness(&self) -> u64 {
         self.client().create_stream(
-        &self.sender,
-        &CreateStreamParams {
-            recipient: self.recipient.clone(),
-            deposit_amount: 1000_i128,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: 1000u64,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    )
+            &self.sender,
+            &CreateStreamParams {
+                recipient: self.recipient.clone(),
+                deposit_amount: 1000_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1000u64,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        )
     }
 
     fn sign_cancel(&self, stream_id: u64, deadline: u64) -> BytesN<64> {
@@ -164,7 +164,10 @@ fn witnessed_cancel_refund_matches_sender_cancel() {
         .witnessed_cancel_stream(&stream_id, &ctx.witness_pk, &9999, &sig);
 
     let sender_balance = ctx.token.balance(&ctx.sender);
-    assert_eq!(sender_balance, 9600, "sender should receive 600 token refund at t=400");
+    assert_eq!(
+        sender_balance, 9600,
+        "sender should receive 600 token refund at t=400"
+    );
 }
 
 #[test]
@@ -193,12 +196,9 @@ fn witnessed_cancel_expired_deadline_rejected() {
     ctx.env.ledger().set_timestamp(5000);
     let sig = ctx.sign_cancel(stream_id, 100);
 
-    let result = ctx.client().try_witnessed_cancel_stream(
-        &stream_id,
-        &ctx.witness_pk,
-        &100,
-        &sig,
-    );
+    let result = ctx
+        .client()
+        .try_witnessed_cancel_stream(&stream_id, &ctx.witness_pk, &100, &sig);
     assert_eq!(
         result,
         Err(Ok(ContractError::SignatureDeadlineExpired)),
@@ -217,12 +217,9 @@ fn witnessed_cancel_no_witness_configured_rejected() {
     ctx.env.ledger().set_timestamp(100);
     let sig = ctx.sign_cancel(stream_id, 9999);
 
-    let result = ctx.client().try_witnessed_cancel_stream(
-        &stream_id,
-        &ctx.witness_pk,
-        &9999,
-        &sig,
-    );
+    let result = ctx
+        .client()
+        .try_witnessed_cancel_stream(&stream_id, &ctx.witness_pk, &9999, &sig);
     assert_eq!(
         result,
         Err(Ok(ContractError::InvalidParams)),
@@ -241,12 +238,9 @@ fn witnessed_cancel_wrong_public_key_rejected() {
     let other_sig = sign_witness_msg(&ctx.env, &other_sk, &msg);
 
     ctx.env.ledger().set_timestamp(100);
-    let result = ctx.client().try_witnessed_cancel_stream(
-        &stream_id,
-        &other_pk,
-        &9999,
-        &other_sig,
-    );
+    let result = ctx
+        .client()
+        .try_witnessed_cancel_stream(&stream_id, &other_pk, &9999, &other_sig);
     assert_eq!(
         result,
         Err(Ok(ContractError::InvalidSignature)),
@@ -311,12 +305,9 @@ fn witnessed_cancel_already_cancelled_rejected() {
     ctx.client()
         .witnessed_cancel_stream(&stream_id, &ctx.witness_pk, &9999, &sig);
 
-    let replay = ctx.client().try_witnessed_cancel_stream(
-        &stream_id,
-        &ctx.witness_pk,
-        &9999,
-        &sig,
-    );
+    let replay = ctx
+        .client()
+        .try_witnessed_cancel_stream(&stream_id, &ctx.witness_pk, &9999, &sig);
     assert_eq!(replay, Err(Ok(ContractError::InvalidState)));
 }
 

@@ -92,22 +92,22 @@ impl<'a> FactoryClientWrapper<'a> {
         withdraw_dust_threshold: &i128,
     ) -> u64 {
         self.client.create_stream(
-        sender,
-        &fluxora_stream::CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: deposit_amount,
-            rate_per_second: rate_per_second,
-            start_time: start_time,
-            cliff_time: cliff_time,
-            end_time: end_time,
-            withdraw_dust_threshold: Some(withdraw_dust_threshold),
-            memo: fluxora_stream::StreamKind::Linear,
-            metadata: None,
-            kind: None,
-            irrevocable: None,
-            witness: None,
-        },
-    )
+            sender,
+            &fluxora_stream::CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: deposit_amount,
+                rate_per_second: rate_per_second,
+                start_time: start_time,
+                cliff_time: cliff_time,
+                end_time: end_time,
+                withdraw_dust_threshold: Some(withdraw_dust_threshold),
+                memo: fluxora_stream::StreamKind::Linear,
+                metadata: None,
+                kind: None,
+                irrevocable: None,
+                witness: None,
+            },
+        )
     }
 
     fn try_create_stream(
@@ -123,22 +123,22 @@ impl<'a> FactoryClientWrapper<'a> {
     ) -> Result<Result<u64, soroban_sdk::Error>, Result<FactoryError, soroban_sdk::InvokeError>>
     {
         self.client.try_create_stream(
-        sender,
-        &fluxora_stream::CreateStreamParams {
-            recipient: recipient.clone(),
-            deposit_amount: deposit_amount,
-            rate_per_second: rate_per_second,
-            start_time: start_time,
-            cliff_time: cliff_time,
-            end_time: end_time,
-            withdraw_dust_threshold: Some(withdraw_dust_threshold),
-            memo: fluxora_stream::StreamKind::Linear,
-            metadata: None,
-            kind: None,
-            irrevocable: None,
-            witness: None,
-        },
-    )
+            sender,
+            &fluxora_stream::CreateStreamParams {
+                recipient: recipient.clone(),
+                deposit_amount: deposit_amount,
+                rate_per_second: rate_per_second,
+                start_time: start_time,
+                cliff_time: cliff_time,
+                end_time: end_time,
+                withdraw_dust_threshold: Some(withdraw_dust_threshold),
+                memo: fluxora_stream::StreamKind::Linear,
+                metadata: None,
+                kind: None,
+                irrevocable: None,
+                witness: None,
+            },
+        )
     }
 
     fn set_factory_paused(&self, paused: &bool) {
@@ -1317,4 +1317,3 @@ fn test_batch_create_streams_memo_over_limit_rejected_by_factory_guard() {
     assert_eq!(ctx.factory.get_factory_stream_count(), 0);
     assert_eq!(ctx.token.balance(&ctx.sender), SENDER_FUNDING);
 }
-

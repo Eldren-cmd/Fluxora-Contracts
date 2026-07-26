@@ -43,20 +43,19 @@ fn create_stream_with_rate(
     let end_time = start_time + 1000;
     let deposit = rate_per_second * 1000; // exactly covers the stream
 
-    client
-        .create_stream(
-            sender,
-            recipient,
-            &deposit,
-            &rate_per_second,
-            &start_time,
-            &cliff_time,
-            &end_time,
-            &0i128, // no dust threshold
-            &None,  // no memo
-            &StreamKind::Linear,
-            &None,
-        )
+    client.create_stream(
+        sender,
+        recipient,
+        &deposit,
+        &rate_per_second,
+        &start_time,
+        &cliff_time,
+        &end_time,
+        &0i128, // no dust threshold
+        &None,  // no memo
+        &StreamKind::Linear,
+        &None,
+    )
 }
 
 // Happy path: rate above 0
@@ -347,20 +346,19 @@ fn test_min_rate_with_long_duration_succeeds() {
     let rate = 100i128;
     let deposit = rate * (duration as i128);
 
-    let stream_id = client
-        .create_stream(
-            &sender,
-            &recipient,
-            &deposit,
-            &rate,
-            &start_time,
-            &start_time,
-            &end_time,
-            &0i128,
-            &None,
-            &StreamKind::Linear,
-            &None,
-        );
+    let stream_id = client.create_stream(
+        &sender,
+        &recipient,
+        &deposit,
+        &rate,
+        &start_time,
+        &start_time,
+        &end_time,
+        &0i128,
+        &None,
+        &StreamKind::Linear,
+        &None,
+    );
 
     let stream = client.get_stream_state(&stream_id);
     assert_eq!(stream.rate_per_second, rate);
@@ -449,7 +447,7 @@ fn test_update_rate_per_second_throttle_enforced() {
     // The first update works because last_rate_change_ledger is 0.
     let res = client.try_update_rate_per_second(&stream_id, &200i128);
     assert_eq!(res, Ok(Ok(())));
-    
+
     // Now the next update in the same ledger should fail with RateCooldownActive
     let result = client.try_update_rate_per_second(&stream_id, &300i128);
     assert_eq!(result, Err(Ok(ContractError::RateCooldownActive)));

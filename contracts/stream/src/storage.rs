@@ -755,9 +755,11 @@ pub(crate) fn save_pooled_stream_shares(
 ) {
     let key = DataKey::PooledStreamShares(stream_id);
     env.storage().persistent().set(&key, shares);
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+    env.storage().persistent().extend_ttl(
+        &key,
+        PERSISTENT_LIFETIME_THRESHOLD,
+        PERSISTENT_BUMP_AMOUNT,
+    );
 }
 
 pub(crate) fn read_pooled_stream_shares(
@@ -766,9 +768,11 @@ pub(crate) fn read_pooled_stream_shares(
 ) -> Result<soroban_sdk::Vec<(Address, u32)>, ContractError> {
     let key = DataKey::PooledStreamShares(stream_id);
     if let Some(shares) = env.storage().persistent().get(&key) {
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_LIFETIME_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
         Ok(shares)
     } else {
         Err(ContractError::StreamNotFound)
@@ -783,18 +787,22 @@ pub(crate) fn save_pooled_stream_withdrawn(
 ) {
     let key = DataKey::PooledStreamWithdrawn(stream_id, recipient);
     env.storage().persistent().set(&key, &amount);
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+    env.storage().persistent().extend_ttl(
+        &key,
+        PERSISTENT_LIFETIME_THRESHOLD,
+        PERSISTENT_BUMP_AMOUNT,
+    );
 }
 
 pub(crate) fn read_pooled_stream_withdrawn(env: &Env, stream_id: u64, recipient: Address) -> i128 {
     let key = DataKey::PooledStreamWithdrawn(stream_id, recipient);
     let amount = env.storage().persistent().get(&key).unwrap_or(0);
     if amount > 0 {
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_LIFETIME_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
     }
     amount
 }

@@ -84,22 +84,22 @@ impl<'a> TestContext<'a> {
     /// Linear stream: rate=1 raw/s so timestamp == withdrawable (before any prior withdraw).
     fn create_linear_stream(&self, deposit: i128, threshold: i128, end_time: u64) -> u64 {
         self.client().create_stream(
-        &self.sender,
-        &CreateStreamParams {
-            recipient: self.recipient.clone(),
-            deposit_amount: deposit,
-            rate_per_second: 1_i128,
-            start_time: 0u64,
-            cliff_time: 0u64,
-            end_time: end_time,
-            withdraw_dust_threshold: Some(threshold),
-            memo: None,
-            metadata: None,
-            kind: StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    )
+            &self.sender,
+            &CreateStreamParams {
+                recipient: self.recipient.clone(),
+                deposit_amount: deposit,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: end_time,
+                withdraw_dust_threshold: Some(threshold),
+                memo: None,
+                metadata: None,
+                kind: StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        )
     }
 }
 

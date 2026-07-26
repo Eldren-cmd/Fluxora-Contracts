@@ -259,7 +259,10 @@ fn auto_renew_permissionless_preserves_subscription_schedule() {
 
     env.ledger().set_timestamp(1_100);
     client.withdraw(&old_id);
-    assert_eq!(client.get_stream_state(&old_id).status, StreamStatus::Completed);
+    assert_eq!(
+        client.get_stream_state(&old_id).status,
+        StreamStatus::Completed
+    );
 
     env.ledger().set_timestamp(1_200);
     let new_id = client.renew_stream(&old_id);
@@ -320,10 +323,7 @@ fn auto_renew_rejects_insufficient_sender_funding_without_new_stream() {
     client.withdraw(&old_id);
 
     let err = client.try_renew_stream(&old_id);
-    assert_eq!(
-        err,
-        Err(Ok(ContractError::AutoRenewFundingUnavailable))
-    );
+    assert_eq!(err, Err(Ok(ContractError::AutoRenewFundingUnavailable)));
     assert_eq!(client.get_stream_count(), 1);
     assert!(client.get_auto_renew(&old_id));
 }

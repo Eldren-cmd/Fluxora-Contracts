@@ -518,7 +518,7 @@ fn test_batch_mixed_recipient_partial_failure_rollback() {
         &ctx.env,
         ctx.make_params(&alice, 1_000, 1_000), // 1st: Alice (valid)
         ctx.make_params(&bob, 2_000, 2_000),   // 2nd: Bob (valid)
-        invalid_params,                         // 3rd: Bob (invalid - rate below min/zero)
+        invalid_params,                        // 3rd: Bob (invalid - rate below min/zero)
         ctx.make_params(&alice, 3_000, 3_000), // 4th: Alice (valid)
         ctx.make_params(&bob, 4_000, 4_000),   // 5th: Bob (valid)
     ];
@@ -566,4 +566,3 @@ fn test_batch_mixed_recipient_fully_valid_success() {
     assert!(bob_index.contains(ids.get(2).unwrap()));
     assert!(bob_index.contains(ids.get(4).unwrap()));
 }
-

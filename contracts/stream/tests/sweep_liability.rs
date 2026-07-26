@@ -229,22 +229,22 @@ fn test_keeper_fee_rounding_non_evenly_divisible_excess() {
         let start_time = ctx.env.ledger().timestamp();
 
         let stream_id = client.create_stream(
-        &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: total_excess,
-            rate_per_second: 0,
-            start_time: start_time,
-            cliff_time: start_time,
-            end_time: (start_time + 100),
-            withdraw_dust_threshold: None,
-            memo: None,
-            metadata: None,
-            kind: fluxora_stream::StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    );
+            &ctx.sender,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: total_excess,
+                rate_per_second: 0,
+                start_time: start_time,
+                cliff_time: start_time,
+                end_time: (start_time + 100),
+                withdraw_dust_threshold: None,
+                memo: None,
+                metadata: None,
+                kind: fluxora_stream::StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        );
 
         // Advance past keeper grace period
         ctx.env.ledger().set_timestamp(start_time + 604_800 + 1);
@@ -336,8 +336,14 @@ fn test_smallest_possible_excess_one_stroop() {
     let sender_refunded = ctx.token.balance(&ctx.sender) - sender_before;
 
     // Keeper must receive 0 (not overpaid)
-    assert_eq!(keeper_paid, 0, "keeper must receive 0 fee for 1-stroop excess");
-    assert!(keeper_paid <= total_excess, "keeper fee must not exceed total excess");
+    assert_eq!(
+        keeper_paid, 0,
+        "keeper must receive 0 fee for 1-stroop excess"
+    );
+    assert!(
+        keeper_paid <= total_excess,
+        "keeper fee must not exceed total excess"
+    );
 
     // Full 1 stroop returned to sender / retained
     assert_eq!(sender_refunded, 1, "remainder must equal 1 stroop");
@@ -349,4 +355,3 @@ fn test_smallest_possible_excess_one_stroop() {
         "keeper_paid + sender_refunded must equal 1 stroop exactly"
     );
 }
-

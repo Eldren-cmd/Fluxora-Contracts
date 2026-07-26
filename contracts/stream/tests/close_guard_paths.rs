@@ -55,41 +55,43 @@ impl<'a> Ctx<'a> {
     fn create_stream(&self, duration: u64) -> u64 {
         let now = self.env.ledger().timestamp();
         self.client.create_stream(
-        &self.sender,
-        &CreateStreamParams {
-            recipient: self.recipient.clone(),
-            deposit_amount: (duration as i128),
-            rate_per_second: 1,
-            start_time: now,
-            cliff_time: now,
-            end_time: (now + duration),
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    )
+            &self.sender,
+            &CreateStreamParams {
+                recipient: self.recipient.clone(),
+                deposit_amount: (duration as i128),
+                rate_per_second: 1,
+                start_time: now,
+                cliff_time: now,
+                end_time: (now + duration),
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        )
+    }
+
     fn create_irrevocable_stream(&self, duration: u64) -> u64 {
         let now = self.env.ledger().timestamp();
         self.client.create_stream(
-        &self.sender,
-        &CreateStreamParams {
-            recipient: self.recipient.clone(),
-            deposit_amount: (duration as i128),
-            rate_per_second: 1,
-            start_time: now,
-            cliff_time: now,
-            end_time: (now + duration),
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: StreamKind::Linear,
-            irrevocable: Some(true),
-            witness: None,
-        },
-    )
+            &self.sender,
+            &CreateStreamParams {
+                recipient: self.recipient.clone(),
+                deposit_amount: (duration as i128),
+                rate_per_second: 1,
+                start_time: now,
+                cliff_time: now,
+                end_time: (now + duration),
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: StreamKind::Linear,
+                irrevocable: Some(true),
+                witness: None,
+            },
+        )
     }
 }
 
@@ -324,7 +326,7 @@ fn test_irrevocable_stream_rejects_cancel() {
 fn test_irrevocable_stream_rejects_admin_cancel() {
     let ctx = Ctx::setup();
     let stream_id = ctx.create_irrevocable_stream(10_000);
-    
+
     // We would test cancel_stream_as_admin, but for simplicity we verify the guard
     // logic which is shared.
     let result = ctx.client.try_cancel_stream_as_admin(&stream_id);
@@ -335,7 +337,7 @@ fn test_irrevocable_stream_rejects_admin_cancel() {
 fn test_irrevocable_stream_rejects_keeper_cancel() {
     let ctx = Ctx::setup();
     let stream_id = ctx.create_irrevocable_stream(10_000);
-    
+
     // Fast-forward past end_time + grace_period
     ctx.env.ledger().with_mut(|l| {
         l.timestamp += 10_000 + 7 * 86400; // end_time + 7 days
@@ -350,9 +352,11 @@ fn test_irrevocable_stream_rejects_keeper_cancel() {
 fn test_irrevocable_stream_rejects_shorten_end_time() {
     let ctx = Ctx::setup();
     let stream_id = ctx.create_irrevocable_stream(10_000);
-    
+
     let now = ctx.env.ledger().timestamp();
-    let result = ctx.client.try_shorten_stream_end_time(&stream_id, &(now + 5_000));
+    let result = ctx
+        .client
+        .try_shorten_stream_end_time(&stream_id, &(now + 5_000));
     assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
 }
 
@@ -360,7 +364,7 @@ fn test_irrevocable_stream_rejects_shorten_end_time() {
 fn test_irrevocable_stream_rejects_bulk_cancel() {
     let ctx = Ctx::setup();
     let stream_id = ctx.create_irrevocable_stream(10_000);
-    
+
     let streams = soroban_sdk::vec![&ctx.env, stream_id];
     let result = ctx.client.try_bulk_cancel_streams(&ctx.sender, &streams);
     assert_eq!(result, Err(Ok(ContractError::Unauthorized)));

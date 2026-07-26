@@ -61,7 +61,8 @@ fn test_delegate_recipient_share_success() {
     let stream_id = create_stream(&env, &client, &sender, &recipient1, 10000);
 
     let share_bps = 5000; // 50%
-    let child_id = client.delegate_recipient_share(&stream_id, &recipient1, &share_bps, &recipient2);
+    let child_id =
+        client.delegate_recipient_share(&stream_id, &recipient1, &share_bps, &recipient2);
 
     let parent_state = client.get_stream_state(&stream_id);
     let child_state = client.get_stream_state(&child_id);
@@ -83,7 +84,10 @@ fn test_delegate_recipient_share_depth_limit() {
 
     let contract_id = env.register_contract(None, fluxora_stream::FluxoraStream {});
     let client = FluxoraStreamClient::new(&env, &contract_id);
-    client.init(&env.register_stellar_asset_contract(Address::generate(&env)), &Address::generate(&env));
+    client.init(
+        &env.register_stellar_asset_contract(Address::generate(&env)),
+        &Address::generate(&env),
+    );
 
     let sender = Address::generate(&env);
     let r1 = Address::generate(&env);
@@ -93,14 +97,14 @@ fn test_delegate_recipient_share_depth_limit() {
     let r5 = Address::generate(&env);
 
     let id1 = create_stream(&env, &client, &sender, &r1, 10000);
-    
+
     // Depth 1
     let id2 = client.delegate_recipient_share(&id1, &r1, &5000, &r2);
     // Depth 2
     let id3 = client.delegate_recipient_share(&id2, &r2, &5000, &r3);
     // Depth 3
     let id4 = client.delegate_recipient_share(&id3, &r3, &5000, &r4);
-    
+
     // Depth 4 should fail (MAX_DELEGATION_DEPTH is 3)
     let err = client
         .try_delegate_recipient_share(&id4, &r4, &5000, &r5)
@@ -117,7 +121,10 @@ fn test_delegate_recipient_share_cyclic() {
 
     let contract_id = env.register_contract(None, fluxora_stream::FluxoraStream {});
     let client = FluxoraStreamClient::new(&env, &contract_id);
-    client.init(&env.register_stellar_asset_contract(Address::generate(&env)), &Address::generate(&env));
+    client.init(
+        &env.register_stellar_asset_contract(Address::generate(&env)),
+        &Address::generate(&env),
+    );
 
     let sender = Address::generate(&env);
     let r1 = Address::generate(&env);
@@ -127,7 +134,7 @@ fn test_delegate_recipient_share_cyclic() {
     let id1 = create_stream(&env, &client, &sender, &r1, 10000);
     let id2 = client.delegate_recipient_share(&id1, &r1, &5000, &r2);
     let id3 = client.delegate_recipient_share(&id2, &r2, &5000, &r3);
-    
+
     // Cycle back to r1
     let err = client
         .try_delegate_recipient_share(&id3, &r3, &5000, &r1)

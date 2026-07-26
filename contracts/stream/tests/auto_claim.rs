@@ -56,22 +56,22 @@ impl<'a> Ctx<'a> {
     fn create_default_stream(&self) -> u64 {
         let now = self.env.ledger().timestamp();
         self.client.create_stream(
-        &self.sender,
-        &CreateStreamParams {
-            recipient: self.recipient.clone(),
-            deposit_amount: 1000i128,
-            rate_per_second: 1i128,
-            start_time: (now + 1),
-            cliff_time: (now + 1),
-            end_time: (now + 1001),
-            withdraw_dust_threshold: Some(0i128),
-            memo: None,
-            metadata: None,
-            kind: StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
-    )
+            &self.sender,
+            &CreateStreamParams {
+                recipient: self.recipient.clone(),
+                deposit_amount: 1000i128,
+                rate_per_second: 1i128,
+                start_time: (now + 1),
+                cliff_time: (now + 1),
+                end_time: (now + 1001),
+                withdraw_dust_threshold: Some(0i128),
+                memo: None,
+                metadata: None,
+                kind: StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        )
     }
 }
 
