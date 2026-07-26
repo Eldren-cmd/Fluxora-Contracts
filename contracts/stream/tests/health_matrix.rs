@@ -139,7 +139,6 @@ fn test_health_matrix_paused_underfunded_mid() {
         },
     );
 
-    ctx.env.ledger().set_sequence(100);
     ctx.env.ledger().set_timestamp(300);
     ctx.client
         .pause_stream(&stream_id, &PauseReason::Operational);
@@ -190,7 +189,6 @@ fn test_health_matrix_expired_not_fully_withdrawn() {
 fn test_health_matrix_completed_after_end() {
     let ctx = TestContext::setup();
     ctx.env.ledger().set_timestamp(0);
-    ctx.env.ledger().set_sequence(1);
 
     let stream_id = ctx.client.create_stream(
         &ctx.sender,
@@ -211,7 +209,6 @@ fn test_health_matrix_completed_after_end() {
     );
 
     ctx.env.ledger().set_timestamp(1200);
-    ctx.env.ledger().set_sequence(100);
     ctx.client.withdraw(&stream_id);
 
     let health = ctx.client.get_stream_health(&stream_id);
@@ -259,4 +256,34 @@ fn test_health_matrix_cancelled_mid() {
     // Seconds until depletion still returns the time remaining if it wasn't cancelled,
     // since the rate_per_second is unmodified.
     assert_eq!(health.seconds_until_depletion, Some(500));
+}
+
+#[test]
+fn test_health_matrix_before_start() {
+    let ctx = TestContext::setup();
+    ctx.env.ledger().set_timestamp(0);
+
+    // start_time=500, so ledger at t=0 is before the stream begins.
+    let stream_id = ctx.client.create_stream(
+        &ctx.sender,
+        &ctx.recipient,
+        &1000_i128,
+        &1_i128,
+        &500u64,
+        &500u64,
+        &1000u64,
+        &0_i128,
+        &None,
+        &StreamKind::Linear,
+    );
+
+    ctx.env.ledger().set_timestamp(0);
+    let health = ctx.client.get_stream_health(&stream_id);
+
+    assert_eq!(health.is_underfunded, false);
+    assert_eq!(health.is_expired, false);
+    assert_eq!(health.accrued_to_date, 0);
+    assert_eq!(health.remaining_deposit, 1000);
+    // No accrual yet, so depletion timer is undefined -> None.
+    assert_eq!(health.seconds_until_depletion, None);
 }
