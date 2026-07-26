@@ -44,7 +44,7 @@ Notes:
 | AutoClaimSet | `["ac_set", stream_id: u64]` | `AutoClaimSet { stream_id: u64, destination: Address }` | When a recipient configures or changes a permissionless final-claim destination via `set_auto_claim`. |
 | AutoClaimRevoked | `["ac_revoke", stream_id: u64]` | `AutoClaimRevoked { stream_id: u64 }` | When a recipient revokes auto-claim configuration via `revoke_auto_claim`. |
 | AutoClaimTriggered | `["ac_trig", stream_id: u64]` | `AutoClaimTriggered { stream_id: u64, destination: Address, amount: i128 }` | When a third party successfully executes a configured final claim via `trigger_auto_claim`. |
-| MigrationCheckpoint | `["migrated"]` | `(from_version: u32, to_version: u32, timestamp: u64)` | When `migration_v5_to_v6` is called as an auditable deployment checkpoint. |
+| MigrationCheckpoint | `["migrated"]` | `(from_version: u32, to_version: u32, timestamp: u64)` | No function currently emits this event. Reserved for future migration checkpoints. |
 | ReservationReleased | `["res_rel", holder: Address]` | `(start_id: u64, count: u64, consumed: u64, reclaimed: u64)` | When a stream ID reservation is voluntarily released or reclaimed after expiry. |
 | ContractUpgraded | `["upgraded"]` | `ContractUpgraded { new_wasm_hash: BytesN<32>, new_version: u32, upgraded_at: u64, upgraded_by: Address }` | When the admin successfully calls `upgrade`. A second, legacy `["upgrade"]` topic event `(new_wasm_hash, old_version, new_version, admin)` is also emitted for backward compatibility with older indexers. |
 
@@ -606,7 +606,6 @@ Commit message suggestion: `docs: add event schema and topics for indexers`
 | `set_auto_claim`                                             | `"ac_set"`      |
 | `trigger_auto_claim`                                         | `"ac_trig"`     |
 | `sweep_excess`                                               | `"ex_swept"`    |
-| `migrate_recipient_index`                                    | `"migrated"`    |
 | `keeper_cancel`                                              | `"kp_cncl"`     |
 | `decrease_rate_per_second`, `shorten_stream_end_time`, `top_up_stream`, `cancel_stream` | `"hlth_chg"` |
 

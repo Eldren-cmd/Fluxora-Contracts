@@ -514,7 +514,7 @@ class TestValidate:
 """,
         )
         vda.validate(*paths)
-        assert "STALE DOC:" in capsys.readouterr().out
+        assert "STALE AUDIT DOC:" in capsys.readouterr().out
 
     def test_fails_on_missing_entrypoint(self, tmp_path):
         paths = _write_files(
@@ -824,6 +824,28 @@ class TestParseMeasurements:
 
     def test_returns_dict(self):
         assert isinstance(vg.parse_measurements(""), dict)
+
+
+# ---------------------------------------------------------------------------
+# build_cargo_test_env
+# ---------------------------------------------------------------------------
+
+class TestBuildCargoTestEnv:
+    def test_prepends_cargo_bin_to_path(self, monkeypatch):
+        monkeypatch.setenv("HOME", "/tmp/testhome")
+        monkeypatch.setenv("PATH", "/usr/bin")
+        env = vg.build_cargo_test_env()
+        assert env["PATH"] == "/tmp/testhome/.cargo/bin:/usr/bin"
+
+    def test_raises_when_home_unset(self, monkeypatch):
+        monkeypatch.delenv("HOME", raising=False)
+        with pytest.raises(RuntimeError, match="HOME is not set"):
+            vg.build_cargo_test_env()
+
+    def test_raises_when_home_empty(self, monkeypatch):
+        monkeypatch.setenv("HOME", "")
+        with pytest.raises(RuntimeError, match="HOME is not set"):
+            vg.build_cargo_test_env()
 
 
 # ---------------------------------------------------------------------------

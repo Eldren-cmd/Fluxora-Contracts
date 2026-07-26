@@ -45,7 +45,7 @@ treasury tooling) can use this reference to handle protocol exceptions correctly
 | `RateCapExceeded` | 30 | Rate per second exceeds the configured maximum | `create_stream`, `update_rate_per_second` |
 | `PauseCooldownActive` | 32 | Stream pause cooldown period is still active | `pause_stream` |
 | `WithdrawalTooFrequent` | 33 | Withdrawal attempted before minimum interval elapsed | `withdraw`, `delegated_withdraw`, `batch_withdraw` |
-| `KeeperGracePeriodNotElapsed` | 34 | Keeper cancellation grace period has not elapsed | `keeper_cancel` |
+| `ReservationAlreadyActive` | 34 | A reservation is already active for this caller | `reserve_stream_ids` |
 | `InvalidDustThreshold` | 35 | Withdraw dust threshold is negative or exceeds deposit amount | `create_stream`, `create_streams`, `create_streams_partial`, `create_stream_relative`, `create_stream_from_template` |
 | `AutoRenewFundingUnavailable` | 36 | The sender cannot fund an auto-renewal with the available balance and allowance | `renew_stream` |
 | `OfferNotFound` | 37 | Stream offer not found (accepted, rejected, cancelled, or never existed) | `accept_stream_offer`, `reject_stream_offer`, `cancel_stream_offer`, `get_stream_offer` |

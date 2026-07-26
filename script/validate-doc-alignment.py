@@ -175,7 +175,7 @@ _RE_CONTRACTIMPL_BLOCK = re.compile(
     re.MULTILINE,
 )
 
-_RE_AUDIT_TABLE_ROW = re.compile(r"^\| `([^`]+)`\s+\|", re.MULTILINE)
+_RE_AUDIT_TABLE_ROW = re.compile(r"^\s*\| `([^`]+)`\s+\|", re.MULTILINE)
 
 _VERSION_CONTRADICTION = "There is no `version` entrypoint"
 
@@ -184,7 +184,7 @@ def extract_entrypoints(source: str) -> set:
     return names - ENTRYPOINT_ALLOWLIST
 
 def extract_contractimpl_entrypoints(source: str) -> set:
-    """Return pub fn names declared inside the FluxoraStream #[contractimpl] block."""
+    """Return pub fn names declared inside any #[contractimpl] block."""
     match = _RE_CONTRACTIMPL_BLOCK.search(source)
     if not match:
         return set()
@@ -201,7 +201,7 @@ def extract_contractimpl_entrypoints(source: str) -> set:
         elif char == "}":
             depth -= 1
             if depth == 0:
-                block = source[brace_start:index + 1]
+                block = source[brace_start + 1:index]
                 names = set(_RE_ENTRYPOINT.findall(block))
                 return names - ENTRYPOINT_ALLOWLIST - AUDIT_ENTRYPOINT_ALLOWLIST
     return set()
