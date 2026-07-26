@@ -4,6 +4,8 @@ Contract storage architecture, key design, TTL policies, and `DataKey` evolution
 
 **Source of truth:** `contracts/stream/src/lib.rs` (`DataKey` enum, TTL constants, storage helpers)
 
+> **Canonical discriminant reference:** For the frozen discriminant table (variants 0–14) and the full ABI stability contract, see [ABI_STABILITY.md § 2.4](./ABI_STABILITY.md#24-storage-key-discriminants). The table below tracks all variants including post-freeze additions; always cross-check against both this file and `ABI_STABILITY.md` when adding new variants.
+
 ---
 
 ## 1. DataKey Enum
@@ -42,6 +44,10 @@ pub enum DataKey {
     LastAccrualLedgerTimestamp,
     PausedStreamCount,
     TotalKeeperFeesPaid,
+    SenderStreams(Address),
+    AutoRenewEnabled(u64),
+    PendingStreamOffer(u64),
+    RecipientPendingOffers(Address),
 }
 ```
 
@@ -78,6 +84,10 @@ pub enum DataKey {
 | 26 | `LastAccrualLedgerTimestamp` | Instance | `u64` | `current_accrual_timestamp` | `current_accrual_timestamp` |
 | 27 | `PausedStreamCount` | Instance | `u64` | `pause_stream`, `pause_stream_as_admin` | `resume_stream`, `cancel_stream`, `close_completed_stream` |
 | 28 | `TotalKeeperFeesPaid` | Instance | `i128` | `init` | `keeper_cancel` |
+| 29 | `SenderStreams(Address)` | Persistent | `Vec<u64>` (sorted) | `create_stream`, `create_streams` | `close_completed_stream`, `close_cancelled_stream` (removes entry) |
+| 30 | `AutoRenewEnabled(u64)` | Persistent | `bool` | sender opt-in | sender revoke |
+| 31 | `PendingStreamOffer(u64)` | Persistent | `StreamOffer` | `create_stream_offer` | accept/reject/cancel (removes) |
+| 32 | `RecipientPendingOffers(Address)` | Persistent | `Vec<u64>` | `create_stream_offer` | accept/reject/cancel (removes) |
 
 ---
 

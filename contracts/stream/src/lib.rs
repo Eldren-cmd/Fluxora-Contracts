@@ -1162,6 +1162,10 @@ pub struct StreamScheduleTemplate {
 ///    migration tooling can determine which entries exist on a given instance.
 ///
 /// Current discriminant assignments (must never change) — see enum definition below for order.
+///
+/// **Doc sync check:** When adding or modifying variants, update *both*:
+/// - `docs/storage.md` — full discriminant table and code block
+/// - `docs/ABI_STABILITY.md` — frozen discriminant table (variants 0–14) and any breaking-change notes
 #[contracttype]
 pub enum DataKey {
     Config,                    // Instance storage for global settings (admin/token).
@@ -4871,6 +4875,17 @@ impl FluxoraStream {
     ///
     /// This view is O(1): it reads the maintained `DataKey::PausedStreamCount` instance key
     /// instead of forcing indexers or dashboards to enumerate every stream.
+    ///
+    /// **Scope:** this counter tracks **only** individually-paused streams (via
+    /// `pause_stream`, `pause_stream_as_admin`, or equivalent).  It is **not**
+    /// affected by the protocol-wide `GlobalEmergencyPaused` circuit breaker.
+    /// When the global flag is `true` all user-facing mutations are blocked and
+    /// every stream is effectively frozen, but `get_paused_stream_count` still
+    /// returns the number of streams that are individually `Paused` — which may
+    /// be `0` during a global emergency pause with no individually-paused streams.
+    ///
+    /// Callers that need full pause-state awareness (e.g. dashboards, monitors)
+    /// must check **both** this view **and** [`get_global_emergency_paused`].
     ///
     /// On upgraded deployments the key may initially be absent, in which case this view
     /// returns `0` until post-upgrade pause/resume/cancel/complete transitions repopulate it.
