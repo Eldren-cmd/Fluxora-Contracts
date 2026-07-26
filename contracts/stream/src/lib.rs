@@ -385,8 +385,6 @@ pub enum ContractError {
     Unauthorized = 7,
     /// Contract is already initialized.
     AlreadyInitialised = 8,
-    /// The token contract did not expose the expected SEP-41 interface during init.
-    TokenVerificationFailed = 23,
     /// Token balance or allowance is insufficient (emulated check if possible, otherwise caught by token client).
     InsufficientBalance = 9,
     /// Deposit amount does not cover the total streamable amount.
@@ -416,27 +414,29 @@ pub enum ContractError {
     /// Caller not authorized to delete template.
     TemplateUnauthorized = 22,
     /// Pause reason string exceeds `MAX_PAUSE_REASON_BYTES`.
-    PauseReasonTooLong = 27,
+    PauseReasonTooLong = 23,
     ReservationNotFound = 24,
     ReservationNotExpirable = 25,
     ReservationStillActive = 26,
-    ReservationAlreadyActive = 34,
     /// Ledger-backed accrual observed a timestamp lower than the previous accrual timestamp.
-    ClockRegression = 28,
-    /// Metadata payload exceeds the allowed size.
-    MetadataTooLarge = 29,
+    ClockRegression = 27,
     /// Stream kind is not supported.
-    UnsupportedStreamKind = 30,
+    UnsupportedStreamKind = 28,
     /// Rate update exceeds the configured rate cap.
-    RateCapExceeded = 31,
+    RateCapExceeded = 29,
     /// Operation blocked by a pause cooldown.
-    PauseCooldownActive = 32,
+    PauseCooldownActive = 30,
     /// Rate limit exceeded for withdrawals.
-    WithdrawalTooFrequent = 33,
+    WithdrawalTooFrequent = 31,
+    /// Metadata payload exceeds the allowed size.
+    MetadataTooLarge = 32,
     /// Keeper attempted to close a stream before the grace period elapsed.
-    KeeperGracePeriodNotElapsed = 35,
+    KeeperGracePeriodNotElapsed = 33,
+    ReservationAlreadyActive = 34,
     /// Withdraw dust threshold is negative or exceeds deposit amount.
-    InvalidDustThreshold = 36,
+    InvalidDustThreshold = 35,
+    /// Rate update cooldown is active.
+    RateCooldownActive = 36,
     /// The sender cannot fund an auto-renewal with the available balance and allowance.
     AutoRenewFundingUnavailable = 37,
     /// Stream offer not found (accepted, rejected, cancelled, or never existed).
@@ -447,12 +447,12 @@ pub enum ContractError {
     OfferWrongRecipient = 40,
     /// Caller is not the sender who created this offer.
     OfferWrongSender = 41,
-    /// Rate update cooldown is active.
-    RateCooldownActive = 42,
     /// Delegation cycle detected.
     CyclicDelegation = 43,
     /// Maximum delegation depth exceeded.
     DelegationDepthExceeded = 44,
+    /// The token contract did not expose the expected SEP-41 interface during init.
+    TokenVerificationFailed = 88,
 }
 
 #[contracttype]

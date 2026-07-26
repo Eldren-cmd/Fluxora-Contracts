@@ -22380,11 +22380,6 @@ fn test_contract_error_discriminants_are_stable() {
         "TemplateUnauthorized must be 22"
     );
     assert_eq!(
-        ContractError::TokenVerificationFailed as u32,
-        23,
-        "TokenVerificationFailed must be 23"
-    );
-    assert_eq!(
         ContractError::ReservationNotFound as u32,
         24,
         "ReservationNotFound must be 24"
@@ -22401,42 +22396,97 @@ fn test_contract_error_discriminants_are_stable() {
     );
     assert_eq!(
         ContractError::PauseReasonTooLong as u32,
-        27,
-        "PauseReasonTooLong must be 27"
+        23,
+        "PauseReasonTooLong must be 23"
     );
     assert_eq!(
         ContractError::ClockRegression as u32,
-        28,
-        "ClockRegression must be 28"
-    );
-    assert_eq!(
-        ContractError::MetadataTooLarge as u32,
-        29,
-        "MetadataTooLarge must be 29"
+        27,
+        "ClockRegression must be 27"
     );
     assert_eq!(
         ContractError::UnsupportedStreamKind as u32,
-        30,
-        "UnsupportedStreamKind must be 30"
+        28,
+        "UnsupportedStreamKind must be 28"
     );
     assert_eq!(
         ContractError::RateCapExceeded as u32,
-        31,
-        "RateCapExceeded must be 31"
+        29,
+        "RateCapExceeded must be 29"
     );
     assert_eq!(
         ContractError::PauseCooldownActive as u32,
-        32,
-        "PauseCooldownActive must be 32"
+        30,
+        "PauseCooldownActive must be 30"
     );
     assert_eq!(
         ContractError::WithdrawalTooFrequent as u32,
-        33,
-        "WithdrawalTooFrequent must be 33"
+        31,
+        "WithdrawalTooFrequent must be 31"
+    );
+    assert_eq!(
+        ContractError::MetadataTooLarge as u32,
+        32,
+        "MetadataTooLarge must be 32"
     );
     assert_eq!(
         ContractError::KeeperGracePeriodNotElapsed as u32,
+        33,
+        "KeeperGracePeriodNotElapsed must be 33"
+    );
+    assert_eq!(
+        ContractError::ReservationAlreadyActive as u32,
         34,
-        "KeeperGracePeriodNotElapsed must be 34"
+        "ReservationAlreadyActive must be 34"
+    );
+    assert_eq!(
+        ContractError::InvalidDustThreshold as u32,
+        35,
+        "InvalidDustThreshold must be 35"
+    );
+    assert_eq!(
+        ContractError::RateCooldownActive as u32,
+        36,
+        "RateCooldownActive must be 36"
+    );
+    assert_eq!(
+        ContractError::AutoRenewFundingUnavailable as u32,
+        37,
+        "AutoRenewFundingUnavailable must be 37"
+    );
+    assert_eq!(
+        ContractError::OfferNotFound as u32,
+        38,
+        "OfferNotFound must be 38"
+    );
+    assert_eq!(
+        ContractError::OfferExpired as u32,
+        39,
+        "OfferExpired must be 39"
+    );
+    assert_eq!(
+        ContractError::OfferWrongRecipient as u32,
+        40,
+        "OfferWrongRecipient must be 40"
+    );
+    assert_eq!(
+        ContractError::OfferWrongSender as u32,
+        41,
+        "OfferWrongSender must be 41"
+    );
+    assert_eq!(
+        ContractError::TokenVerificationFailed as u32,
+        88,
+        "TokenVerificationFailed must be 88"
+    );
+    assert_eq!(
+        ContractError::CyclicDelegation as u32,
+        43,
+        "CyclicDelegation must be 43"
+    );
+    assert_eq!(
+        ContractError::DelegationDepthExceeded as u32,
+        44,
+        "DelegationDepthExceeded must be 44"
     );
 }

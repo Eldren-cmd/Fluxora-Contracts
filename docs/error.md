@@ -34,24 +34,28 @@ treasury tooling) can use this reference to handle protocol exceptions correctly
 | `TemplateNotFound` | 20 | Requested stream template does not exist | `get_stream_template`, `create_stream_from_template`, `delete_stream_template` |
 | `TemplateLimitExceeded` | 21 | Per-owner or global template limit would be exceeded | `register_stream_template` |
 | `TemplateUnauthorized` | 22 | Caller is not authorized to delete a template | `delete_stream_template` |
-| `TokenVerificationFailed` | 23 | Token contract does not expose the expected SEP-41 interface during init | `init` |
+| `PauseReasonTooLong` | 23 | Pause reason string exceeds `MAX_PAUSE_REASON_BYTES` | `pause_protocol` |
 | `ReservationNotFound` | 24 | No ID reservation exists for the specified holder | `release_id_reservation`, `reclaim_expired_id_reservation` |
 | `ReservationStillActive` | 25 | Reservation has not yet expired and cannot be reclaimed | `reclaim_expired_id_reservation` |
 | `ReservationNotExpirable` | 26 | Reservation has no expiry and cannot be reclaimed | `reclaim_expired_id_reservation` |
+| `ClockRegression` | 27 | Ledger-backed accrual observed a timestamp lower than the previous accrual timestamp | `calculate_accrued`, `get_withdrawable`, `withdraw`, `withdraw_to`, `batch_withdraw`, `batch_withdraw_to`, rate changes, `cancel_stream`, auto-claim paths |
+| `UnsupportedStreamKind` | 28 | Stream kind does not support this operation (e.g., rate changes on CliffOnly) | `update_rate_per_second`, `decrease_rate_per_second` |
+| `RateCapExceeded` | 29 | Rate per second exceeds the configured maximum | `create_stream`, `update_rate_per_second` |
+| `PauseCooldownActive` | 30 | Stream pause cooldown period is still active | `pause_stream` |
+| `WithdrawalTooFrequent` | 31 | Withdrawal attempted before minimum interval elapsed | `withdraw`, `delegated_withdraw`, `batch_withdraw` |
+| `MetadataTooLarge` | 32 | Stream metadata exceeds size limits | `create_stream`, `create_streams`, `create_streams_partial` |
+| `KeeperGracePeriodNotElapsed` | 33 | Keeper cancellation grace period has not elapsed | `keeper_cancel` |
 | `ReservationAlreadyActive` | 34 | A reservation is already active for this caller | `reserve_stream_ids` |
-| `PauseReasonTooLong` | 27 | Pause reason string exceeds `MAX_PAUSE_REASON_BYTES` | `pause_protocol` |
-| `ClockRegression` | 28 | Ledger-backed accrual observed a timestamp lower than the previous accrual timestamp | `calculate_accrued`, `get_withdrawable`, `withdraw`, `withdraw_to`, `batch_withdraw`, `batch_withdraw_to`, rate changes, `cancel_stream`, auto-claim paths |
-| `MetadataTooLarge` | 29 | Stream metadata exceeds size limits | `create_stream`, `create_streams`, `create_streams_partial` |
-| `RateCapExceeded` | 30 | Rate per second exceeds the configured maximum | `create_stream`, `update_rate_per_second` |
-| `PauseCooldownActive` | 32 | Stream pause cooldown period is still active | `pause_stream` |
-| `WithdrawalTooFrequent` | 33 | Withdrawal attempted before minimum interval elapsed | `withdraw`, `delegated_withdraw`, `batch_withdraw` |
-| `KeeperGracePeriodNotElapsed` | 35 | Keeper cancellation grace period has not elapsed | `keeper_cancel` |
-| `InvalidDustThreshold` | 36 | Withdraw dust threshold is negative or exceeds deposit amount | `create_stream`, `create_streams`, `create_streams_partial`, `create_stream_relative`, `create_stream_from_template` |
-| `AutoRenewFundingUnavailable` | 37 | Sender cannot fund auto-renewal with available balance and allowance | `renew_stream` |
-| `OfferNotFound` | 38 | Stream offer not found | `accept_stream_offer`, `reject_stream_offer`, `cancel_stream_offer`, `get_stream_offer` |
-| `OfferExpired` | 39 | Stream offer has passed expiry timestamp | `accept_stream_offer` |
-| `OfferWrongRecipient` | 40 | Caller is not the intended recipient of stream offer | `accept_stream_offer`, `reject_stream_offer` |
-| `OfferWrongSender` | 41 | Caller is not the sender who created stream offer | `cancel_stream_offer` |
+| `InvalidDustThreshold` | 35 | Withdraw dust threshold is negative or exceeds deposit amount | `create_stream`, `create_streams`, `create_streams_partial`, `create_stream_relative`, `create_stream_from_template` |
+| `RateCooldownActive` | 36 | Rate change attempted too soon after a previous rate change | `update_rate_per_second`, `decrease_rate_per_second` |
+| `AutoRenewFundingUnavailable` | 37 | The sender cannot fund an auto-renewal with the available balance and allowance | `trigger_auto_claim`, auto-renew paths |
+| `OfferNotFound` | 38 | Stream offer not found (accepted, rejected, cancelled, or never existed) | `accept_stream_offer`, `reject_stream_offer`, `cancel_stream_offer`, `get_stream_offer` |
+| `OfferExpired` | 39 | Stream offer has expired (`current_time > offer.expiry_time`) | `accept_stream_offer` |
+| `OfferWrongRecipient` | 40 | Caller is not the intended recipient of this offer | `accept_stream_offer`, `reject_stream_offer` |
+| `OfferWrongSender` | 41 | Caller is not the sender who created this offer | `cancel_stream_offer` |
+| `CyclicDelegation` | 43 | Cyclic delegation detected in delegation chain | `delegate_recipient_share` |
+| `DelegationDepthExceeded` | 44 | Delegation depth limit exceeded | `delegate_recipient_share` |
+| `TokenVerificationFailed` | 88 | Token contract does not expose the expected SEP-41 interface during init | `init` |
 
 Non-error enum values used by stream creation and accrual:
 
@@ -59,6 +63,7 @@ Non-error enum values used by stream creation and accrual:
 |------|-------|---------|
 | `Linear` | 0 | A `StreamKind` that accrues continuously over time after the start time. |
 | `CliffOnly` | 1 | A `StreamKind` that unlocks the full deposit at the cliff time in one step. |
+| `CliffSlope` | 2 | A `StreamKind` that accrues linearly from cliff_time to end_time, and nothing before. |
 
 ---
 
@@ -622,7 +627,7 @@ match client.try_delegated_withdraw(&relayer, &stream_id, &signature, &nonce, &e
 
 ---
 
-### ClockRegression (28)
+### ClockRegression (27)
 
 **Definition**: Ledger-backed accrual observed a ledger timestamp lower than the previous accrual timestamp stored for the contract instance.
 
@@ -684,7 +689,7 @@ match client.try_delegated_withdraw(&relayer, &stream_id, &signature, &nonce, &e
 
 ---
 
-### TokenVerificationFailed (23)
+### TokenVerificationFailed (88)
 
 **Definition**: During initialization, the configured token contract did not expose the expected SEP-41 interface.
 
@@ -692,7 +697,7 @@ match client.try_delegated_withdraw(&relayer, &stream_id, &signature, &nonce, &e
 
 ---
 
-### PauseReasonTooLong (27)
+### PauseReasonTooLong (23)
 
 **Definition**: `pause_protocol` received a reason string longer than `MAX_PAUSE_REASON_BYTES`.
 
@@ -731,6 +736,185 @@ match client.try_create_stream(..., &withdraw_dust_threshold, ...) {
 **Success Semantics**: Returns `u64` stream_id with valid dust threshold.
 
 **Integrator Note**: The dust threshold enforces a minimum withdrawable amount to prevent dust accumulation. The threshold must be in the range `[0, deposit_amount]`. When `withdraw_dust_threshold == deposit_amount`, withdrawals are only allowed when the full deposit is withdrawable (e.g., at stream end or after final drain).
+
+---
+
+### RateCooldownActive (36)
+
+**Definition**: Rate change attempted too soon after a previous rate change.
+
+**Trigger Conditions**:
+- `update_rate_per_second` or `decrease_rate_per_second` called before `MIN_RATE_INTERVAL_LEDGERS` has elapsed since the last rate change
+- Cooldown period enforced to prevent rate manipulation attacks
+
+**Affected Roles**:
+| Role | Can Trigger | Notes |
+|------|------------|-------|
+| Sender | Yes | Attempting rate changes too frequently |
+| Admin | Yes | If admin can modify rates |
+
+**Client Action**:
+```rust
+match client.try_update_rate_per_second(&stream_id, &new_rate) {
+    Ok(()) => { /* success */ }
+    Err(ContractError::RateCooldownActive) => {
+        // Wait for cooldown period to elapse
+        // Check last_rate_change_ledger from stream state
+        let stream = client.get_stream_state(&stream_id)?;
+        let cooldown_remaining = MIN_RATE_INTERVAL_LEDGERS - (current_ledger - stream.last_rate_change_ledger);
+        // Retry after cooldown_remaining ledgers
+    }
+    Err(e) => { /* handle other errors */ }
+}
+```
+
+**Success Semantics**: Returns `()` on successful rate update.
+
+---
+
+### CyclicDelegation (43)
+
+**Definition**: Cyclic delegation detected in delegation chain.
+
+**Trigger Conditions**:
+- `delegate_recipient_share` called when the delegation would create a cycle (A delegates to B, B delegates to A)
+- Prevents infinite loops in delegation traversal
+
+**Affected Roles**:
+| Role | Can Trigger | Notes |
+|------|------------|-------|
+| Recipient | Yes | Attempting to delegate to an ancestor in the chain |
+
+**Client Action**:
+```rust
+match client.try_delegate_recipient_share(&stream_id, &new_recipient, &share_bps) {
+    Ok(child_stream_id) => { /* success */ }
+    Err(ContractError::CyclicDelegation) => {
+        // Delegation would create a cycle
+        // Choose a different recipient that is not an ancestor
+        // Check parent_stream_id chain to avoid cycles
+    }
+    Err(e) => { /* handle other errors */ }
+}
+```
+
+**Success Semantics**: Returns `u64` child_stream_id of the delegated stream.
+
+---
+
+### DelegationDepthExceeded (44)
+
+**Definition**: Delegation depth limit exceeded.
+
+**Trigger Conditions**:
+- `delegate_recipient_share` called when the delegation chain would exceed `MAX_DELEGATION_DEPTH`
+- Prevents excessively deep delegation chains that could impact performance
+
+**Affected Roles**:
+| Role | Can Trigger | Notes |
+|------|------------|-------|
+| Recipient | Yes | Attempting to delegate beyond maximum depth |
+
+**Client Action**:
+```rust
+match client.try_delegate_recipient_share(&stream_id, &new_recipient, &share_bps) {
+    Ok(child_stream_id) => { /* success */ }
+    Err(ContractError::DelegationDepthExceeded) => {
+        // Delegation chain would exceed MAX_DELEGATION_DEPTH
+        // Choose a recipient closer in the chain or reduce delegation depth
+        // Check current delegation_depth from stream state
+    }
+    Err(e) => { /* handle other errors */ }
+}
+```
+
+**Success Semantics**: Returns `u64` child_stream_id of the delegated stream.
+
+---
+
+### AutoRenewFundingUnavailable (37)
+
+**Definition**: The sender cannot fund an auto-renewal with the available balance and allowance.
+
+**Trigger Conditions**:
+- Auto-renew trigger path attempted but sender token balance or allowance is insufficient
+
+**Affected Roles**:
+| Role | Can Trigger | Notes |
+|------|------------|-------|
+| Funder / Keeper | Yes | `trigger_auto_claim`, auto-renew execution |
+
+**Client Action**:
+Ensure the stream sender has deposited sufficient balance and granted sufficient token allowance for auto-renewal.
+
+---
+
+### OfferNotFound (38)
+
+**Definition**: Stream offer not found (accepted, rejected, cancelled, or never existed).
+
+**Trigger Conditions**:
+- Attempting to accept, reject, cancel, or query an `offer_id` that does not exist in pending offer storage
+
+**Affected Roles**:
+| Role | Can Trigger | Notes |
+|------|------------|-------|
+| Recipient | Yes | `accept_stream_offer`, `reject_stream_offer` |
+| Sender | Yes | `cancel_stream_offer` |
+
+**Client Action**:
+Verify the `offer_id` parameter and ensure the offer has not already been accepted, rejected, or cancelled.
+
+---
+
+### OfferExpired (39)
+
+**Definition**: Stream offer has expired (`current_time > offer.expiry_time`).
+
+**Trigger Conditions**:
+- Calling `accept_stream_offer` when the ledger timestamp exceeds the offer's `expiry_time`
+
+**Affected Roles**:
+| Role | Can Trigger | Notes |
+|------|------------|-------|
+| Recipient | Yes | `accept_stream_offer` |
+
+**Client Action**:
+Do not attempt to accept an expired offer. The sender must create a new stream offer with an updated expiry.
+
+---
+
+### OfferWrongRecipient (40)
+
+**Definition**: Caller is not the intended recipient of this offer.
+
+**Trigger Conditions**:
+- Calling `accept_stream_offer` or `reject_stream_offer` with an address that does not match `offer.recipient`
+
+**Affected Roles**:
+| Role | Can Trigger | Notes |
+|------|------------|-------|
+| Caller | Yes | `accept_stream_offer`, `reject_stream_offer` |
+
+**Client Action**:
+Ensure the transaction is signed and authorized by the specified recipient address.
+
+---
+
+### OfferWrongSender (41)
+
+**Definition**: Caller is not the sender who created this offer.
+
+**Trigger Conditions**:
+- Calling `cancel_stream_offer` with an address that does not match `offer.sender`
+
+**Affected Roles**:
+| Role | Can Trigger | Notes |
+|------|------------|-------|
+| Caller | Yes | `cancel_stream_offer` |
+
+**Client Action**:
+Ensure the cancellation request is invoked and authorized by the original offer sender.
 
 ---
 

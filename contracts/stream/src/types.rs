@@ -181,8 +181,6 @@ pub enum ContractError {
     Unauthorized = 7,
     /// Contract is already initialized.
     AlreadyInitialised = 8,
-    /// The token contract did not expose the expected SEP-41 interface during init.
-    TokenVerificationFailed = 88,
     /// Token balance or allowance is insufficient (emulated check if possible, otherwise caught by token client).
     InsufficientBalance = 9,
     /// Deposit amount does not cover the total streamable amount.
@@ -215,9 +213,8 @@ pub enum ContractError {
     PauseReasonTooLong = 23,
     ReservationNotFound = 24,
     ReservationNotExpirable = 25,
-    ClockRegression = 27,
     ReservationStillActive = 26,
-    ReservationAlreadyActive = 34,
+    ClockRegression = 27,
     /// Stream kind does not support this operation (e.g., rate changes on CliffOnly).
     UnsupportedStreamKind = 28,
     /// New rate exceeds the governance-controlled maximum rate per second.
@@ -230,14 +227,27 @@ pub enum ContractError {
     MetadataTooLarge = 32,
     /// Keeper attempted to cancel before grace period has elapsed past end_time.
     KeeperGracePeriodNotElapsed = 33,
+    ReservationAlreadyActive = 34,
     /// Withdraw dust threshold is negative or exceeds deposit amount.
     InvalidDustThreshold = 35,
     /// Rate change attempted too soon after a previous rate change.
     RateCooldownActive = 36,
+    /// The sender cannot fund an auto-renewal with the available balance and allowance.
+    AutoRenewFundingUnavailable = 37,
+    /// Stream offer not found (accepted, rejected, cancelled, or never existed).
+    OfferNotFound = 38,
+    /// Stream offer has expired (`current_time > offer.expiry_time`).
+    OfferExpired = 39,
+    /// Caller is not the intended recipient of this offer.
+    OfferWrongRecipient = 40,
+    /// Caller is not the sender who created this offer.
+    OfferWrongSender = 41,
     /// Cyclic delegation detected.
     CyclicDelegation = 43,
     /// Delegation depth limit exceeded.
     DelegationDepthExceeded = 44,
+    /// The token contract did not expose the expected SEP-41 interface during init.
+    TokenVerificationFailed = 88,
 }
 
 #[contracttype]
