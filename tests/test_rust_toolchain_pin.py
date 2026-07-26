@@ -184,6 +184,44 @@ def test_pinned_components_returns_list():
     assert "clippy" in components
     assert "rustfmt" in components
 
+def test_main_fails_in_process_when_missing_targets(monkeypatch, capsys):
+    """Test that main() fails when required targets are missing."""
+    monkeypatch.setenv("RUSTC_VERSION_OUTPUT", "rustc 1.94.1 (abcdef 2026-01-01)")
+    monkeypatch.setenv("RUSTUP_TARGET_LIST_OUTPUT", "x86_64-unknown-linux-gnu")
+    monkeypatch.setenv("RUSTUP_COMPONENT_LIST_OUTPUT", "rustfmt\nclippy")
+    assert verify_rust_version.main() == 1
+    captured = capsys.readouterr()
+    assert "Missing required targets: wasm32-unknown-unknown" in captured.err
+
+
+def test_main_fails_in_process_when_missing_components(monkeypatch, capsys):
+    """Test that main() fails when required components are missing."""
+    monkeypatch.setenv("RUSTC_VERSION_OUTPUT", "rustc 1.94.1 (abcdef 2026-01-01)")
+    monkeypatch.setenv("RUSTUP_TARGET_LIST_OUTPUT", "wasm32-unknown-unknown")
+    monkeypatch.setenv("RUSTUP_COMPONENT_LIST_OUTPUT", "rustfmt")
+    assert verify_rust_version.main() == 1
+    captured = capsys.readouterr()
+    assert "Missing required components: clippy" in captured.err
+
+
+def test_main_prints_installed_targets_message(monkeypatch, capsys):
+    """Test that main() prints targets match message when all present."""
+    monkeypatch.setenv("RUSTC_VERSION_OUTPUT", "rustc 1.94.1 (abcdef 2026-01-01)")
+    monkeypatch.setenv("RUSTUP_TARGET_LIST_OUTPUT", "wasm32-unknown-unknown")
+    monkeypatch.setenv("RUSTUP_COMPONENT_LIST_OUTPUT", "rustfmt\nclippy")
+    assert verify_rust_version.main() == 0
+    captured = capsys.readouterr()
+    assert "Installed targets match requirements" in captured.out
+
+
+def test_main_prints_installed_components_message(monkeypatch, capsys):
+    """Test that main() prints components match message when all present."""
+    monkeypatch.setenv("RUSTC_VERSION_OUTPUT", "rustc 1.94.1 (abcdef 2026-01-01)")
+    monkeypatch.setenv("RUSTUP_TARGET_LIST_OUTPUT", "wasm32-unknown-unknown")
+    monkeypatch.setenv("RUSTUP_COMPONENT_LIST_OUTPUT", "rustfmt\nclippy")
+    assert verify_rust_version.main() == 0
+    captured = capsys.readouterr()
+    assert "Installed components match requirements" in captured.out
 
 # MSRV cross-check: each crate manifest's `rust-version` must track the
 # `rust-toolchain.toml` pin independently of the CI-invoked `rustc --version`
