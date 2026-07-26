@@ -632,7 +632,7 @@ On failure (`InvalidParams` or `InvalidState`):
 - No arbitrary hard-coded caps (e.g. "max 1M tokens").
 - The technical upper bound is `i128::MAX` or the underlying token's total supply.
 - Rationale: Accrual math (in `accrual.rs`) is already overflow-safe via `checked_mul` and clamping.
-- Application-specific limits should be handled in the frontend or factory contracts.
+- Application-specific limits should be handled in the frontend or factory contracts. Note that the factory's policies (allowlist, deposit cap, minimum duration) only apply when streams are created through the factory — direct calls to this contract bypass them entirely. See [factory.md § Important Bypass Warning](./factory.md#important-bypass-warning).
 
 ### Batch Creation: Atomic vs Partial
 
@@ -1426,6 +1426,7 @@ For a full list of contract errors, see [error.md](./error.md).
 - **Recipient Applications**: See §2 (Accrual Formula), §4 (Withdrawal), §5 (Events)
 - **Indexers**: See §5 (Events), §6 (Error Behavior)
 - **Auditors**: See [protocol-narrative-code-alignment.md](./protocol-narrative-code-alignment.md) for complete verification
+- **Factory/Policy Integrators**: The stream contract enforces no recipient allowlist, deposit cap, or minimum duration. These policies exist only in the factory contract and are bypassed by direct stream-contract calls. See [factory.md § Important Bypass Warning](./factory.md#important-bypass-warning) for details.
 
 ### Verification
 
