@@ -1,8 +1,21 @@
-import re
 import json
+import os
+import re
 import subprocess
 import sys
-from typing import Dict, Any
+from typing import Any, Dict
+
+
+def build_cargo_test_env() -> Dict[str, str]:
+    """Return subprocess env with ~/.cargo/bin prepended to PATH."""
+    home = os.environ.get("HOME")
+    if not home:
+        raise RuntimeError(
+            "HOME is not set; cannot prepend ~/.cargo/bin to PATH for cargo. "
+            "Set HOME in the environment or ensure cargo is on PATH."
+        )
+    inherited_path = os.environ.get("PATH", "")
+    return {"PATH": f"{home}/.cargo/bin:{inherited_path}"}
 
 def extract_baselines(file_path: str) -> Dict[str, Any]:
     with open(file_path, 'r') as f:
@@ -18,7 +31,7 @@ def run_tests() -> str:
         ["cargo", "test", "-p", "fluxora_stream", "--test", "gas_regression", "--", "--nocapture"],
         capture_output=True,
         text=True,
-        env={"PATH": f"{subprocess.os.environ.get('HOME', '/Users/aditya')}/.cargo/bin:{subprocess.os.environ.get('PATH', '')}"}
+        env=build_cargo_test_env(),
     )
     # We ignore the return code here because the script handles the actual validation
     return result.stdout
