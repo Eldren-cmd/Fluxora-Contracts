@@ -267,18 +267,6 @@ fn dispatch_call(env: &Env, target: &Address, calldata: &Bytes) -> Result<(), Go
         }
     }
     Ok(())
-
-    CallData::GovSetThreshold(new_threshold) => {
-            set_threshold_internal(env, new_threshold)?;
-        }
-        CallData::GovAddSigner(signer) => {
-            FluxoraGovernance::add_signer_internal(env, signer)?;
-        }
-        CallData::GovRemoveSigner(signer) => {
-            FluxoraGovernance::remove_signer_internal(env, signer)?;
-        }
-    }
-    Ok(())
 }
 
 const INSTANCE_LIFETIME_THRESHOLD: u32 = 17_280;

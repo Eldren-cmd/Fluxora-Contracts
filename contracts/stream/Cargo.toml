@@ -138,7 +138,7 @@ test = false
 [[test]]
 name = "storage_key_compat"
 path = "tests/storage_key_compat.rs"
-test = false
+required-features = ["testutils"]
 
 [[test]]
 name = "sweep_liability"

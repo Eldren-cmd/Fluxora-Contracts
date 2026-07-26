@@ -214,7 +214,8 @@ pub enum ContractError {
     ReservationNotFound = 24,
     ReservationNotExpirable = 25,
     ReservationStillActive = 26,
-    ReservationAlreadyActive = 41,
+    /// Ledger-backed accrual observed a timestamp lower than the previous accrual timestamp.
+    ClockRegression = 27,
     /// Stream kind does not support this operation (e.g., rate changes on CliffOnly).
     UnsupportedStreamKind = 28,
     /// New rate exceeds the governance-controlled maximum rate per second.
@@ -226,7 +227,7 @@ pub enum ContractError {
     /// Metadata map or individual key/value exceeds the allowed size limit.
     MetadataTooLarge = 32,
     /// Keeper attempted to cancel before grace period has elapsed past end_time.
-    KeeperGracePeriodNotElapsed = 33,
+    KeeperGracePeriodNotElapsed = 42,
     ReservationAlreadyActive = 34,
     /// Withdraw dust threshold is negative or exceeds deposit amount.
     InvalidDustThreshold = 35,
