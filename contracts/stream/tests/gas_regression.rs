@@ -222,3 +222,39 @@ fn test_keeper_cancel_gas_fully_accrued() {
 
     println!("GAS_MEASUREMENT: keeper_cancel: fully_accrued: {}", cost);
 }
+
+#[test]
+fn test_duplicate_detection_benchmark() {
+    let ctx = TestContext::setup();
+    let mut env = ctx.env.clone();
+
+    // Test with various batch sizes
+    let sizes = [10, 50, 100, 200];
+
+    for &size in &sizes {
+        // Create a vector of unique stream IDs
+        let mut ids = soroban_sdk::Vec::new(&env);
+        for i in 0..size {
+            ids.push_back(i as u64);
+        }
+
+        // Measure gas for duplicate detection
+        let cost = measure_gas(&ctx, |ctx| {
+            // We need to call reject_duplicate_ids directly
+            // Using a small helper function
+            let _ = fluxora_stream::reject_duplicate_ids(&ctx.env, &ids);
+        });
+
+        println!("GAS_MEASUREMENT: duplicate_detection: size_{}: {}", size, cost);
+
+        // Add a duplicate at the end and measure error case
+        let mut ids_with_dup = ids.clone();
+        ids_with_dup.push_back(0u64); // Duplicate of first ID
+
+        let cost_error = measure_gas(&ctx, |ctx| {
+            let _ = fluxora_stream::reject_duplicate_ids(&ctx.env, &ids_with_dup);
+        });
+
+        println!("GAS_MEASUREMENT: duplicate_detection_error: size_{}: {}", size, cost_error);
+    }
+}
