@@ -11,10 +11,10 @@ use soroban_sdk::{
     testutils::{Address as _, Events, Ledger},
     token::{Client as TokenClient, StellarAssetClient},
     xdr::{AccountId, PublicKey, ScAddress, Uint256},
-    Address, Bytes, BytesN, Env, TryFromVal, TryIntoVal,
+    Address, Bytes, BytesN, Env, FromVal, TryFromVal, TryIntoVal,
 };
 
-const WITNESSED_CANCEL_DOMAIN: &[u8] = b"fluxora_witnessed_cancel";
+const WITNESSED_CANCEL_DOMAIN: &[u8; 24] = b"fluxora_witnessed_cancel";
 
 fn address_from_pk(env: &Env, pk: &[u8; 32]) -> Address {
     ScAddress::Account(AccountId(PublicKey::PublicKeyTypeEd25519(Uint256(*pk))))
@@ -105,8 +105,8 @@ impl<'a> WitnessCtx<'a> {
                 memo: None,
                 metadata: None,
                 kind: StreamKind::Linear,
-                irrevocable: Some(self.witness_addr.clone()),
-                witness: None,
+                irrevocable: None,
+                witness: Some(self.witness_addr.clone()),
             },
         )
     }
@@ -284,7 +284,8 @@ fn witnessed_cancel_from_paused_stream_succeeds() {
     let ctx = WitnessCtx::setup();
     let stream_id = ctx.create_stream_with_witness();
 
-    ctx.client().pause_stream(&stream_id);
+    ctx.client()
+        .pause_stream(&stream_id, &fluxora_stream::PauseReason::Operational);
     ctx.env.ledger().set_timestamp(200);
     let sig = ctx.sign_cancel(stream_id, 9999);
 
@@ -340,6 +341,7 @@ fn create_streams_with_witness_persists_witness() {
             memo: None,
             metadata: None,
             kind: StreamKind::Linear,
+            irrevocable: None,
             witness: Some(ctx.witness_addr.clone()),
         },
     ];

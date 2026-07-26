@@ -1,8 +1,8 @@
 extern crate std;
 
 use fluxora_stream::{
-    AutoClaimStatus, AutoClaimValidPayload, ContractError, FluxoraStream, FluxoraStreamClient,
-    StreamKind,
+    AutoClaimStatus, AutoClaimValidPayload, ContractError, CreateStreamParams, FluxoraStream,
+    FluxoraStreamClient, StreamKind,
 };
 use soroban_sdk::{
     testutils::{Address as _, Ledger},

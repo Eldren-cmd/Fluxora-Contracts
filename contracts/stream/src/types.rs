@@ -234,6 +234,10 @@ pub enum ContractError {
     InvalidDustThreshold = 35,
     /// Rate change attempted too soon after a previous rate change.
     RateCooldownActive = 36,
+    /// Cyclic delegation detected.
+    CyclicDelegation = 43,
+    /// Delegation depth limit exceeded.
+    DelegationDepthExceeded = 44,
 }
 
 #[contracttype]
@@ -653,6 +657,12 @@ pub struct Stream {
     /// Ledger sequence number of the last rate change (or creation).
     /// Used to enforce MIN_RATE_INTERVAL_LEDGERS cooldown.
     pub last_rate_change_ledger: u32,
+    /// Whether this stream is part of a pooled stream (multi-recipient).
+    pub is_pooled: Option<bool>,
+    /// Parent stream ID for delegated streams (child streams only).
+    pub parent_stream_id: Option<u64>,
+    /// Delegation depth for nested delegation chains.
+    pub delegation_depth: u32,
 }
 
 /// Pagination result for recipient stream listing
@@ -821,6 +831,10 @@ pub enum DataKey {
     PausedStreamCount,
     /// Aggregate sum of all keeper fees paid out via `keeper_cancel` (`i128`, instance storage).
     TotalKeeperFeesPaid,
+    /// Pooled stream shares mapping (stream_id → recipient → share_bps).
+    PooledStreamShares(u64),
+    /// Pooled stream withdrawn amounts (stream_id → recipient → withdrawn_amount).
+    PooledStreamWithdrawn(u64, Address),
 }
 
 /// Type of pause.

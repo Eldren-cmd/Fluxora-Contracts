@@ -1,8 +1,7 @@
 #![cfg(test)]
 
 use fluxora_stream::{
-    types::{ContractError, StreamKind, StreamStatus},
-    FluxoraStreamClient,
+    ContractError, CreateStreamParams, FluxoraStreamClient, StreamKind, StreamStatus,
 };
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
@@ -43,7 +42,7 @@ fn test_delegate_recipient_share_success() {
     env.mock_all_auths();
     env.ledger().with_mut(|li| {
         li.timestamp = 1000;
-        li.sequence = 10;
+        li.sequence_number = 10;
     });
 
     let contract_id = env.register_contract(None, fluxora_stream::FluxoraStream {});

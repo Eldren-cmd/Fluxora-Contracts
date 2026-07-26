@@ -1,7 +1,8 @@
 extern crate std;
 
 use fluxora_stream::{
-    ContractError, FluxoraStream, FluxoraStreamClient, StreamKind, WithdrawToParam,
+    ContractError, CreateStreamParams, FluxoraStream, FluxoraStreamClient, StreamKind,
+    WithdrawToParam,
 };
 use soroban_sdk::{
     testutils::{Address as _, Ledger},

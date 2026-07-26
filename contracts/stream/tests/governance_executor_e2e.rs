@@ -29,8 +29,8 @@ use fluxora_governance::{
     CallData, FluxoraGovernance, FluxoraGovernanceClient, GovernanceError, ProposalExecuted,
 };
 use fluxora_stream::{
-    ContractError, DataKey, FluxoraStream, FluxoraStreamClient, PauseReason, StreamKind,
-    StreamStatus,
+    ContractError, CreateStreamParams, DataKey, FluxoraStream, FluxoraStreamClient, PauseReason,
+    StreamKind, StreamStatus,
 };
 use soroban_sdk::{
     symbol_short,

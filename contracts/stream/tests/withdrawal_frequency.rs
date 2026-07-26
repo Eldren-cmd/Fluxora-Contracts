@@ -1,7 +1,9 @@
 #![cfg(test)]
 extern crate std;
 
-use fluxora_stream::{ContractError, FluxoraStream, FluxoraStreamClient, StreamKind};
+use fluxora_stream::{
+    ContractError, CreateStreamParams, FluxoraStream, FluxoraStreamClient, StreamKind,
+};
 use soroban_sdk::{
     testutils::{Address as _, Ledger, LedgerInfo},
     token::Client as TokenClient,

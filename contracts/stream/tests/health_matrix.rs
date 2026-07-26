@@ -1,6 +1,8 @@
 #![cfg(test)]
 
-use fluxora_stream::{FluxoraStream, FluxoraStreamClient, PauseReason, StreamKind};
+use fluxora_stream::{
+    CreateStreamParams, FluxoraStream, FluxoraStreamClient, PauseReason, StreamKind,
+};
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
     token::Client as TokenClient,

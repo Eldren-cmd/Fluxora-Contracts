@@ -52,7 +52,7 @@ pub(crate) fn build_witnessed_cancel_message(
     deadline: u64,
 ) -> soroban_sdk::Bytes {
     let mut msg = soroban_sdk::Bytes::new(env);
-    msg.extend_from_array(WITNESSED_CANCEL_DOMAIN);
+    msg.extend_from_slice(WITNESSED_CANCEL_DOMAIN);
     msg.extend_from_array(&stream_id.to_be_bytes());
     msg.extend_from_array(&deadline.to_be_bytes());
     msg
@@ -99,7 +99,7 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::{FluxoraStream, FluxoraStreamClient, StreamKind};
+    use crate::{CreateStreamParams, FluxoraStream, FluxoraStreamClient, StreamKind};
     use soroban_sdk::{
         testutils::{Address as _, Ledger},
         token::Client as TokenClient,

@@ -13,6 +13,7 @@ pub mod types;
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env, Map};
 use storage::*;
 use token_check::verify_token_behavior;
+use types::{ClaimOwnershipTransferred, RecipientShareDelegated, MAX_POOL_RECIPIENTS};
 
 // ---------------------------------------------------------------------------
 // TTL constants
@@ -363,6 +364,8 @@ pub enum StreamKind {
     Linear = 0,
     /// Stream that unlocks its full deposit at the cliff time in a one-shot event.
     CliffOnly = 1,
+    /// Stream with a cliff period followed by linear accrual.
+    CliffSlope = 2,
 }
 
 #[soroban_sdk::contracterror]
@@ -444,6 +447,12 @@ pub enum ContractError {
     OfferWrongRecipient = 40,
     /// Caller is not the sender who created this offer.
     OfferWrongSender = 41,
+    /// Rate update cooldown is active.
+    RateCooldownActive = 42,
+    /// Delegation cycle detected.
+    CyclicDelegation = 43,
+    /// Maximum delegation depth exceeded.
+    DelegationDepthExceeded = 44,
 }
 
 #[contracttype]
@@ -969,6 +978,10 @@ pub struct Stream {
     /// Optional compliance witness authorized to cancel via signed attestation.
     /// `None` when not configured (default for backward compatibility).
     pub witness: Option<Address>,
+    pub last_rate_change_ledger: u32,
+    pub is_pooled: Option<bool>,
+    pub delegation_depth: u32,
+    pub parent_stream_id: Option<u64>,
 }
 
 /// Pagination result for recipient stream listing
@@ -1218,6 +1231,10 @@ pub enum DataKey {
     /// Populated on `create_stream_offer`, removed on accept/reject/cancel.
     /// Not updated when an offer is cancelled by the sender (sender index maintained separately).
     RecipientPendingOffers(Address),
+    /// Multi-recipient pooled stream shares (Vec<(Address, u32)>).
+    PooledStreamShares(u64),
+    /// Per-recipient withdrawn amount for a pooled stream.
+    PooledStreamWithdrawn(u64, Address),
 }
 
 // ---------------------------------------------------------------------------
@@ -2096,8 +2113,12 @@ impl FluxoraStream {
             last_pause_toggle_ledger: 0,
             last_withdraw_ledger: 0,
             metadata: None,
+            irrevocable,
             witness: witness.clone(),
             last_rate_change_ledger: 0,
+            is_pooled: None,
+            delegation_depth: 0,
+            parent_stream_id: None,
         };
 
         save_stream(env, &stream);
@@ -2182,8 +2203,13 @@ impl FluxoraStream {
             last_pause_toggle_ledger: 0,
             last_withdraw_ledger: 0,
             metadata: None,
+            claim_owner: None,
+            irrevocable,
             witness: witness.clone(),
             last_rate_change_ledger: 0,
+            is_pooled: None,
+            delegation_depth: 0,
+            parent_stream_id: None,
         };
 
         save_stream(env, &stream);
@@ -2623,7 +2649,13 @@ impl FluxoraStream {
             last_pause_toggle_ledger: 0,
             last_withdraw_ledger: 0,
             metadata: None,
+            claim_owner: None,
+            irrevocable: None,
+            witness: None,
+            last_rate_change_ledger: 0,
             is_pooled: Some(true),
+            delegation_depth: 0,
+            parent_stream_id: None,
         };
 
         save_stream(&env, &stream);
@@ -5262,6 +5294,11 @@ impl FluxoraStream {
             last_pause_toggle_ledger: 0,
             last_withdraw_ledger: 0,
             metadata: stream.metadata.clone(),
+            claim_owner: None,
+            irrevocable: None,
+            witness: None,
+            last_rate_change_ledger: 0,
+            is_pooled: None,
             parent_stream_id: Some(stream_id),
             delegation_depth: stream.delegation_depth + 1,
         };
@@ -6221,8 +6258,8 @@ impl FluxoraStream {
             0usize
         } else {
             match streams.binary_search(cursor) {
-                Ok(pos) => pos,  // start AT the cursor stream (inclusive)
-                Err(pos) => pos, // gap: start at the next higher stream
+                Ok(pos) => pos as usize,  // start AT the cursor stream (inclusive)
+                Err(pos) => pos as usize, // gap: start at the next higher stream
             }
         };
 
@@ -8612,6 +8649,13 @@ impl FluxoraStream {
             last_pause_toggle_ledger: 0,
             last_withdraw_ledger: 0,
             metadata: offer.metadata.clone(),
+            claim_owner: None,
+            irrevocable: None,
+            witness: None,
+            last_rate_change_ledger: 0,
+            is_pooled: None,
+            delegation_depth: 0,
+            parent_stream_id: None,
         };
 
         save_stream(&env, &stream);

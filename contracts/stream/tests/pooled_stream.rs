@@ -12,7 +12,7 @@ fn test_pooled_stream_creation_and_withdrawal() {
     env.mock_all_auths();
     env.ledger().with_mut(|l| {
         l.timestamp = 1000;
-        l.sequence = 10;
+        l.sequence_number = 10;
     });
 
     let admin = Address::generate(&env);

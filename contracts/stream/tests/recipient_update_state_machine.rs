@@ -4,7 +4,7 @@
 
 extern crate std;
 
-use fluxora_stream::{ContractError, FluxoraStream, FluxoraStreamClient};
+use fluxora_stream::{ContractError, CreateStreamParams, FluxoraStream, FluxoraStreamClient};
 use soroban_sdk::{
     testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
     token::{Client as TokenClient, StellarAssetClient},

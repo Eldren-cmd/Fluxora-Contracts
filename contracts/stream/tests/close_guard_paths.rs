@@ -7,7 +7,8 @@
 //!    index entry is absent (no panic, no partial state left behind).
 
 use fluxora_stream::{
-    ContractError, FluxoraStream, FluxoraStreamClient, PauseReason, StreamKind, StreamStatus,
+    ContractError, CreateStreamParams, FluxoraStream, FluxoraStreamClient, PauseReason, StreamKind,
+    StreamStatus,
 };
 use soroban_sdk::{
     testutils::{Address as _, Ledger},

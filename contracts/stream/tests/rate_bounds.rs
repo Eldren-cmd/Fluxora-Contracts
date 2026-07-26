@@ -3,7 +3,7 @@ use fluxora_stream::{
     FluxoraStreamClient, StreamKind, StreamStatus,
 };
 use soroban_sdk::{
-    testutils::Address as _,
+    testutils::{Address as _, Ledger},
     token::{Client as TokenClient, StellarAssetClient},
     Address, Env,
 };
@@ -45,16 +45,20 @@ fn create_stream_with_rate(
 
     client.create_stream(
         sender,
-        recipient,
-        &deposit,
-        &rate_per_second,
-        &start_time,
-        &cliff_time,
-        &end_time,
-        &0i128, // no dust threshold
-        &None,  // no memo
-        &StreamKind::Linear,
-        &None,
+        &CreateStreamParams {
+            recipient: recipient.clone(),
+            deposit_amount: deposit,
+            rate_per_second,
+            start_time,
+            cliff_time,
+            end_time,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     )
 }
 
@@ -142,6 +146,7 @@ fn test_create_streams_with_mixed_rates_fails_atomically() {
             memo: None,
             kind: StreamKind::Linear,
             metadata: None,
+            irrevocable: None,
             witness: None,
         },
         CreateStreamParams {
@@ -155,6 +160,7 @@ fn test_create_streams_with_mixed_rates_fails_atomically() {
             memo: None,
             kind: StreamKind::Linear,
             metadata: None,
+            irrevocable: None,
             witness: None,
         },
     ];
@@ -186,6 +192,7 @@ fn test_create_streams_all_valid_rates_succeeds() {
             memo: None,
             kind: StreamKind::Linear,
             metadata: None,
+            irrevocable: None,
             witness: None,
         },
         CreateStreamParams {
@@ -199,6 +206,7 @@ fn test_create_streams_all_valid_rates_succeeds() {
             memo: None,
             kind: StreamKind::Linear,
             metadata: None,
+            irrevocable: None,
             witness: None,
         },
     ];
@@ -226,6 +234,7 @@ fn test_create_stream_relative_below_min_rate_fails() {
         memo: None,
         kind: StreamKind::Linear,
         metadata: None,
+        irrevocable: None,
     };
 
     let result = client.try_create_stream_relative(&sender, &params);
@@ -248,6 +257,7 @@ fn test_create_stream_relative_at_min_rate_succeeds() {
         memo: None,
         kind: StreamKind::Linear,
         metadata: None,
+        irrevocable: None,
     };
 
     let stream_id = client.create_stream_relative(&sender, &params);
@@ -348,16 +358,20 @@ fn test_min_rate_with_long_duration_succeeds() {
 
     let stream_id = client.create_stream(
         &sender,
-        &recipient,
-        &deposit,
-        &rate,
-        &start_time,
-        &start_time,
-        &end_time,
-        &0i128,
-        &None,
-        &StreamKind::Linear,
-        &None,
+        &CreateStreamParams {
+            recipient: recipient.clone(),
+            deposit_amount: deposit,
+            rate_per_second: rate,
+            start_time,
+            cliff_time: start_time,
+            end_time,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     let stream = client.get_stream_state(&stream_id);

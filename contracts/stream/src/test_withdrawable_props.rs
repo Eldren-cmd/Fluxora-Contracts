@@ -20,7 +20,7 @@ use soroban_sdk::{
     Address, Env,
 };
 
-use crate::{FluxoraStream, FluxoraStreamClient, StreamStatus};
+use crate::{CreateStreamParams, FluxoraStream, FluxoraStreamClient, StreamKind, StreamStatus};
 
 // ---------------------------------------------------------------------------
 // Minimal isolated test harness

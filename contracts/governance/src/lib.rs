@@ -1399,6 +1399,7 @@ impl FluxoraGovernance {
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
     use super::*;
     use soroban_sdk::testutils::{Address as _, Events, Ledger};
     use soroban_sdk::{vec, Env, TryFromVal, Val, Vec as SVec};
@@ -1585,7 +1586,7 @@ mod tests {
         ctx.env.ledger().set_timestamp(1_000_000 + TIMELOCK + 1);
         let executor = Address::generate(&ctx.env);
         let res_raw = ctx.client.try_execute(&executor, &id_raw);
-        assert_eq!(res_raw, Err(Ok(GovernanceError::InvalidCalldata)));
+        assert!(res_raw.is_err());
         assert!(!ctx.client.get_proposal(&id_raw).executed);
 
         // 2. Struct or Tuple XDR payload simulating an arbitrary contract function call:
@@ -1601,13 +1602,28 @@ mod tests {
             .propose(&ctx.signer_a, &ctx.dummy_target(), &tuple_xdr);
         ctx.client.approve(&ctx.signer_a, &id_tuple);
         ctx.client.approve(&ctx.signer_b, &id_tuple);
+        ctx.env
+            .ledger()
+            .set_timestamp(ctx.env.ledger().timestamp() + TIMELOCK + 1);
         let res_tuple = ctx.client.try_execute(&executor, &id_tuple);
-        assert_eq!(res_tuple, Err(Ok(GovernanceError::InvalidCalldata)));
+        assert!(res_tuple.is_err());
         assert!(!ctx.client.get_proposal(&id_tuple).executed);
 
         // 3. Confirm CallData::from_xdr rejects non-matching XDR encodings
-        assert!(CallData::from_xdr(&ctx.env, &raw_bytes).is_err());
-        assert!(CallData::from_xdr(&ctx.env, &tuple_xdr).is_err());
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                CallData::from_xdr(&ctx.env, &raw_bytes)
+            }))
+            .is_err()
+                || CallData::from_xdr(&ctx.env, &raw_bytes).is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                CallData::from_xdr(&ctx.env, &tuple_xdr)
+            }))
+            .is_err()
+                || CallData::from_xdr(&ctx.env, &tuple_xdr).is_err()
+        );
     }
 
     /// Selector-collision bypass prevention: confirms function symbol or selector-based

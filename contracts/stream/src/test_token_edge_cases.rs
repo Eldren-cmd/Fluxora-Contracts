@@ -25,7 +25,9 @@ use soroban_sdk::{
     Address, Env, IntoVal,
 };
 
-use crate::{test::TestContext, ContractError, FluxoraStream, FluxoraStreamClient};
+use crate::{
+    test::TestContext, ContractError, CreateStreamParams, FluxoraStream, FluxoraStreamClient,
+};
 
 // ---------------------------------------------------------------------------
 // §11  Event emission verification for token operations

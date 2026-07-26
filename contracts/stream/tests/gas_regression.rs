@@ -1,5 +1,5 @@
 // See docs/gas.md for the baseline update process and review bar.
-use fluxora_stream::{FluxoraStream, FluxoraStreamClient, StreamKind};
+use fluxora_stream::{CreateStreamParams, FluxoraStream, FluxoraStreamClient, StreamKind};
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
     token::{Client as TokenClient, StellarAssetClient},
