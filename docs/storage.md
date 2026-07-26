@@ -364,19 +364,20 @@ The file `contracts/stream/tests/storage_key_compat.rs` encodes these invariants
 
 ---
 
-## 9. ID Reservation Asymmetry
+## 9. ID Reservation Reclamation
 
-The contract maintains two entrypoints for releasing reservations, with asymmetric counter behaviors:
+Both reservation release entrypoints now share a unified reclamation helper (`release_reservation`) that reclaims tip-adjacent unused IDs:
 
 ### `release_id_reservation` (Voluntary)
 - **Action**: Immediate, voluntary release of an active reservation by its owner.
-- **Counter Behavior**: Never rewinds `NextStreamId`. Released IDs are permanently skipped and will not be reused by subsequent `create_stream` calls, even if the reservation was tip-adjacent and fully unconsumed. This guarantees that once a reservation is made, its ID space is exclusively burned if surrendered voluntarily.
+- **Counter Behavior**: If the reservation is **tip-adjacent** (its allocated range ends exactly at the current `NextStreamId`) and **fully or partially unconsumed**, `NextStreamId` is rewound to the first unconsumed ID. If IDs beyond the reservation range were consumed (non-tip-adjacent), the reservation record is simply removed with no counter rewind.
 
 ### `reclaim_expired_id_reservation` (Post-Expiry)
 - **Action**: Permissionless reclamation of a reservation that has passed its `expiry` timestamp.
-- **Counter Behavior**: If the expired reservation is **tip-adjacent** (its allocated range ends exactly at the current `NextStreamId`) and **fully unconsumed**, reclaiming it will rewind `NextStreamId` to the start of the reservation. This ensures that abandoned or lost reservations at the counter tip do not permanently waste ID space.
+- **Counter Behavior**: Same as `release_id_reservation` — if the expired reservation is **tip-adjacent** and **unconsumed**, `NextStreamId` is rewound to the first unconsumed ID.
 
 ### Security Assumptions (NatSpec / Doc-comment style)
 - **Pre-expiry rejection**: Blocks denial-of-service (DoS) or front-running attacks where an attacker reclaims a user's reservation before they can publish their streams.
 - **At-expiry & post-expiry success**: Ensures that if a holder abandons or loses access to their reservation, the counter space/storage is not permanently locked, maintaining contract liveness.
-- **Voluntary Release Asymmetry**: `release_id_reservation` does not rewind `NextStreamId` to prevent complex re-orgs if off-chain systems assumed those IDs were consumed or burned.
+- **Tip-adjacent guard**: Counter rewind only occurs when `reservation_end == current_count`, meaning no streams exist beyond the reserved range. This prevents unsafe rewinds that would create ID collisions with already-created streams.
+- **Consistent event shape**: Both paths emit the `res_rel` event with `(start_id, count, consumed, reclaimed)`, ensuring consistent indexer accounting regardless of which release path triggered the reclamation.

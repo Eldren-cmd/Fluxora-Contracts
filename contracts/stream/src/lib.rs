@@ -8153,7 +8153,10 @@ impl FluxoraStream {
     pub fn release_id_reservation(env: Env, caller: Address) -> Result<(), ContractError> {
         caller.require_auth();
 
-        remove_id_reservation(&env, &caller);
+        let res =
+            load_id_reservation(&env, &caller).ok_or(ContractError::ReservationNotFound)?;
+
+        Self::release_reservation(&env, &caller, &res);
         Ok(())
     }
 
