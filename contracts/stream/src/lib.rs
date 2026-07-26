@@ -1127,6 +1127,10 @@ pub struct StreamScheduleTemplate {
 ///    migration tooling can determine which entries exist on a given instance.
 ///
 /// Current discriminant assignments (must never change) — see enum definition below for order.
+///
+/// **Doc sync check:** When adding or modifying variants, update *both*:
+/// - `docs/storage.md` — full discriminant table and code block
+/// - `docs/ABI_STABILITY.md` — frozen discriminant table (variants 0–14) and any breaking-change notes
 #[contracttype]
 pub enum DataKey {
     Config,                    // Instance storage for global settings (admin/token).
