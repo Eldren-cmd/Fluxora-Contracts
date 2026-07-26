@@ -94,6 +94,11 @@ path = "tests/id_range.rs"
 test = false
 
 [[test]]
+name = "metadata_limits_900"
+path = "tests/metadata_limits_900.rs"
+test = true
+
+[[test]]
 name = "keeper_cancel"
 path = "tests/keeper_cancel.rs"
 test = false
