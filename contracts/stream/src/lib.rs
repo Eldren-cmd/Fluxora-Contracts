@@ -4145,6 +4145,12 @@ impl FluxoraStream {
                 save_stream(&env, &stream);
                 reconcile_paused_stream_count(&env, previous_status, stream.status);
 
+                // Reduce liabilities as tokens leave the contract.
+                let liabilities = read_total_liabilities(&env)
+                    .checked_sub(withdrawable)
+                    .unwrap_or(0);
+                write_total_liabilities(&env, liabilities);
+
                 push_token(&env, &param.destination, withdrawable)?;
 
                 env.events().publish(
@@ -4331,6 +4337,12 @@ impl FluxoraStream {
         }
         save_stream(&env, &stream);
         reconcile_paused_stream_count(&env, previous_status, stream.status);
+
+        // Reduce liabilities as tokens leave the contract to the recipient.
+        let liabilities = read_total_liabilities(&env)
+            .checked_sub(withdrawable)
+            .unwrap_or(0);
+        write_total_liabilities(&env, liabilities);
 
         // 10. Increment nonce to prevent replay.
         increment_delegated_nonce(&env, &stream.recipient);
@@ -5095,6 +5107,11 @@ impl FluxoraStream {
 
         // Refund the now-unreachable portion of the deposit to the sender.
         if refund_amount > 0 {
+            // Reduce liabilities by the refunded portion (no longer owed to recipient).
+            let liabilities = read_total_liabilities(&env)
+                .checked_sub(refund_amount)
+                .unwrap_or(0);
+            write_total_liabilities(&env, liabilities);
             push_token(&env, &stream.sender, refund_amount)?;
         }
 
@@ -7642,6 +7659,12 @@ impl FluxoraStream {
 
         save_stream(&env, &stream);
         reconcile_paused_stream_count(&env, previous_status, stream.status);
+
+        // Reduce liabilities as tokens leave the contract.
+        let liabilities = read_total_liabilities(&env)
+            .checked_sub(withdrawable)
+            .unwrap_or(0);
+        write_total_liabilities(&env, liabilities);
 
         // Emit auto-claim triggered event
         env.events().publish(
