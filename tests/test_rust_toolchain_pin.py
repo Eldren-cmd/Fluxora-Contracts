@@ -170,6 +170,21 @@ def test_rustc_version_falls_back_to_invoking_real_rustc(monkeypatch):
     assert version
 
 
+def test_pinned_targets_returns_list():
+    """Test pinned_targets() returns list from toolchain file."""
+    targets = verify_rust_version.pinned_targets(TOOLCHAIN)
+    assert isinstance(targets, list)
+    assert "wasm32-unknown-unknown" in targets
+
+
+def test_pinned_components_returns_list():
+    """Test pinned_components() returns list from toolchain file."""
+    components = verify_rust_version.pinned_components(TOOLCHAIN)
+    assert isinstance(components, list)
+    assert "clippy" in components
+    assert "rustfmt" in components
+
+
 # MSRV cross-check: each crate manifest's `rust-version` must track the
 # `rust-toolchain.toml` pin independently of the CI-invoked `rustc --version`
 # comparison above, so `cargo` itself enforces the floor on every invocation
