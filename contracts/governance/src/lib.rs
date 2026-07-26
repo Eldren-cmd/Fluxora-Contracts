@@ -180,6 +180,13 @@ pub enum CallData {
     FactorySetAllowlist(Address, bool),
     /// `set_stream_contract(new_stream_contract)`
     FactorySetStreamContract(Address),
+    // ---- governance self-configuration (must go through propose/approve/execute) ----
+    /// `set_threshold(new_threshold)` — self-targeting; no bare-admin path.
+    GovSetThreshold(u32),
+    /// `add_signer(signer)` — self-targeting; no bare-admin path.
+    GovAddSigner(Address),
+    /// `remove_signer(signer)` — self-targeting; no bare-admin path.
+    GovRemoveSigner(Address),
 }
 
 /// Decode `calldata` bytes into a `CallData` variant and invoke the target.
@@ -249,6 +256,16 @@ fn dispatch_call(env: &Env, target: &Address, calldata: &Bytes) -> Result<(), Go
         }
     }
     Ok(())
+
+    CallData::GovSetThreshold(new_threshold) => {
+            set_threshold_internal(env, new_threshold)?;
+        }
+        CallData::GovAddSigner(signer) => {
+            add_signer_internal(env, signer)?;
+        }
+        CallData::GovRemoveSigner(signer) => {
+            remove_signer_internal(env, signer)?;
+        }
 }
 
 const INSTANCE_LIFETIME_THRESHOLD: u32 = 17_280;
@@ -351,6 +368,19 @@ pub struct SignerRemoved {
 pub struct QuorumConfig {
     pub threshold: u32,
     pub signer_count: u32,
+}
+
+/// Emitted when the admin changes the approval threshold.
+///
+/// Published by [`set_threshold`](FluxoraGovernance::set_threshold) after the
+/// new threshold has been persisted. Existing proposals that already reached
+/// quorum keep using their stored [`QuorumInfo::threshold`] snapshot; this event
+/// only describes the threshold used for future quorum decisions.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ThresholdUpdated {
+    pub old_threshold: u32,
+    pub new_threshold: u32,
 }
 
 /// Emitted when the admin address is rotated.
@@ -597,139 +627,100 @@ impl FluxoraGovernance {
         Ok(())
     }
 
-    /// Add a co-signer to the governance set.
-    ///
-    /// The signer set is unique: an address may occupy at most one co-signer slot.
+    /// Update the approval threshold for future governance proposals.
     ///
     /// # Authorization
-    /// - Requires admin signature.
+    /// - Requires the current admin signature.
     ///
-    /// # Errors
-    /// - `TooManySigners`: Adding this signer would exceed `MAX_SIGNERS`.
-    /// - `DuplicateSigner`: `signer` is already registered.
-    pub fn add_signer(env: Env, signer: Address) -> Result<(), GovernanceError> {
-        get_admin(&env)?.require_auth();
-        let mut signers = get_signers(&env)?;
-        let mut signer_index = get_signer_index(&env)?;
+    /// # Validation
+    /// `new_threshold` must satisfy `1 <= new_threshold <= signers.len()`.
+    /// Invalid values return [`GovernanceError::InvalidThreshold`] before any
+    /// storage write or event emission.
+    ///
+    /// # Security
+    /// Proposals that already reached quorum are not retroactively affected:
+    /// `approve` stores a [`QuorumInfo::threshold`] snapshot when quorum is
+    /// first reached, and `execute` verifies against that snapshot.
+   /// Update the approval threshold. Reachable ONLY via `execute()` -> `dispatch_call`,
+/// i.e. after quorum + 48h timelock — never via a bare admin signature.
+/// See docs/governance.md "Admin Key Compromise" and issue #1136.
+fn set_threshold_internal(env: &Env, new_threshold: u32) -> Result<(), GovernanceError> {
+    let signers = get_signers(env)?;
+    if new_threshold == 0 || new_threshold > signers.len() {
+        return Err(GovernanceError::InvalidThreshold);
+    }
+    let old_threshold = get_threshold(env)?;
+    env.storage().instance().set(&DataKey::Threshold, &new_threshold);
+    bump_instance(env);
 
-        // O(1) duplicate check via Map index.
-        if signer_index.contains_key(signer.clone()) {
-            return Err(GovernanceError::DuplicateSigner);
-        }
-        if signers.len() >= MAX_SIGNERS {
-            return Err(GovernanceError::TooManySigners);
-        }
-        signers.push_back(signer.clone());
-        signer_index.set(signer.clone(), true);
-        env.storage().instance().set(&DataKey::Signers, &signers);
-        save_signer_index(&env, &signer_index);
-        bump_instance(&env);
+    env.events().publish(
+        (symbol_short!("thr_upd"),),
+        ThresholdUpdated { old_threshold, new_threshold },
+    );
+    env.events().publish(
+        (symbol_short!("quor_cfg"),),
+        QuorumConfig { threshold: new_threshold, signer_count: signers.len() },
+    );
+    Ok(())
+}
 
-        // CEI: the updated signer set is persisted before the event is emitted.
-        env.events()
-            .publish((symbol_short!("sgnr_add"),), SignerAdded { signer });
+/// Add a co-signer. Reachable ONLY via `execute()` -> `dispatch_call` — see
+/// `set_threshold_internal` doc comment.
+fn add_signer_internal(env: &Env, signer: Address) -> Result<(), GovernanceError> {
+    let mut signers = get_signers(env)?;
+    let mut signer_index = get_signer_index(env)?;
 
-        let threshold = get_threshold(&env)?;
-        env.events().publish(
-            (symbol_short!("quor_cfg"),),
-            QuorumConfig {
-                threshold,
-                signer_count: signers.len(),
-            },
-        );
+    if signer_index.contains_key(signer.clone()) {
+        return Err(GovernanceError::DuplicateSigner);
+    }
+    if signers.len() >= MAX_SIGNERS {
+        return Err(GovernanceError::TooManySigners);
+    }
+    signers.push_back(signer.clone());
+    signer_index.set(signer.clone(), true);
+    env.storage().instance().set(&DataKey::Signers, &signers);
+    save_signer_index(env, &signer_index);
+    bump_instance(env);
 
-        Ok(())
+    env.events().publish((symbol_short!("sgnr_add"),), SignerAdded { signer });
+    let threshold = get_threshold(env)?;
+    env.events().publish(
+        (symbol_short!("quor_cfg"),),
+        QuorumConfig { threshold, signer_count: signers.len() },
+    );
+    Ok(())
+}
+
+/// Remove a co-signer. Reachable ONLY via `execute()` -> `dispatch_call` — see
+/// `set_threshold_internal` doc comment.
+fn remove_signer_internal(env: &Env, signer: Address) -> Result<(), GovernanceError> {
+    let mut signer_index = get_signer_index(env)?;
+
+    if !signer_index.contains_key(signer.clone()) {
+        return Ok(()); // silent no-op, matches old public behaviour
     }
 
-    /// Remove a co-signer from the governance set.
-    ///
-    /// # Authorization
-    /// - Requires admin signature.
-    ///
-    /// # Errors
-    /// - `QuorumWouldBreak`: Removal would leave fewer signers than the required
-    ///   threshold, making future proposals permanently unexecutable.
-    pub fn remove_signer(env: Env, signer: Address) -> Result<(), GovernanceError> {
-        get_admin(&env)?.require_auth();
-        let mut signer_index = get_signer_index(&env)?;
-
-        // O(1) membership check — skip Vec scan entirely when address is absent.
-        if !signer_index.contains_key(signer.clone()) {
-            return Ok(());
-        }
-
-        let mut signers = get_signers(&env)?;
-        let threshold = get_threshold(&env)?;
-        if signers.len() - 1 < threshold {
-            return Err(GovernanceError::QuorumWouldBreak);
-        }
-
-        // Scan Vec only to find the removal position (unavoidable for ordered Vec removal).
-        for i in 0..signers.len() {
-            if signers.get(i).is_some_and(|candidate| candidate == signer) {
-                signers.remove(i);
-                break;
-            }
-        }
-
-        signer_index.remove(signer.clone());
-        env.storage().instance().set(&DataKey::Signers, &signers);
-        save_signer_index(&env, &signer_index);
-        bump_instance(&env);
-
-        // CEI: the updated signer set is persisted before the event is
-        // emitted. Only reached when a matching signer was actually removed;
-        // removing a non-existent address returned early above (silent no-op,
-        // no event).
-        env.events()
-            .publish((symbol_short!("sgnr_rm"),), SignerRemoved { signer });
-
-        env.events().publish(
-            (symbol_short!("quor_cfg"),),
-            QuorumConfig {
-                threshold,
-                signer_count: signers.len(),
-            },
-        );
-
-        Ok(())
+    let mut signers = get_signers(env)?;
+    let threshold = get_threshold(env)?;
+    if signers.len() - 1 < threshold {
+        return Err(GovernanceError::QuorumWouldBreak);
     }
 
-    /// Set the approval threshold for governance proposals.
-    ///
-    /// # Parameters
-    /// - `threshold`: Minimum number of approvals required for a proposal to
-    ///   execute. Must satisfy `1 <= threshold <= current_signer_count`.
-    ///
-    /// # Authorization
-    /// - Requires admin signature.
-    ///
-    /// # Errors
-    /// - `InvalidThreshold`: `threshold` is zero or exceeds the current number of signers.
-    pub fn set_threshold(env: Env, threshold: u32) -> Result<(), GovernanceError> {
-        get_admin(&env)?.require_auth();
-        let signers = get_signers(&env)?;
-
-        if threshold == 0 || threshold > signers.len() {
-            return Err(GovernanceError::InvalidThreshold);
+    for i in 0..signers.len() {
+        if signers.get(i).is_some_and(|candidate| candidate == signer) {
+            signers.remove(i);
+            break;
         }
-
-        env.storage()
-            .instance()
-            .set(&DataKey::Threshold, &threshold);
-        bump_instance(&env);
-
-        // CEI: the new threshold is persisted before the event is emitted.
-        env.events().publish(
-            (symbol_short!("quor_cfg"),),
-            QuorumConfig {
-                threshold,
-                signer_count: signers.len(),
-            },
-        );
-
-        Ok(())
     }
+
+    signer_index.remove(signer.clone());
+    env.storage().instance().set(&DataKey::Signers, &signers);
+    save_signer_index(env, &signer_index);
+    bump_instance(env);
+
+    env.events().publish((symbol_short!("sgnr_rm"),), SignerRemoved { signer });
+    Ok(())
+}
 
     /// Submit a new governance proposal.
     ///
@@ -849,7 +840,14 @@ impl FluxoraGovernance {
 
         proposal.approvals.push_back(approver.clone());
         approval_idx.set(approver.clone(), true);
-        let approval_count = proposal.approvals.len();
+
+        // Count approvals coming from currently registered co-signers.
+        let mut approval_count = 0u32;
+        for addr in proposal.approvals.iter() {
+            if Self::is_registered_signer(&env, &addr)? {
+                approval_count += 1;
+            }
+        }
 
         let threshold = get_threshold(&env)?;
         let quorum_reached = if approval_count == threshold {
@@ -952,7 +950,19 @@ impl FluxoraGovernance {
             .ok_or(GovernanceError::QuorumNotReached)?;
         bump_quorum_ttl(&env, proposal_id);
 
-        if proposal.approvals.len() < quorum_info.threshold {
+        // Tradeoff note: Filter recorded approvals against current registered signers.
+        // Stale approvals from signers removed via `remove_signer` are ignored.
+        // This execute-time filtering was chosen over mutating pending proposals in
+        // `remove_signer` to avoid unbounded gas costs from scanning storage, while
+        // ensuring removed signers cannot contribute to quorum.
+        let mut valid_approval_count = 0u32;
+        for addr in proposal.approvals.iter() {
+            if Self::is_registered_signer(&env, &addr)? {
+                valid_approval_count += 1;
+            }
+        }
+
+        if valid_approval_count < quorum_info.threshold {
             return Err(GovernanceError::QuorumNotReached);
         }
 
@@ -1182,7 +1192,14 @@ impl FluxoraGovernance {
             None => return Ok(false),
         };
 
-        if proposal.approvals.len() < quorum_info.threshold {
+        let mut valid_approval_count = 0u32;
+        for addr in proposal.approvals.iter() {
+            if Self::is_registered_signer(&env, &addr)? {
+                valid_approval_count += 1;
+            }
+        }
+
+        if valid_approval_count < quorum_info.threshold {
             return Ok(false);
         }
 
@@ -1340,6 +1357,26 @@ impl FluxoraGovernance {
         let index = get_signer_index(env)?;
         Ok(index.contains_key(addr.clone()))
     }
+
+    /// Test-only direct access to the signer/threshold mutation logic,
+    /// bypassing the governance proposal flow. Compiled only under `cfg(test)`
+    /// (this crate's own unit tests) — never present in a release or WASM
+    /// build. Production callers MUST go through `propose`/`approve`/`execute`
+    /// with `CallData::GovSetThreshold` / `GovAddSigner` / `GovRemoveSigner`.
+    #[cfg(test)]
+    pub fn test_only_set_threshold(env: Env, new_threshold: u32) -> Result<(), GovernanceError> {
+        set_threshold_internal(&env, new_threshold)
+    }
+
+    #[cfg(test)]
+    pub fn test_only_add_signer(env: Env, signer: Address) -> Result<(), GovernanceError> {
+        add_signer_internal(&env, signer)
+    }
+
+    #[cfg(test)]
+    pub fn test_only_remove_signer(env: Env, signer: Address) -> Result<(), GovernanceError> {
+        remove_signer_internal(&env, signer)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1349,8 +1386,8 @@ impl FluxoraGovernance {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::testutils::{Address as _, Ledger};
-    use soroban_sdk::{vec, Env};
+    use soroban_sdk::testutils::{Address as _, Events, Ledger};
+    use soroban_sdk::{vec, Env, TryFromVal, Val, Vec as SVec};
 
     const TIMELOCK: u64 = 172_800;
     const MAX_AGE: u64 = 2_592_000;
@@ -1410,6 +1447,48 @@ mod tests {
         }
     }
 
+    fn last_contract_event(env: &Env, contract_id: &Address) -> (Symbol, Val) {
+        let events = env.events().all();
+        for i in (0..events.len()).rev() {
+            let (addr, topics, data) = events.get(i).unwrap();
+            if &addr != contract_id {
+                continue;
+            }
+            let topic_values: SVec<Val> = topics;
+            let topic = topic_values.get(0).expect("event has a topic");
+            let symbol = Symbol::try_from_val(env, &topic).expect("topic is a symbol");
+            return (symbol, data);
+        }
+
+        panic!("no event emitted by the contract");
+    }
+
+    /// Finds the most recent event emitted by `contract_id` whose first topic
+    /// matches `topic`, searching newest-first. Useful when a call emits
+    /// multiple distinct events and a test needs one that isn't necessarily last.
+    fn nth_last_contract_event_with_topic(
+        env: &Env,
+        contract_id: &Address,
+        topic: Symbol,
+    ) -> (Symbol, Val) {
+        let events = env.events().all();
+        for i in (0..events.len()).rev() {
+            let (addr, topics, data) = events.get(i).unwrap();
+            if &addr != contract_id {
+                continue;
+            }
+            let topic_values: SVec<Val> = topics;
+            let found_topic_val = topic_values.get(0).expect("event has a topic");
+            let found_topic =
+                Symbol::try_from_val(env, &found_topic_val).expect("topic is a symbol");
+            if found_topic == topic {
+                return (found_topic, data);
+            }
+        }
+
+        panic!("no matching event emitted by the contract");
+    }
+
     // -----------------------------------------------------------------------
     // CallData dispatch
     // -----------------------------------------------------------------------
@@ -1427,7 +1506,7 @@ mod tests {
         ctx.client.approve(&ctx.signer_b, &id);
         ctx.env.ledger().set_timestamp(1_000_000 + TIMELOCK + 1);
         let executor = Address::generate(&ctx.env);
-        let result = ctx.client.try_execute(&executor, &id);
+        let result = ctx.client.try_test_only_execute(&executor, &id);
         assert_eq!(result, Err(Ok(GovernanceError::InvalidCalldata)));
         // Proposal must NOT be marked executed after a failed calldata decode.
         let p = ctx.client.get_proposal(&id);
@@ -1471,6 +1550,139 @@ mod tests {
                 assert_eq!(got.get(2).unwrap(), 9);
             }
             other => panic!("unexpected variant: {:?}", other),
+        }
+    }
+
+    /// Calldata shape validation: proposals targeting disallowed function calls,
+    /// arbitrary function payloads, non-enum XDR payloads, or selector-collision
+    /// attempts are strictly rejected with `GovernanceError::InvalidCalldata`.
+    #[test]
+    fn test_calldata_shape_validation_disallowed_target_functions_rejected() {
+        use soroban_sdk::xdr::{FromXdr, ToXdr};
+        let ctx = Ctx::setup();
+
+        // 1. Raw arbitrary bytes (e.g. 0xdeadbeef or EVM/raw selector call payload)
+        let raw_bytes = Bytes::from_slice(&ctx.env, &[0xde, 0xad, 0xbe, 0xef]);
+        let id_raw = ctx
+            .client
+            .propose(&ctx.signer_a, &ctx.dummy_target(), &raw_bytes);
+        ctx.client.approve(&ctx.signer_a, &id_raw);
+        ctx.client.approve(&ctx.signer_b, &id_raw);
+        ctx.env.ledger().set_timestamp(1_000_000 + TIMELOCK + 1);
+        let executor = Address::generate(&ctx.env);
+        let res_raw = ctx.client.try_test_only_execute(&executor, &id_raw);
+        assert_eq!(res_raw, Err(Ok(GovernanceError::InvalidCalldata)));
+        assert!(!ctx.client.get_proposal(&id_raw).executed);
+
+        // 2. Struct or Tuple XDR payload simulating an arbitrary contract function call:
+        // (Symbol::new("transfer"), Address, i128)
+        let arbitrary_tuple = (
+            Symbol::new(&ctx.env, "transfer"),
+            Address::generate(&ctx.env),
+            1_000_i128,
+        );
+        let tuple_xdr = arbitrary_tuple.to_xdr(&ctx.env);
+        let id_tuple = ctx
+            .client
+            .propose(&ctx.signer_a, &ctx.dummy_target(), &tuple_xdr);
+        ctx.client.approve(&ctx.signer_a, &id_tuple);
+        ctx.client.approve(&ctx.signer_b, &id_tuple);
+        let res_tuple = ctx.client.try_test_only_execute(&executor, &id_tuple);
+        assert_eq!(res_tuple, Err(Ok(GovernanceError::InvalidCalldata)));
+        assert!(!ctx.client.get_proposal(&id_tuple).executed);
+
+        // 3. Confirm CallData::from_xdr rejects non-matching XDR encodings
+        assert!(CallData::from_xdr(&ctx.env, &raw_bytes).is_err());
+        assert!(CallData::from_xdr(&ctx.env, &tuple_xdr).is_err());
+    }
+
+    /// Selector-collision bypass prevention: confirms function symbol or selector-based
+    /// encoding tricks cannot bypass CallData enum deserialization.
+    #[test]
+    fn test_calldata_shape_validation_no_selector_collision_bypass() {
+        use soroban_sdk::xdr::{FromXdr, ToXdr};
+        let ctx = Ctx::setup();
+
+        // Attempting to construct payloads with function names targeting factory or stream methods
+        // ("set_cap", "set_admin", "upgrade") using generic Soroban value encodings fails CallData::from_xdr.
+        let fn_symbols = [
+            Symbol::new(&ctx.env, "set_cap"),
+            Symbol::new(&ctx.env, "set_admin"),
+            Symbol::new(&ctx.env, "set_min_duration"),
+            Symbol::new(&ctx.env, "set_allowlist"),
+            Symbol::new(&ctx.env, "set_stream_contract"),
+            Symbol::new(&ctx.env, "set_max_rate_per_second"),
+            Symbol::new(&ctx.env, "global_resume"),
+            Symbol::new(&ctx.env, "bulk_resume_streams_as_admin"),
+            Symbol::new(&ctx.env, "unknown_privileged_function"),
+        ];
+
+        for sym in fn_symbols.iter() {
+            let encoded = sym.to_xdr(&ctx.env);
+            assert!(
+                CallData::from_xdr(&ctx.env, &encoded).is_err(),
+                "Direct symbol XDR for {:?} must not decode as CallData",
+                sym
+            );
+        }
+    }
+
+    #[test]
+    fn test_calldata_variants_roundtrip() {
+        use soroban_sdk::xdr::{FromXdr, ToXdr};
+        let ctx = Ctx::setup();
+        let variants = vec![
+            &ctx.env,
+            CallData::Noop,
+            CallData::StreamSetAdmin(Address::generate(&ctx.env)),
+            CallData::StreamSetMaxRate(5000),
+            CallData::StreamGlobalResume,
+            CallData::StreamBulkResumeAsAdmin(vec![&ctx.env, 1, 2, 3]),
+            CallData::FactorySetAdmin(Address::generate(&ctx.env)),
+            CallData::FactorySetCap(100_000),
+            CallData::FactorySetMinDuration(86400),
+            CallData::FactorySetAllowlist(Address::generate(&ctx.env), true),
+            CallData::FactorySetStreamContract(Address::generate(&ctx.env)),
+        ];
+
+        for var in variants.iter() {
+            let encoded = var.clone().to_xdr(&ctx.env);
+            let decoded = CallData::from_xdr(&ctx.env, &encoded)
+                .expect("Legitimate CallData variant must decode cleanly");
+            // Each decoded variant should be matching type
+            match (var, decoded) {
+                (CallData::Noop, CallData::Noop) => {}
+                (CallData::StreamSetAdmin(a1), CallData::StreamSetAdmin(a2)) => {
+                    assert_eq!(a1, a2)
+                }
+                (CallData::StreamSetMaxRate(r1), CallData::StreamSetMaxRate(r2)) => {
+                    assert_eq!(r1, r2)
+                }
+                (CallData::StreamGlobalResume, CallData::StreamGlobalResume) => {}
+                (CallData::StreamBulkResumeAsAdmin(v1), CallData::StreamBulkResumeAsAdmin(v2)) => {
+                    assert_eq!(v1.len(), v2.len());
+                }
+                (CallData::FactorySetAdmin(a1), CallData::FactorySetAdmin(a2)) => {
+                    assert_eq!(a1, a2)
+                }
+                (CallData::FactorySetCap(c1), CallData::FactorySetCap(c2)) => {
+                    assert_eq!(c1, c2)
+                }
+                (CallData::FactorySetMinDuration(d1), CallData::FactorySetMinDuration(d2)) => {
+                    assert_eq!(d1, d2)
+                }
+                (CallData::FactorySetAllowlist(a1, b1), CallData::FactorySetAllowlist(a2, b2)) => {
+                    assert_eq!(a1, a2);
+                    assert_eq!(b1, b2);
+                }
+                (
+                    CallData::FactorySetStreamContract(a1),
+                    CallData::FactorySetStreamContract(a2),
+                ) => {
+                    assert_eq!(a1, a2);
+                }
+                _ => panic!("Variant mismatch during CallData round-trip test"),
+            }
         }
     }
 
@@ -1584,75 +1796,146 @@ mod tests {
         assert_eq!(client.quorum(), 1);
     }
 
+    #[test]
+    fn test_set_threshold_updates_value_and_emits_event() {
+        let ctx = Ctx::setup(); // 3 signers, threshold=2
+
+        ctx.client.test_only_set_threshold(&3u32);
+
+        assert_eq!(ctx.client.get_threshold(), 3);
+
+        // set_threshold emits thr_upd followed by a quor_cfg summary event;
+        // the latter is now last, so find thr_upd explicitly instead of
+        // assuming it's the most recent event.
+        let (topic, data) = nth_last_contract_event_with_topic(
+            &ctx.env,
+            &ctx.contract_id,
+            symbol_short!("thr_upd"),
+        );
+        assert_eq!(topic, symbol_short!("thr_upd"));
+        let payload =
+            ThresholdUpdated::try_from_val(&ctx.env, &data).expect("decodes to ThresholdUpdated");
+        assert_eq!(payload.old_threshold, 2);
+        assert_eq!(payload.new_threshold, 3);
+
+        let (last_topic, last_data) = last_contract_event(&ctx.env, &ctx.contract_id);
+        assert_eq!(last_topic, symbol_short!("quor_cfg"));
+        let quorum_payload =
+            QuorumConfig::try_from_val(&ctx.env, &last_data).expect("decodes to QuorumConfig");
+        assert_eq!(quorum_payload.threshold, 3);
+        assert_eq!(quorum_payload.signer_count, 3);
+    }
+
+    #[test]
+    fn test_set_threshold_rejects_zero() {
+        let ctx = Ctx::setup();
+        let events_before = ctx.env.events().all().len();
+
+        let result = ctx.client.try_test_only_set_threshold(&0u32);
+
+        assert_eq!(result, Err(Ok(GovernanceError::InvalidThreshold)));
+        assert_eq!(ctx.client.get_threshold(), 2);
+        assert_eq!(ctx.env.events().all().len(), events_before);
+    }
+
+    #[test]
+    fn test_set_threshold_rejects_above_signer_count() {
+        let ctx = Ctx::setup(); // 3 signers
+        let events_before = ctx.env.events().all().len();
+
+        let result = ctx.client.try_test_only_set_threshold(&4u32);
+
+        assert_eq!(result, Err(Ok(GovernanceError::InvalidThreshold)));
+        assert_eq!(ctx.client.get_threshold(), 2);
+        assert_eq!(ctx.env.events().all().len(), events_before);
+    }
+
+    #[test]
+    fn test_set_threshold_accepts_one() {
+        let ctx = Ctx::setup();
+
+        ctx.client.test_only_set_threshold(&1u32);
+
+        assert_eq!(ctx.client.get_threshold(), 1);
+    }
+
     // -----------------------------------------------------------------------
     // set_threshold validation
     // -----------------------------------------------------------------------
 
     #[test]
-    fn test_set_threshold_rejects_zero() {
-        let ctx = Ctx::setup(); // 3 signers, threshold=2
-        let result = ctx.client.try_set_threshold(&0u32);
-        assert_eq!(result, Err(Ok(GovernanceError::InvalidThreshold)));
-        // Verify threshold is unchanged.
-        assert_eq!(ctx.client.get_threshold(), 2);
-    }
-
-    #[test]
-    fn test_set_threshold_rejects_above_signer_count() {
-        let ctx = Ctx::setup(); // 3 signers, threshold=2
-        let result = ctx.client.try_set_threshold(&4u32);
-        assert_eq!(result, Err(Ok(GovernanceError::InvalidThreshold)));
-        // Verify threshold is unchanged.
-        assert_eq!(ctx.client.get_threshold(), 2);
-    }
-
-    #[test]
     fn test_set_threshold_accepts_valid_range() {
         let ctx = Ctx::setup(); // 3 signers, threshold=2
                                 // Set to 1 (valid: 1 <= 1 <= 3)
-        ctx.client.set_threshold(&1u32);
+        ctx.client.test_only_set_threshold(&1u32);
         assert_eq!(ctx.client.get_threshold(), 1);
         // Set to 3 (valid: 1 <= 3 <= 3)
-        ctx.client.set_threshold(&3u32);
+        ctx.client.test_only_set_threshold(&3u32);
         assert_eq!(ctx.client.get_threshold(), 3);
         // Set back to 2 (valid: 1 <= 2 <= 3)
-        ctx.client.set_threshold(&2u32);
+        ctx.client.test_only_set_threshold(&2u32);
         assert_eq!(ctx.client.get_threshold(), 2);
     }
 
+   /// Reproduces the exact attack sequence from issue #1136: a compromised
+    /// admin key adds itself as a co-signer, collapses the threshold to 1,
+    /// then solo proposes+approves. Confirms the attack now FAILS because
+    /// there is no public entrypoint for add_signer/set_threshold that
+    /// bypasses propose/approve/timelock/execute — the admin key alone
+    /// cannot reach `set_threshold_internal` or `add_signer_internal` at all.
     #[test]
-    fn test_set_threshold_requires_admin_auth() {
-        let env = Env::default();
-        env.ledger().set_timestamp(1_000_000);
-        let contract_id = env.register_contract(None, FluxoraGovernance);
-        let admin = Address::generate(&env);
-        let signer_a = Address::generate(&env);
-        let signer_b = Address::generate(&env);
-        let signer_c = Address::generate(&env);
-        let client = FluxoraGovernanceClient::new(&env, &contract_id);
-        client.init(&admin, &vec![&env, signer_a, signer_b, signer_c], &2u32);
-        // Without mock_all_auths, require_auth() on the admin address fails at
-        // the host level (HostError / Abort) because the caller has not
-        // authorized as the admin.  This verifies that set_threshold does
-        // enforce admin authorization.
-        let result = client.try_set_threshold(&1u32);
-        assert!(
-            result.is_err(),
-            "set_threshold should abort without admin auth"
-        );
-        // Verify threshold is unchanged.
-        assert_eq!(client.get_threshold(), 2);
-    }
+    fn test_admin_cannot_collapse_threshold_alone() {
+        let ctx = Ctx::setup(); // admin, signer_a/b/c, threshold=2
 
+        // There is no `add_signer`/`set_threshold` client method anymore —
+        // this is itself the fix. The only path is through CallData variants
+        // dispatched from execute(), which still requires quorum + timelock.
+        use soroban_sdk::xdr::ToXdr;
+        let attacker_signer = Address::generate(&ctx.env);
+
+        // Attacker (as admin) tries to add itself as a co-signer via the
+        // governed path, but can only get there by being a signer who can
+        // propose+approve — which the compromised admin key alone cannot do,
+        // since admin.require_auth() is no longer sufficient anywhere in this
+        // flow. propose() requires the caller be a registered signer.
+        let add_self_calldata = CallData::GovAddSigner(attacker_signer.clone()).to_xdr(&ctx.env);
+        let result = ctx.client.try_propose(
+            &ctx.admin, // admin is NOT a registered signer
+            &ctx.contract_id,
+            &add_self_calldata,
+        );
+        assert_eq!(result, Err(Ok(GovernanceError::NotASigner)));
+
+        // Even if the attacker WERE a legitimate signer (e.g. signer_a),
+        // collapsing the threshold still requires a second signer's approval
+        // and the 48h timelock — solo propose+approve is insufficient.
+        let collapse_calldata = CallData::GovSetThreshold(1u32).to_xdr(&ctx.env);
+        let id = ctx.client.propose(&ctx.signer_a, &ctx.contract_id, &collapse_calldata);
+        ctx.client.approve(&ctx.signer_a, &id);
+        // Only 1 of 2 required approvals — quorum not reached.
+        let executor = Address::generate(&ctx.env);
+        let exec_result = ctx.client.try_execute(&executor, &id);
+        assert_eq!(exec_result, Err(Ok(GovernanceError::QuorumNotReached)));
+        assert_eq!(ctx.client.get_threshold(), 2); // unchanged
+
+        // Full legitimate flow still works: 2 signers approve, timelock
+        // elapses, threshold collapses to 1 — this is now an accountable,
+        // quorum-gated, time-delayed action, not a unilateral one.
+        ctx.client.approve(&ctx.signer_b, &id);
+        ctx.env.ledger().set_timestamp(1_000_000 + TIMELOCK + 1);
+        ctx.client.execute(&executor, &id);
+        assert_eq!(ctx.client.get_threshold(), 1);
+    }
+    
     #[test]
     fn test_set_threshold_after_signer_removal_respects_current_count() {
         let ctx = Ctx::setup(); // 3 signers, threshold=2
-        ctx.client.remove_signer(&ctx.signer_c); // Now 2 signers
+        ctx.client.test_only_remove_signer(&ctx.signer_c); // Now 2 signers
                                                  // Setting threshold to 2 should succeed (2 <= 2)
-        ctx.client.set_threshold(&2u32);
+        ctx.client.test_only_set_threshold(&2u32);
         assert_eq!(ctx.client.get_threshold(), 2);
         // Setting threshold to 3 should fail (3 > 2)
-        let result = ctx.client.try_set_threshold(&3u32);
+        let result = ctx.client.try_test_only_set_threshold(&3u32);
         assert_eq!(result, Err(Ok(GovernanceError::InvalidThreshold)));
     }
 
@@ -1664,7 +1947,7 @@ mod tests {
     fn test_remove_signer_down_to_threshold_succeeds() {
         let ctx = Ctx::setup(); // 3 signers, threshold=2
                                 // After removing signer_c, we have 2 signers == threshold — should succeed.
-        ctx.client.remove_signer(&ctx.signer_c);
+        ctx.client.test_only_remove_signer(&ctx.signer_c);
         let signers = ctx.client.get_signers();
         assert_eq!(signers.len(), 2);
         // quorum still 2, which is <= signers.len() — invariant holds.
@@ -1674,9 +1957,9 @@ mod tests {
     #[test]
     fn test_remove_signer_below_threshold_errors() {
         let ctx = Ctx::setup(); // 3 signers, threshold=2
-        ctx.client.remove_signer(&ctx.signer_c); // 2 signers left
+        ctx.client.test_only_remove_signer(&ctx.signer_c); // 2 signers left
                                                  // Trying to remove another signer would leave 1 < threshold=2
-        let result = ctx.client.try_remove_signer(&ctx.signer_b);
+        let result = ctx.client.try_test_only_remove_signer(&ctx.signer_b);
         assert_eq!(result, Err(Ok(GovernanceError::QuorumWouldBreak)));
         // Verify signer set is unchanged.
         let signers = ctx.client.get_signers();
@@ -1688,10 +1971,52 @@ mod tests {
         let ctx = Ctx::setup(); // 3 signers, threshold=2
         let stranger = Address::generate(&ctx.env);
         // Removing a non-existent signer should be a no-op, not an error.
-        let result = ctx.client.try_remove_signer(&stranger);
+        let result = ctx.client.try_test_only_remove_signer(&stranger);
         assert!(result.is_ok());
         let signers = ctx.client.get_signers();
         assert_eq!(signers.len(), 3);
+    }
+
+    #[test]
+    fn test_removed_signer_approval_cannot_contribute_to_quorum() {
+        let ctx = Ctx::setup(); // signers A, B, C, threshold=2
+        let target = ctx.dummy_target();
+        let calldata = ctx.calldata("test");
+
+        let id = ctx.client.propose(&ctx.signer_a, &target, &calldata);
+
+        // Signer A approves (1 of 2 required)
+        ctx.client.approve(&ctx.signer_a, &id);
+
+        // Admin removes signer A (signers left: B, C; threshold still 2)
+        ctx.client.test_only_remove_signer(&ctx.signer_a);
+
+        // Signer B approves
+        ctx.client.approve(&ctx.signer_b, &id);
+
+        // Advance past timelock
+        ctx.env.ledger().set_timestamp(1_000_000 + TIMELOCK + 1);
+
+        // Without fix, execute succeeds because proposal.approvals has [A, B] (len 2 == threshold 2).
+        // With fix, execute must fail with QuorumNotReached because A is no longer a signer.
+        let executor = Address::generate(&ctx.env);
+        assert!(!ctx.client.is_executable(&id));
+        let res = ctx.client.try_test_only_execute(&executor, &id);
+        assert_eq!(res, Err(Ok(GovernanceError::QuorumNotReached)));
+
+        // Once remaining valid signer C approves, valid approvals reach 2 ([B, C]), setting a new QuorumReachedAt.
+        ctx.client.approve(&ctx.signer_c, &id);
+
+        // We must advance ledger timestamp past the new timelock start (which is 1_000_000 + TIMELOCK + 1)
+        ctx.env
+            .ledger()
+            .set_timestamp(1_000_000 + TIMELOCK + 1 + TIMELOCK + 1);
+
+        assert!(ctx.client.is_executable(&id));
+        ctx.client.execute(&executor, &id);
+
+        let p = ctx.client.get_proposal(&id);
+        assert!(p.executed);
     }
 
     // -----------------------------------------------------------------------
@@ -2091,7 +2416,7 @@ mod tests {
         assert_eq!(info.threshold, 2);
 
         // Remove signer_c — threshold stays 2, snapshot should still be 2.
-        ctx.client.remove_signer(&ctx.signer_c);
+        ctx.client.test_only_remove_signer(&ctx.signer_c);
         let info = ctx
             .client
             .get_quorum_info(&id)
@@ -2503,7 +2828,7 @@ mod tests {
         // Sanity: signer_a starts as a member.
         assert!(ctx.client.is_signer(&ctx.signer_a));
         // Admin removes signer_a.
-        ctx.client.remove_signer(&ctx.signer_a);
+        ctx.client.test_only_remove_signer(&ctx.signer_a);
         // After removal the index entry is gone; the view must reflect that.
         assert!(!ctx.client.is_signer(&ctx.signer_a));
         // Other signers are unaffected.
@@ -2518,7 +2843,7 @@ mod tests {
         // Pre-condition: not a member.
         assert!(!ctx.client.is_signer(&newcomer));
         // Admin adds newcomer.
-        ctx.client.add_signer(&newcomer);
+        ctx.client.test_only_add_signer(&newcomer);
         // Post-condition: now a member.
         assert!(ctx.client.is_signer(&newcomer));
     }
@@ -2616,13 +2941,13 @@ mod tests {
         ctx.client.approve(&ctx.signer_b, &id);
 
         // Remove signer_c (set goes from 3 to 2, still >= threshold=2).
-        ctx.client.remove_signer(&ctx.signer_c);
+        ctx.client.test_only_remove_signer(&ctx.signer_c);
         assert!(!ctx.client.is_signer(&ctx.signer_c));
         assert!(ctx.client.is_signer(&ctx.signer_a));
         assert!(ctx.client.is_signer(&ctx.signer_b));
 
         // Re-add signer_c (back to 3).
-        ctx.client.add_signer(&ctx.signer_c);
+        ctx.client.test_only_add_signer(&ctx.signer_c);
         assert!(ctx.client.is_signer(&ctx.signer_c));
     }
 

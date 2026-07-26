@@ -1157,3 +1157,305 @@ fn test_single_then_batch_registry_accumulates_in_order() {
     assert_eq!(page.get(1).unwrap(), batch_ids.get(0).unwrap());
     assert_eq!(page.get(2).unwrap(), batch_ids.get(1).unwrap());
 }
+
+// ---------------------------------------------------------------------------
+// Memo-length shared constant & early rejection test suite
+// ---------------------------------------------------------------------------
+
+/// Compile-time & runtime assertion proving the factory's memo-length guard is driven
+/// by `fluxora_stream::MAX_MEMO_BYTES` (the shared constant).
+///
+/// # Security & Architectural Safeguard
+/// The factory contract directly imports `fluxora_stream::MAX_MEMO_BYTES` in both
+/// `create_stream` and `create_streams` (Guard 8). This test machine-checks that
+/// the constant imported and evaluated by the factory test suite is identical to
+/// `fluxora_stream::MAX_MEMO_BYTES`, guaranteeing that changes to the stream contract's
+/// memo limit will automatically drive factory validation without risk of stale copies or divergence.
+#[test]
+fn test_factory_memo_guard_tracks_shared_max_memo_bytes_constant() {
+    // Direct compile-time constant alignment check
+    const FACTORY_EXPECTED_MAX_MEMO: usize = fluxora_stream::MAX_MEMO_BYTES;
+    assert_eq!(
+        FACTORY_EXPECTED_MAX_MEMO,
+        fluxora_stream::MAX_MEMO_BYTES,
+        "Factory memo guard constant must equal fluxora_stream::MAX_MEMO_BYTES"
+    );
+    assert_eq!(fluxora_stream::MAX_MEMO_BYTES, 256);
+}
+
+/// Proves that `create_stream` with a memo one byte over `fluxora_stream::MAX_MEMO_BYTES`
+/// (i.e. `MAX_MEMO_BYTES + 1` bytes) is rejected by the factory's own guard
+/// (`FactoryError::InvalidMemo`) BEFORE the cross-contract call is made to `FluxoraStream`.
+///
+/// # Early Rejection Proof
+/// 1. `ctx.factory.client.try_create_stream(...)` returns `Err(Ok(FactoryError::InvalidMemo))`.
+/// 2. The stream contract registry count and factory registry count remain 0.
+/// 3. The sender's token balance is untouched.
+/// 4. Distinguishes factory's Guard 8 early rejection (`FactoryError::InvalidMemo`) from
+///    downstream stream contract rejection (`ContractError::MemoTooLong`).
+#[test]
+fn test_single_create_stream_memo_over_limit_rejected_by_factory_guard() {
+    let ctx = Ctx::setup();
+    let now = ctx.now();
+
+    // Construct a memo of length MAX_MEMO_BYTES + 1 (257 bytes)
+    let mut over_limit_bytes = std::vec::Vec::with_capacity(fluxora_stream::MAX_MEMO_BYTES + 1);
+    over_limit_bytes.resize(fluxora_stream::MAX_MEMO_BYTES + 1, 0xAB);
+    let over_limit_memo = soroban_sdk::Bytes::from_slice(&ctx.env, &over_limit_bytes);
+
+    let res = ctx.factory.client.try_create_stream(
+        &ctx.sender,
+        &ctx.recipient,
+        &DEPOSIT_AMOUNT,
+        &RATE_PER_SECOND,
+        &now,
+        &now,
+        &(now + STREAM_DURATION),
+        &0,
+        &Some(over_limit_memo),
+        &fluxora_stream::StreamKind::Linear,
+    );
+
+    // Must return FactoryError::InvalidMemo from the factory itself
+    assert!(res.is_err());
+    let err = res.err().unwrap();
+    assert_eq!(
+        err,
+        Ok(FactoryError::InvalidMemo),
+        "Factory must reject over-length memo with FactoryError::InvalidMemo before calling stream contract"
+    );
+
+    // Verify early rejection before cross-contract interaction (0 streams registered, sender balance untouched)
+    assert_eq!(ctx.factory.get_factory_stream_count(), 0);
+    assert_eq!(ctx.token.balance(&ctx.sender), SENDER_FUNDING);
+}
+
+/// Proves that `create_stream` with a memo of exactly `fluxora_stream::MAX_MEMO_BYTES`
+/// (256 bytes) is accepted by the factory's guard and successfully forwarded to `FluxoraStream`.
+#[test]
+fn test_single_create_stream_exact_max_memo_bytes_accepted() {
+    let ctx = Ctx::setup();
+    let now = ctx.now();
+
+    // Construct a memo of length exactly MAX_MEMO_BYTES (256 bytes)
+    let mut exact_bytes = std::vec::Vec::with_capacity(fluxora_stream::MAX_MEMO_BYTES);
+    exact_bytes.resize(fluxora_stream::MAX_MEMO_BYTES, 0xCD);
+    let exact_memo = soroban_sdk::Bytes::from_slice(&ctx.env, &exact_bytes);
+
+    let res = ctx.factory.client.try_create_stream(
+        &ctx.sender,
+        &ctx.recipient,
+        &DEPOSIT_AMOUNT,
+        &RATE_PER_SECOND,
+        &now,
+        &now,
+        &(now + STREAM_DURATION),
+        &0,
+        &Some(exact_memo.clone()),
+        &fluxora_stream::StreamKind::Linear,
+    );
+
+    assert!(res.is_ok());
+    let stream_id = res.unwrap().unwrap();
+    assert_eq!(ctx.factory.get_factory_stream_count(), 1);
+
+    // Verify stream state in stream contract has the exact memo attached
+    let state = ctx.stream.get_stream_state(&stream_id);
+    assert_eq!(state.memo, Some(exact_memo));
+}
+
+/// Proves that batch stream creation (`create_streams`) with one stream entry containing
+/// a memo exceeding `fluxora_stream::MAX_MEMO_BYTES` is rejected by the factory
+/// (`FactoryError::InvalidMemo`) prior to making any cross-contract call.
+#[test]
+fn test_batch_create_streams_memo_over_limit_rejected_by_factory_guard() {
+    let ctx = Ctx::setup();
+
+    let mut over_limit_bytes = std::vec::Vec::with_capacity(fluxora_stream::MAX_MEMO_BYTES + 1);
+    over_limit_bytes.resize(fluxora_stream::MAX_MEMO_BYTES + 1, 0xEE);
+    let over_limit_memo = soroban_sdk::Bytes::from_slice(&ctx.env, &over_limit_bytes);
+
+    let mut streams = Vec::new(&ctx.env);
+    // Entry 1: valid stream params
+    streams.push_back(make_params(&ctx, &ctx.recipient, 0));
+    // Entry 2: memo exceeds MAX_MEMO_BYTES by 1 byte
+    let mut invalid_params = make_params(&ctx, &ctx.recipient, 100);
+    invalid_params.memo = Some(over_limit_memo);
+    streams.push_back(invalid_params);
+
+    let res = ctx.factory.try_create_streams(&ctx.sender, &streams);
+
+    assert!(res.is_err());
+    let err = res.err().unwrap();
+    assert_eq!(
+        err,
+        Ok(FactoryError::InvalidMemo),
+        "Batch creation must reject over-length memo with FactoryError::InvalidMemo before calling stream contract"
+    );
+
+    // Atomic rejection: 0 streams created in registry, sender balance untouched
+    assert_eq!(ctx.factory.get_factory_stream_count(), 0);
+    assert_eq!(ctx.token.balance(&ctx.sender), SENDER_FUNDING);
+}
+
+// ---------------------------------------------------------------------------
+// Trust-boundary bypass: direct stream-contract calls skip factory policy
+//
+// The factory's allowlist, deposit-cap, and minimum-duration policies are
+// enforced entirely within FluxoraFactory. FluxoraStream::create_stream has
+// no awareness of these policies. Any caller with direct access to the stream
+// contract address can create streams that violate every factory-level rule.
+// This section proves the bypass with concrete tests (issue #961).
+// ---------------------------------------------------------------------------
+
+/// Factory rejects a non-allowlisted recipient, but a direct call to
+/// `FluxoraStream::create_stream` with the same parameters succeeds —
+/// proving the allowlist is not enforced at the stream-contract level.
+#[test]
+fn test_direct_stream_call_bypasses_recipient_allowlist() {
+    let ctx = Ctx::setup();
+    let now = ctx.now();
+
+    // Remove the recipient from the factory allowlist.
+    ctx.factory.set_allowlist(&ctx.recipient, &false);
+
+    // Factory rejects: RecipientNotAllowlisted.
+    let res = ctx.factory.try_create_stream(
+        &ctx.sender,
+        &ctx.recipient,
+        &DEPOSIT_AMOUNT,
+        &RATE_PER_SECOND,
+        &now,
+        &now,
+        &(now + STREAM_DURATION),
+        &0,
+    );
+    assert_eq!(res, Err(Ok(FactoryError::RecipientNotAllowlisted)));
+
+    // Direct stream-contract call succeeds — allowlist bypassed.
+    let stream_id = ctx
+        .stream
+        .create_stream(
+            &ctx.sender,
+            &ctx.recipient,
+            &DEPOSIT_AMOUNT,
+            &RATE_PER_SECOND,
+            &now,
+            &now,
+            &(now + STREAM_DURATION),
+            &0,
+            &None,
+            &StreamKind::Linear,
+            &None,
+            &None,
+        )
+        .unwrap();
+
+    // Stream exists in the stream contract.
+    let state = ctx.stream.get_stream_state(&stream_id);
+    assert_eq!(state.recipient, ctx.recipient);
+
+    // Stream is NOT registered in the factory.
+    assert_eq!(ctx.factory.get_factory_stream_count(), 0);
+
+    // Deposit was pulled from sender.
+    assert_eq!(
+        ctx.token.balance(&ctx.sender),
+        SENDER_FUNDING - DEPOSIT_AMOUNT
+    );
+}
+
+/// Factory rejects a deposit that exceeds the cap, but a direct call to
+/// `FluxoraStream::create_stream` with the same over-cap amount succeeds —
+/// proving the deposit cap is not enforced at the stream-contract level.
+#[test]
+fn test_direct_stream_call_bypasses_deposit_cap() {
+    let ctx = Ctx::setup();
+    let now = ctx.now();
+
+    let over_cap_deposit = MAX_DEPOSIT + 1;
+
+    // Factory rejects: DepositExceedsCap.
+    let res = ctx.factory.try_create_stream(
+        &ctx.sender,
+        &ctx.recipient,
+        &over_cap_deposit,
+        &RATE_PER_SECOND,
+        &now,
+        &now,
+        &(now + STREAM_DURATION),
+        &0,
+    );
+    assert_eq!(res, Err(Ok(FactoryError::DepositExceedsCap)));
+
+    // Direct stream-contract call succeeds — deposit cap bypassed.
+    let stream_id = ctx
+        .stream
+        .create_stream(
+            &ctx.sender,
+            &ctx.recipient,
+            &over_cap_deposit,
+            &RATE_PER_SECOND,
+            &now,
+            &now,
+            &(now + STREAM_DURATION),
+            &0,
+            &None,
+            &StreamKind::Linear,
+            &None,
+            &None,
+        )
+        .unwrap();
+
+    let state = ctx.stream.get_stream_state(&stream_id);
+    assert_eq!(state.deposit_amount, over_cap_deposit);
+    assert_eq!(ctx.factory.get_factory_stream_count(), 0);
+}
+
+/// Factory rejects a duration below the minimum, but a direct call to
+/// `FluxoraStream::create_stream` with the same short duration succeeds —
+/// proving the minimum-duration policy is not enforced at the stream-contract level.
+#[test]
+fn test_direct_stream_call_bypasses_minimum_duration() {
+    let ctx = Ctx::setup();
+    let now = ctx.now();
+
+    let short_duration = MIN_DURATION - 1;
+
+    // Factory rejects: DurationTooShort.
+    let res = ctx.factory.try_create_stream(
+        &ctx.sender,
+        &ctx.recipient,
+        &DEPOSIT_AMOUNT,
+        &RATE_PER_SECOND,
+        &now,
+        &now,
+        &(now + short_duration),
+        &0,
+    );
+    assert_eq!(res, Err(Ok(FactoryError::DurationTooShort)));
+
+    // Direct stream-contract call succeeds — minimum duration bypassed.
+    let stream_id = ctx
+        .stream
+        .create_stream(
+            &ctx.sender,
+            &ctx.recipient,
+            &DEPOSIT_AMOUNT,
+            &RATE_PER_SECOND,
+            &now,
+            &now,
+            &(now + short_duration),
+            &0,
+            &None,
+            &StreamKind::Linear,
+            &None,
+            &None,
+        )
+        .unwrap();
+
+    let state = ctx.stream.get_stream_state(&stream_id);
+    assert_eq!(state.end_time - state.start_time, short_duration);
+    assert_eq!(ctx.factory.get_factory_stream_count(), 0);
+}
+

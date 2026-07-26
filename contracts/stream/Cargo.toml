@@ -2,6 +2,7 @@
 name = "fluxora_stream"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.94.1"
 description = "Fluxora USDC streaming contract for Stellar Soroban"
 # Issue #206 — global emergency pause: scaffold branch. Instance pause flag + admin setter to follow.
 
@@ -35,6 +36,7 @@ proptest = "1"
 # Required for constructing Ed25519 keypairs in delegated-withdraw tests
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 rand = "0.8"
+soroban-env-host = "=21.2.1"
 
 # ---------------------------------------------------------------------------
 # Known-broken integration tests (pre-existing, unrelated to CI restoration)
@@ -109,14 +111,24 @@ path = "tests/metadata_extension.rs"
 test = false
 
 [[test]]
+name = "stream_offer"
+path = "tests/stream_offer.rs"
+test = true
+
+[[test]]
 name = "rate_bounds"
 path = "tests/rate_bounds.rs"
-test = false
+test = true
 
 [[test]]
 name = "rate_decrease_after_withdraw"
 path = "tests/rate_decrease_after_withdraw.rs"
-test = false
+test = true
+
+[[test]]
+name = "witnessed_cancel"
+path = "tests/witnessed_cancel.rs"
+test = true
 
 [[test]]
 name = "recipient_update_state_machine"
@@ -141,7 +153,20 @@ test = false
 [[test]]
 name = "withdrawal_frequency"
 path = "tests/withdrawal_frequency.rs"
-test = false
+test = true
+
+# Hard gate: Cargo.lock determinism structural checks.
+# Verifies lockfile presence, soroban-sdk exact pin, no [patch] table,
+# resolver = "2", modern lockfile format, and manifest/lockfile version
+# consistency. Complements the CI "Verify Cargo.lock is committed and
+# unchanged" step in .github/workflows/ci.yml (build job). No soroban
+# testutils dependency — compiles and runs in every cargo test invocation.
+# See contracts/stream/src/checksum.rs ("Dependency resolution" residual risk)
+# and docs/upgrade.md §8 "Cargo.lock Determinism".
+[[test]]
+name = "cargo_lock_determinism"
+path = "tests/cargo_lock_determinism.rs"
+test = true
 
 # ---------------------------------------------------------------------------
 # Known-broken integration tests, second batch (compile fine, fail at runtime)
@@ -183,7 +208,7 @@ required-features = ["testutils"]
 [[test]]
 name = "event_snapshots_suite"
 path = "tests/event_snapshots_suite.rs"
-test = false
+test = true
 
 [[test]]
 name = "governance_integration"
