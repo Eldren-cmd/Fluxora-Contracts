@@ -204,6 +204,44 @@ def test_main_fails_in_process_when_missing_components(monkeypatch, capsys):
     assert "Missing required components: clippy" in captured.err
 
 
+def test_main_fails_when_toolchain_missing_channel(monkeypatch, capsys, tmp_path):
+    """Test that main() fails when rust-toolchain.toml is missing [toolchain].channel."""
+    bad_toolchain = tmp_path / "rust-toolchain.toml"
+    bad_toolchain.write_text('[toolchain]\n')
+    
+    monkeypatch.setattr(verify_rust_version, "TOOLCHAIN_FILE", bad_toolchain)
+    assert verify_rust_version.main() == 1
+    captured = capsys.readouterr()
+    assert "::error::" in captured.err
+
+
+def test_main_fails_when_pinned_targets_invalid_type(monkeypatch, capsys, tmp_path):
+    """Test that main() fails when [toolchain].targets is not a list."""
+    bad_toolchain = tmp_path / "rust-toolchain.toml"
+    bad_toolchain.write_text('[toolchain]\nchannel = "1.94.1"\ntargets = "not-a-list"\n')
+    
+    monkeypatch.setattr(verify_rust_version, "TOOLCHAIN_FILE", bad_toolchain)
+    monkeypatch.setenv("RUSTC_VERSION_OUTPUT", "rustc 1.94.1 (abcdef 2026-01-01)")
+    monkeypatch.setenv("RUSTUP_TARGET_LIST_OUTPUT", "wasm32-unknown-unknown")
+    monkeypatch.setenv("RUSTUP_COMPONENT_LIST_OUTPUT", "rustfmt\nclippy")
+    assert verify_rust_version.main() == 1
+    captured = capsys.readouterr()
+    assert "::error::" in captured.err
+
+
+def test_main_fails_when_pinned_components_invalid_type(monkeypatch, capsys, tmp_path):
+    """Test that main() fails when [toolchain].components is not a list."""
+    bad_toolchain = tmp_path / "rust-toolchain.toml"
+    bad_toolchain.write_text('[toolchain]\nchannel = "1.94.1"\ncomponents = "not-a-list"\n')
+    
+    monkeypatch.setattr(verify_rust_version, "TOOLCHAIN_FILE", bad_toolchain)
+    monkeypatch.setenv("RUSTC_VERSION_OUTPUT", "rustc 1.94.1 (abcdef 2026-01-01)")
+    monkeypatch.setenv("RUSTUP_TARGET_LIST_OUTPUT", "wasm32-unknown-unknown")
+    monkeypatch.setenv("RUSTUP_COMPONENT_LIST_OUTPUT", "rustfmt\nclippy")
+    assert verify_rust_version.main() == 1
+    captured = capsys.readouterr()
+    assert "::error::" in captured.err
+
 def test_main_prints_installed_targets_message(monkeypatch, capsys):
     """Test that main() prints targets match message when all present."""
     monkeypatch.setenv("RUSTC_VERSION_OUTPUT", "rustc 1.94.1 (abcdef 2026-01-01)")
