@@ -28,7 +28,6 @@ treasury tooling) can use this reference to handle protocol exceptions correctly
 | `DuplicateStreamId` | 14 | Duplicate stream IDs supplied to a batch operation | `batch_withdraw` |
 | `InvalidSignature` | 15 | Delegated withdrawal signature is invalid, expired, or nonce mismatch | `delegated_withdraw` |
 | `BelowMinimumAmount` | 16 | Withdrawable amount is below the `expected_minimum_amount` committed in the signature | `delegated_withdraw` |
-| `ClockRegression` | 17 | Ledger-backed accrual observed a timestamp lower than the previous accrual timestamp | `calculate_accrued`, `get_withdrawable`, `withdraw`, `withdraw_to`, `batch_withdraw`, `batch_withdraw_to`, rate changes, `cancel_stream`, auto-claim paths |
 | `ReservationCountZero` | 17 | ID reservation count is zero | `reserve_stream_ids` |
 | `ReservationLimitExceeded` | 18 | ID reservation count exceeds `MAX_ID_RESERVATION` | `reserve_stream_ids` |
 | `SignatureDeadlineExpired` | 19 | Delegated withdrawal signature deadline has passed | `delegated_withdraw` |
@@ -36,15 +35,23 @@ treasury tooling) can use this reference to handle protocol exceptions correctly
 | `TemplateLimitExceeded` | 21 | Per-owner or global template limit would be exceeded | `register_stream_template` |
 | `TemplateUnauthorized` | 22 | Caller is not authorized to delete a template | `delete_stream_template` |
 | `TokenVerificationFailed` | 23 | Token contract does not expose the expected SEP-41 interface during init | `init` |
-| `PauseReasonTooLong` | 23 | Pause reason string exceeds `MAX_PAUSE_REASON_BYTES` | `pause_protocol` |
 | `ReservationNotFound` | 24 | No ID reservation exists for the specified holder | `release_id_reservation`, `reclaim_expired_id_reservation` |
 | `ReservationStillActive` | 25 | Reservation has not yet expired and cannot be reclaimed | `reclaim_expired_id_reservation` |
 | `ReservationNotExpirable` | 26 | Reservation has no expiry and cannot be reclaimed | `reclaim_expired_id_reservation` |
-| `KeeperGracePeriodNotElapsed` | 27 | Keeper cancellation grace period has not elapsed | `keeper_cancel` |
-| `MetadataTooLarge` | 28 | Stream metadata exceeds size limits | `create_stream`, `create_streams`, `create_streams_partial` |
-| `PauseCooldownActive` | 29 | Stream pause cooldown period is still active | `pause_stream` |
+| `ReservationAlreadyActive` | 41 | A reservation is already active for this caller | `reserve_stream_ids` |
+| `PauseReasonTooLong` | 27 | Pause reason string exceeds `MAX_PAUSE_REASON_BYTES` | `pause_protocol` |
+| `ClockRegression` | 28 | Ledger-backed accrual observed a timestamp lower than the previous accrual timestamp | `calculate_accrued`, `get_withdrawable`, `withdraw`, `withdraw_to`, `batch_withdraw`, `batch_withdraw_to`, rate changes, `cancel_stream`, auto-claim paths |
+| `MetadataTooLarge` | 29 | Stream metadata exceeds size limits | `create_stream`, `create_streams`, `create_streams_partial` |
 | `RateCapExceeded` | 30 | Rate per second exceeds the configured maximum | `create_stream`, `update_rate_per_second` |
-| `WithdrawalTooFrequent` | 31 | Withdrawal attempted before minimum interval elapsed | `withdraw`, `delegated_withdraw`, `batch_withdraw` |
+| `PauseCooldownActive` | 32 | Stream pause cooldown period is still active | `pause_stream` |
+| `WithdrawalTooFrequent` | 33 | Withdrawal attempted before minimum interval elapsed | `withdraw`, `delegated_withdraw`, `batch_withdraw` |
+| `ReservationAlreadyActive` | 34 | A reservation is already active for this caller | `reserve_stream_ids` |
+| `InvalidDustThreshold` | 35 | Withdraw dust threshold is negative or exceeds deposit amount | `create_stream`, `create_streams`, `create_streams_partial`, `create_stream_relative`, `create_stream_from_template` |
+| `AutoRenewFundingUnavailable` | 36 | The sender cannot fund an auto-renewal with the available balance and allowance | `renew_stream` |
+| `OfferNotFound` | 37 | Stream offer not found (accepted, rejected, cancelled, or never existed) | `accept_stream_offer`, `reject_stream_offer`, `cancel_stream_offer`, `get_stream_offer` |
+| `OfferExpired` | 38 | Stream offer `expiry_time` has passed at acceptance | `accept_stream_offer` |
+| `OfferWrongRecipient` | 39 | Caller is not the intended recipient of this offer | `accept_stream_offer`, `reject_stream_offer` |
+| `OfferWrongSender` | 40 | Caller is not the original sender who created this offer | `cancel_stream_offer` |
 
 Non-error enum values used by stream creation and accrual:
 
@@ -557,6 +564,7 @@ match client.try_batch_withdraw(&recipient, &stream_ids) {
 - `delegated_withdraw` called with an invalid ed25519 signature
 - Signature has expired (timestamp check failed)
 - Nonce mismatch (replay protection)
+- Cross-stream confusion (signature crafted for a different `stream_id` but submitted against another)
 - Signature does not match the expected payload structure
 
 **Affected Roles**:
@@ -614,7 +622,7 @@ match client.try_delegated_withdraw(&relayer, &stream_id, &signature, &nonce, &e
 
 ---
 
-### ClockRegression (17)
+### ClockRegression (28)
 
 **Definition**: Ledger-backed accrual observed a ledger timestamp lower than the previous accrual timestamp stored for the contract instance.
 
@@ -684,13 +692,89 @@ match client.try_delegated_withdraw(&relayer, &stream_id, &signature, &nonce, &e
 
 ---
 
-### PauseReasonTooLong (23)
+### PauseReasonTooLong (27)
 
 **Definition**: `pause_protocol` received a reason string longer than `MAX_PAUSE_REASON_BYTES`.
 
 **Client Action**: Shorten the operator-facing pause reason and retry the pause transaction.
 
 ---
+
+### InvalidDustThreshold (35)
+
+**Definition**: Withdraw dust threshold is negative or exceeds deposit amount.
+
+**Trigger Conditions**:
+| Parameter | Invalid When |
+|-----------|--------------|
+| `withdraw_dust_threshold < 0` | Threshold must be non-negative |
+| `withdraw_dust_threshold > deposit_amount` | Threshold cannot exceed total deposit |
+
+**Affected Roles**:
+| Role | Can Trigger | Notes |
+|------|------------|-------|
+| Sender | Yes | `create_stream`, `create_streams`, `create_streams_partial`, `create_stream_relative`, `create_stream_from_template` |
+
+**Client Action**:
+```rust
+match client.try_create_stream(..., &withdraw_dust_threshold, ...) {
+    Ok(stream_id) => { /* success */ }
+    Err(ContractError::InvalidDustThreshold) => {
+        // Ensure withdraw_dust_threshold >= 0
+        // Ensure withdraw_dust_threshold <= deposit_amount
+        // withdraw_dust_threshold == deposit_amount is allowed (boundary case)
+    }
+    Err(e) => { /* handle other errors */ }
+}
+```
+
+**Success Semantics**: Returns `u64` stream_id with valid dust threshold.
+
+**Integrator Note**: The dust threshold enforces a minimum withdrawable amount to prevent dust accumulation. The threshold must be in the range `[0, deposit_amount]`. When `withdraw_dust_threshold == deposit_amount`, withdrawals are only allowed when the full deposit is withdrawable (e.g., at stream end or after final drain).
+
+---
+
+### AutoRenewFundingUnavailable (36)
+
+**Definition**: The sender on a stream opted-in to auto-renewal via `set_auto_renew` does not currently have sufficient token balance or allowance to fund a fresh deposit for the renewal.
+
+**Trigger Conditions**:
+
+| Condition | Detection |
+|-----------|-----------|
+| `token.balance(stream.sender) < stream.deposit_amount` | Token client balance read returns less than the required deposit |
+| `token.allowance(stream.sender, contract_address) < stream.deposit_amount` | Token client allowance read returns less than the required deposit |
+
+Either condition causes `renew_stream` to revert before any state mutation or token transfer is attempted, preserving CEI ordering.
+
+**Affected Roles**:
+
+| Role | Can Trigger | Notes |
+|------|------------|-------|
+| Anyone | Yes | `renew_stream` is permissionless once a sender has opted the stream in via `set_auto_renew` |
+| Sender | Yes | Same path; the renewal precondition involves reading the sender's own balance and allowance |
+| Admin | No | Admin cannot pre-fund another sender's renewal balance/allowance through this path |
+
+**Client Action**:
+
+```rust
+match client.try_renew_stream(&stream_id) {
+    Ok(new_stream_id) => { /* success — fresh deposit wired and old stream archived */ }
+    Err(ContractError::AutoRenewFundingUnavailable) => {
+        // The opted-in sender (or topology: anyone triggering the renewal on their behalf)
+        // must refill balance OR increase allowance before retrying.
+        let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+        let balance    = token_client.balance(&stream.sender);
+        let allowance  = token_client.allowance(&stream.sender, &env.current_contract_address());
+        // Notify the sender with the shortfall; expose both numbers for fast UI display.
+    }
+    Err(e) => { /* handle other errors */ }
+}
+```
+
+**Success Semantics**: Returns the newly created `stream_id` from the renewal transaction; the old stream transitions to `Completed` and a `StreamRenewed` event is emitted correlating the two IDs.
+
+**Integrator Note**: This error is **recoverable**. The opt-in survives across failures, so once the sender tops up balance and/or bumps allowance, any caller (including the original sender) can re-invoke `renew_stream` without re-registering the opt-in. Treat surfacing this error to the opted-in sender as a strong signal to surface the current `balance`/`allowance` shortfall inline in the UI; do not auto-retry with exponential backoff because the precondition can only be fixed by an explicit on-chain action by the sender.
 
 ## Previously Panicking Paths (Now Structured Errors)
 
@@ -877,6 +961,72 @@ result — see code 3 above.
 | Downstream contract error other than `ContractPaused` | `StreamContractError` (11) | catch-all wrapper — see above |
 | Memo at exactly `MAX_MEMO_BYTES` | success | `>` comparison used in source |
 | Rate exactly at `MinRatePerSecond` / `MaxRatePerSecond` | success | bounds are inclusive |
+
+---
+
+---
+
+## Cross-File Discriminant-Collision Audit
+
+### Shared-Decoder Finding
+
+`ContractError` (stream contract), `FactoryError` (factory contract), and
+`GovernanceError` (governance contract) are **three independent
+`#[contracterror] #[repr(u32)]` enums**, each compiled into a separate Soroban
+contract binary. Soroban returns numeric error codes scoped to the invoking
+contract's XDR context, so **no shared runtime decoder exists today**: a wallet
+or indexer receives the raw `u32` together with the contract address that
+produced it, and must route decoding through the correct enum based on that
+address.
+
+**Verified absence of a shared decoder (as of 2026-07-22):**
+
+| Component | How errors are decoded |
+|-----------|----------------------|
+| Stream contract clients | Map `u32` → `ContractError` variant using stream contract address context |
+| Factory contract clients | Map `u32` → `FactoryError` variant using factory contract address context |
+| Governance contract clients | Map `u32` → `GovernanceError` variant using governance contract address context |
+| Off-chain indexer / SDK | Must branch on `invoking_contract_address` **before** looking up the numeric code; a single flat code-to-message table shared across all three contracts would cause silent misclassification |
+
+**Residual risk**: If a future SDK or indexer merges all three error namespaces
+into one flat `code → message` lookup (without first routing by contract
+address), numeric overlaps between sections become silent misclassifications.
+The automated cross-check script `script/check-discriminant-collisions.py`
+reports such overlaps on every CI run so they are never silently introduced.
+
+### Automated Audit Script
+
+`script/check-discriminant-collisions.py` parses all three discriminant tables
+in this file on every CI run and reports:
+
+| Finding type | Behaviour |
+|-------------|-----------|
+| **Intra-section collision** — two different variant names share the same code within one enum | Script exits **1** (hard failure). This is always a documentation error; Rust/Soroban forbids duplicate discriminants at the source level. |
+| **Cross-section overlap** — the same numeric code appears in more than one enum section | Script exits **0** (warning only). Overlap is harmless when a shared decoder routes by contract address first. |
+| **Out-of-order entries** — discriminants not monotonically increasing within a section | Script exits **0** (maintenance warning). Indicates a likely cut-paste error in the table. |
+
+Run locally:
+
+```bash
+python3 script/check-discriminant-collisions.py
+# or point at a different docs path:
+python3 script/check-discriminant-collisions.py --docs path/to/error.md
+```
+
+The companion test suite is at `tests/test_check_discriminant_collisions.py`
+(≥95% coverage, runs in the `docs-alignment-check` CI job).
+
+### Companion Discriminant-Stability Tests
+
+Both Rust-level discriminant-stability tests are wired into CI:
+
+| Test | File | CI job |
+|------|------|--------|
+| `test_contract_error_discriminants_are_stable` | `contracts/stream/src/test.rs` | `test` job — `cargo test --workspace` (hard gate) |
+| `test_factory_error_discriminants_are_stable` | `contracts/factory/tests/factory_error_discriminants.rs` | `test` job — `cargo test -p fluxora_factory` (explicit, hard gate) |
+
+The factory test is intentionally `soroban_sdk::testutils`-free so it runs in
+CI without any ledger or token deployment.
 
 ---
 
