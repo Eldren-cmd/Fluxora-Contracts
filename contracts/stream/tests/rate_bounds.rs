@@ -477,8 +477,14 @@ fn test_update_rate_per_second_throttle_enforced() {
 
     // Initial rate is 100. Stream creation sets last_rate_change_ledger = 0.
     // The first update works because last_rate_change_ledger is 0.
+    let first_seq = env.ledger().sequence();
     let res = client.try_update_rate_per_second(&stream_id, &200i128);
     assert_eq!(res, Ok(Ok(())));
+    assert_eq!(
+        client.get_stream_state(&stream_id).last_rate_change_ledger,
+        first_seq,
+        "successful update must bump last_rate_change_ledger"
+    );
 
     // Now the next update in the same ledger should fail with RateCooldownActive
     let result = client.try_update_rate_per_second(&stream_id, &300i128);
@@ -489,11 +495,22 @@ fn test_update_rate_per_second_throttle_enforced() {
     env.ledger().set_sequence_number(seq + 16);
     let result2 = client.try_update_rate_per_second(&stream_id, &300i128);
     assert_eq!(result2, Err(Ok(ContractError::RateCooldownActive)));
+    assert_eq!(
+        client.get_stream_state(&stream_id).last_rate_change_ledger,
+        first_seq,
+        "rejected updates must not bump last_rate_change_ledger"
+    );
 
     // Fast forward 1 more ledger
     env.ledger().set_sequence_number(seq + 17);
+    let allowed_seq = env.ledger().sequence();
     let result3 = client.try_update_rate_per_second(&stream_id, &300i128);
     assert_eq!(result3, Ok(Ok(())));
+    assert_eq!(
+        client.get_stream_state(&stream_id).last_rate_change_ledger,
+        allowed_seq,
+        "post-cooldown update must refresh last_rate_change_ledger"
+    );
 }
 
 #[test]
@@ -504,8 +521,14 @@ fn test_decrease_rate_per_second_throttle_enforced() {
     let stream_id = create_stream_with_rate(&env, &client, &sender, &recipient, 1000i128);
 
     // First decrease works
+    let first_seq = env.ledger().sequence();
     let res = client.try_decrease_rate_per_second(&stream_id, &500i128);
     assert_eq!(res, Ok(Ok(())));
+    assert_eq!(
+        client.get_stream_state(&stream_id).last_rate_change_ledger,
+        first_seq,
+        "successful decrease must bump last_rate_change_ledger"
+    );
 
     // Second decrease fails in the same ledger
     let result = client.try_decrease_rate_per_second(&stream_id, &400i128);
@@ -516,6 +539,11 @@ fn test_decrease_rate_per_second_throttle_enforced() {
     env.ledger().set_sequence_number(seq + 16);
     let result2 = client.try_decrease_rate_per_second(&stream_id, &400i128);
     assert_eq!(result2, Err(Ok(ContractError::RateCooldownActive)));
+    assert_eq!(
+        client.get_stream_state(&stream_id).last_rate_change_ledger,
+        first_seq,
+        "rejected decreases must not bump last_rate_change_ledger"
+    );
 
     // Fast forward 1 more ledger
     env.ledger().set_sequence_number(seq + 17);
@@ -525,6 +553,12 @@ fn test_decrease_rate_per_second_throttle_enforced() {
     env.ledger().set_timestamp(ts + (17 * 5));
 
     // Now it should succeed
+    let allowed_seq = env.ledger().sequence();
     let result3 = client.try_decrease_rate_per_second(&stream_id, &400i128);
     assert_eq!(result3, Ok(Ok(())));
+    assert_eq!(
+        client.get_stream_state(&stream_id).last_rate_change_ledger,
+        allowed_seq,
+        "post-cooldown decrease must refresh last_rate_change_ledger"
+    );
 }

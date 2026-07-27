@@ -61,9 +61,6 @@ pub const MAX_RECIPIENT_PAGE_SIZE: u32 = RECIPIENT_STREAMS_PAGE_LIMIT;
 /// Maximum byte length for memo attached to a stream.
 pub const MAX_MEMO_BYTES: usize = 256;
 
-/// Maximum number of recipients allowed in a pooled stream creation.
-pub const MAX_POOL_RECIPIENTS: u32 = 100;
-
 /// Maximum byte length for pause-reason strings.
 pub const MAX_PAUSE_REASON_BYTES: usize = 256;
 
@@ -771,15 +768,6 @@ pub struct SenderTransferred {
     pub new_sender: Address,
 }
 
-/// Emitted when a stream's claim ownership is transferred.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ClaimOwnershipTransferred {
-    pub stream_id: u64,
-    pub old_owner: Option<Address>,
-    pub new_owner: Address,
-}
-
 /// Emitted when a stream's funding health status transitions between
 /// adequately funded and underfunded states.
 ///
@@ -1100,6 +1088,9 @@ pub struct Stream {
     /// Parent stream id when this stream is a delegated child of another stream.
     /// `None` for root streams.
     pub parent_stream_id: Option<u64>,
+    /// If true, the stream is decommissioned and restricted to cancel-or-no-op.
+    /// Defaults to false (None) for backward compatibility with existing streams.
+    pub decommissioned: Option<bool>,
 }
 
 /// Pagination result for recipient stream listing
@@ -1698,6 +1689,25 @@ fn reconcile_paused_stream_count(env: &Env, previous: StreamStatus, next: Stream
 use storage::{
     load_id_reservation, next_stream_id_for, remove_id_reservation, save_id_reservation,
 };
+
+/// Enforce the rate-change cooldown and record the current ledger as the last change.
+///
+/// Shared by `update_rate_per_second` and `decrease_rate_per_second` so the
+/// cooldown policy cannot drift between the two entrypoints. The first rate
+/// change on a stream (`last_rate_change_ledger == 0`) is exempt. The bump is
+/// applied to the in-memory `stream`; callers must only persist on success.
+fn check_and_bump_rate_cooldown(env: &Env, stream: &mut Stream) -> Result<(), ContractError> {
+    if stream.last_rate_change_ledger > 0 {
+        let min_ledger = stream
+            .last_rate_change_ledger
+            .saturating_add(MIN_RATE_INTERVAL_LEDGERS);
+        if env.ledger().sequence() < min_ledger {
+            return Err(ContractError::RateCooldownActive);
+        }
+    }
+    stream.last_rate_change_ledger = env.ledger().sequence();
+    Ok(())
+}
 
 fn load_stream(env: &Env, stream_id: u64) -> Result<Stream, ContractError> {
     let key = DataKey::Stream(stream_id);
@@ -2336,8 +2346,9 @@ impl FluxoraStream {
             .unwrap_or(i128::MAX);
         write_total_liabilities(env, liabilities);
 
-        env.events().publish(
-            (symbol_short!("created"), stream_id),
+        events::emit_stream_created(
+            env,
+            stream_id,
             StreamCreated {
                 stream_id,
                 sender,
@@ -2429,8 +2440,9 @@ impl FluxoraStream {
             .unwrap_or(i128::MAX);
         write_total_liabilities(env, liabilities);
 
-        env.events().publish(
-            (symbol_short!("created"), stream_id),
+        events::emit_stream_created(
+            env,
+            stream_id,
             StreamCreated {
                 stream_id,
                 sender,
@@ -2927,6 +2939,7 @@ impl FluxoraStream {
             delegation_depth: 0,
             parent_stream_id: None,
             is_pooled: Some(true),
+            decommissioned: None,
         };
 
         save_stream(&env, &stream);
@@ -2937,8 +2950,9 @@ impl FluxoraStream {
             .unwrap_or(i128::MAX);
         write_total_liabilities(&env, liabilities);
 
-        env.events().publish(
-            (symbol_short!("created"), stream_id),
+        events::emit_stream_created(
+            &env,
+            stream_id,
             StreamCreated {
                 stream_id,
                 sender,
@@ -3472,8 +3486,9 @@ impl FluxoraStream {
             PauseReason::Emergency => soroban_sdk::String::from_str(&env, "Emergency"),
             PauseReason::Compliance => soroban_sdk::String::from_str(&env, "Compliance"),
         };
-        env.events().publish(
-            (symbol_short!("paused"), stream_id),
+        events::emit_stream_paused(
+            &env,
+            stream_id,
             StreamPaused {
                 stream_id,
                 reason: reason_str,
@@ -3537,10 +3552,7 @@ impl FluxoraStream {
         save_stream(&env, &stream);
         reconcile_paused_stream_count(&env, previous_status, stream.status);
 
-        env.events().publish(
-            (symbol_short!("resumed"), stream_id),
-            StreamEvent::Resumed(stream_id),
-        );
+        events::emit_stream_resumed(&env, stream_id);
         Ok(())
     }
 
@@ -3741,8 +3753,9 @@ impl FluxoraStream {
 
         push_token(&env, &stream.recipient, withdrawable)?;
 
-        env.events().publish(
-            (symbol_short!("withdrew"), stream_id),
+        events::emit_withdrawal(
+            &env,
+            stream_id,
             Withdrawal {
                 stream_id,
                 recipient: stream.recipient.clone(),
@@ -3751,10 +3764,7 @@ impl FluxoraStream {
         );
 
         if completed_now {
-            env.events().publish(
-                (symbol_short!("completed"), stream_id),
-                StreamEvent::StreamCompleted(stream_id),
-            );
+            events::emit_stream_completed(&env, stream_id);
         }
 
         Ok(withdrawable)
@@ -3847,8 +3857,9 @@ impl FluxoraStream {
 
         push_token(&env, &caller, withdrawable)?;
 
-        env.events().publish(
-            (symbol_short!("withdrew"), stream_id),
+        events::emit_withdrawal(
+            &env,
+            stream_id,
             Withdrawal {
                 stream_id,
                 recipient: caller.clone(),
@@ -3857,10 +3868,7 @@ impl FluxoraStream {
         );
 
         if completed_now {
-            env.events().publish(
-                (symbol_short!("completed"), stream_id),
-                StreamEvent::StreamCompleted(stream_id),
-            );
+            events::emit_stream_completed(&env, stream_id);
         }
 
         Ok(withdrawable)
@@ -3992,8 +4000,9 @@ impl FluxoraStream {
 
         push_token(&env, &destination, withdrawable)?;
 
-        env.events().publish(
-            (symbol_short!("wdraw_to"), stream_id),
+        events::emit_withdrawal_to(
+            &env,
+            stream_id,
             WithdrawalTo {
                 stream_id,
                 recipient: stream.recipient.clone(),
@@ -4003,10 +4012,7 @@ impl FluxoraStream {
         );
 
         if completed_now {
-            env.events().publish(
-                (symbol_short!("completed"), stream_id),
-                StreamEvent::StreamCompleted(stream_id),
-            );
+            events::emit_stream_completed(&env, stream_id);
         }
 
         Ok(withdrawable)
@@ -4099,8 +4105,9 @@ impl FluxoraStream {
             .persistent()
             .remove(&DataKey::PendingRecipientUpdate(stream_id));
 
-        env.events().publish(
-            (symbol_short!("recp_upd"), stream_id),
+        events::emit_recipient_updated(
+            &env,
+            stream_id,
             RecipientUpdated {
                 stream_id,
                 old_recipient,
@@ -4350,8 +4357,9 @@ impl FluxoraStream {
 
                 push_token(&env, &stream.recipient, withdrawable)?;
 
-                env.events().publish(
-                    (symbol_short!("withdrew"), param.stream_id),
+                events::emit_withdrawal(
+                    &env,
+                    param.stream_id,
                     Withdrawal {
                         stream_id: param.stream_id,
                         recipient: stream.recipient.clone(),
@@ -4360,10 +4368,7 @@ impl FluxoraStream {
                 );
 
                 if completed_now {
-                    env.events().publish(
-                        (symbol_short!("completed"), param.stream_id),
-                        StreamEvent::StreamCompleted(param.stream_id),
-                    );
+                    events::emit_stream_completed(&env, param.stream_id);
                 }
             }
 
@@ -4537,8 +4542,9 @@ impl FluxoraStream {
             push_token(&env, &relayer, relayer_fee)?;
         }
 
-        env.events().publish(
-            (symbol_short!("withdrew"), stream_id),
+        events::emit_withdrawal(
+            &env,
+            stream_id,
             Withdrawal {
                 stream_id,
                 recipient: stream.recipient.clone(),
@@ -4547,10 +4553,7 @@ impl FluxoraStream {
         );
 
         if completed_now {
-            env.events().publish(
-                (symbol_short!("completed"), stream_id),
-                StreamEvent::StreamCompleted(stream_id),
-            );
+            events::emit_stream_completed(&env, stream_id);
         }
 
         Ok(net_amount)
@@ -5117,18 +5120,15 @@ impl FluxoraStream {
         require_not_globally_paused(&env)?;
         let mut stream = load_stream(&env, stream_id)?;
 
+        if stream.decommissioned.unwrap_or(false) {
+            return Err(ContractError::InvalidState);
+        }
+
         if stream.kind != StreamKind::Linear {
             return Err(ContractError::UnsupportedStreamKind);
         }
 
-        if stream.last_rate_change_ledger > 0 {
-            let min_ledger = stream
-                .last_rate_change_ledger
-                .saturating_add(MIN_RATE_INTERVAL_LEDGERS);
-            if env.ledger().sequence() < min_ledger {
-                return Err(ContractError::RateCooldownActive);
-            }
-        }
+        check_and_bump_rate_cooldown(&env, &mut stream)?;
 
         // Only the original sender can update the rate.
         Self::require_stream_sender(&stream.sender);
@@ -5152,8 +5152,9 @@ impl FluxoraStream {
         let max_rate = get_max_rate_per_second(&env);
         if new_rate_per_second > max_rate {
             // Emit event when cap is enforced
-            env.events().publish(
-                (symbol_short!("rate_cap"), stream_id),
+            events::emit_rate_cap_enforced(
+                &env,
+                stream_id,
                 RateCapEnforced {
                     stream_id,
                     attempted_rate: new_rate_per_second,
@@ -5190,11 +5191,12 @@ impl FluxoraStream {
         stream.checkpointed_amount = accrued_now;
         stream.checkpointed_at = now;
         stream.rate_per_second = new_rate_per_second;
-        stream.last_rate_change_ledger = env.ledger().sequence();
+        // `last_rate_change_ledger` already bumped by `check_and_bump_rate_cooldown`.
         save_stream(&env, &stream);
 
-        env.events().publish(
-            (symbol_short!("rate_upd"), stream_id),
+        events::emit_rate_updated(
+            &env,
+            stream_id,
             RateUpdated {
                 stream_id,
                 old_rate_per_second: old_rate,
@@ -5261,18 +5263,15 @@ impl FluxoraStream {
         require_not_globally_paused(&env)?;
         let mut stream = load_stream(&env, stream_id)?;
 
+        if stream.decommissioned.unwrap_or(false) {
+            return Err(ContractError::InvalidState);
+        }
+
         if stream.kind != StreamKind::Linear {
             return Err(ContractError::UnsupportedStreamKind);
         }
 
-        if stream.last_rate_change_ledger > 0 {
-            let min_ledger = stream
-                .last_rate_change_ledger
-                .saturating_add(MIN_RATE_INTERVAL_LEDGERS);
-            if env.ledger().sequence() < min_ledger {
-                return Err(ContractError::RateCooldownActive);
-            }
-        }
+        check_and_bump_rate_cooldown(&env, &mut stream)?;
 
         // Sender-only: only the original creator may reduce the rate.
         Self::require_stream_sender(&stream.sender);
@@ -5341,7 +5340,7 @@ impl FluxoraStream {
         stream.checkpointed_at = now;
         stream.rate_per_second = new_rate_per_second;
         stream.deposit_amount = new_deposit;
-        stream.last_rate_change_ledger = env.ledger().sequence();
+        // `last_rate_change_ledger` already bumped by `check_and_bump_rate_cooldown`.
         save_stream(&env, &stream);
 
         // Refund the now-unreachable portion of the deposit to the sender.
@@ -5354,8 +5353,9 @@ impl FluxoraStream {
             push_token(&env, &stream.sender, refund_amount)?;
         }
 
-        env.events().publish(
-            (symbol_short!("rate_dec"), stream_id),
+        events::emit_rate_decreased(
+            &env,
+            stream_id,
             RateDecreased {
                 stream_id,
                 old_rate_per_second: old_rate,
@@ -5641,8 +5641,9 @@ impl FluxoraStream {
             push_token(&env, &stream.sender, refund_amount)?;
         }
 
-        env.events().publish(
-            (symbol_short!("end_shrt"), stream_id),
+        events::emit_stream_end_shortened(
+            &env,
+            stream_id,
             StreamEndShortened {
                 stream_id,
                 old_end_time,
@@ -5688,6 +5689,10 @@ impl FluxoraStream {
         require_not_globally_paused(&env)?;
         let mut stream = load_stream(&env, stream_id)?;
 
+        if stream.decommissioned.unwrap_or(false) {
+            return Err(ContractError::InvalidState);
+        }
+
         if stream.kind != StreamKind::Linear {
             return Err(ContractError::UnsupportedStreamKind);
         }
@@ -5724,8 +5729,9 @@ impl FluxoraStream {
         stream.end_time = new_end_time;
         save_stream(&env, &stream);
 
-        env.events().publish(
-            (symbol_short!("end_ext"), stream_id),
+        events::emit_stream_end_extended(
+            &env,
+            stream_id,
             StreamEndExtended {
                 stream_id,
                 old_end_time,
@@ -5796,6 +5802,10 @@ impl FluxoraStream {
 
         let stream = load_stream(&env, stream_id)?;
 
+        if stream.decommissioned.unwrap_or(false) {
+            return Err(ContractError::InvalidState);
+        }
+
         if stream.kind != StreamKind::Linear {
             return Err(ContractError::UnsupportedStreamKind);
         }
@@ -5841,8 +5851,9 @@ impl FluxoraStream {
             .ok_or(ContractError::ArithmeticOverflow)?;
         write_total_liabilities(&env, liabilities);
 
-        env.events().publish(
-            (symbol_short!("top_up"), stream_id),
+        events::emit_stream_topped_up(
+            &env,
+            stream_id,
             StreamToppedUp {
                 stream_id,
                 top_up_amount: amount,
@@ -5850,6 +5861,55 @@ impl FluxoraStream {
                 new_end_time,
             },
         );
+        Ok(())
+    }
+
+    /// Flag a stream for wind-down or clear its decommissioned status.
+    ///
+    /// When `decommissioned == true`, mutation entrypoints (`update_rate_per_second`,
+    /// `decrease_rate_per_second`, `top_up_stream`, `extend_stream_end_time`, and
+    /// `clone_stream`) are blocked, returning `ContractError::InvalidState`.
+    /// Withdrawals, pause/resume, and cancellation remain fully functional.
+    ///
+    /// # Authorization
+    /// - Requires authorization from the stream's original sender.
+    ///
+    /// # Reversibility & Irrevocable Precedence
+    /// - Setting `decommissioned` to `false` reverses decommission mode, unless the
+    ///   stream is marked `irrevocable` (`irrevocable == Some(true)`), in which case
+    ///   reversal is blocked and returns `ContractError::Unauthorized`.
+    ///
+    /// # Errors
+    /// - `StreamNotFound` if the stream does not exist.
+    /// - `Unauthorized` if the caller is not the sender or if reversal is attempted on an irrevocable stream.
+    /// - `InvalidState` if the stream is terminal (`Completed` or `Cancelled`).
+    pub fn set_stream_decommissioned(
+        env: Env,
+        stream_id: u64,
+        sender: Address,
+        decommissioned: bool,
+    ) -> Result<(), ContractError> {
+        require_not_globally_paused(&env)?;
+        let mut stream = load_stream(&env, stream_id)?;
+
+        sender.require_auth();
+        if stream.sender != sender {
+            return Err(ContractError::Unauthorized);
+        }
+
+        if stream.status == StreamStatus::Completed || stream.status == StreamStatus::Cancelled {
+            return Err(ContractError::InvalidState);
+        }
+
+        if !decommissioned && stream.irrevocable.unwrap_or(false) {
+            return Err(ContractError::Unauthorized);
+        }
+
+        stream.decommissioned = Some(decommissioned);
+        save_stream(&env, &stream);
+
+        events::emit_stream_decommissioned(&env, stream_id, decommissioned);
+
         Ok(())
     }
 
@@ -6036,10 +6096,7 @@ impl FluxoraStream {
             }
         }
 
-        env.events().publish(
-            (symbol_short!("closed"), stream_id),
-            StreamEvent::StreamClosed(stream_id),
-        );
+        events::emit_stream_closed(&env, stream_id);
 
         // Remove stream from recipient's index before deleting the stream
         remove_stream_from_recipient_index(&env, &stream.recipient, stream_id);
@@ -6104,10 +6161,7 @@ impl FluxoraStream {
             return Err(ContractError::InvalidState);
         }
 
-        env.events().publish(
-            (symbol_short!("closed"), stream_id),
-            StreamEvent::StreamClosed(stream_id),
-        );
+        events::emit_stream_closed(&env, stream_id);
 
         // Remove from recipient index and delete stream storage.
         remove_stream_from_recipient_index(&env, &stream.recipient, stream_id);
@@ -6666,10 +6720,7 @@ impl FluxoraStream {
             push_token(env, &stream.sender, refund_amount)?;
         }
 
-        env.events().publish(
-            (symbol_short!("cancelled"), stream.stream_id),
-            StreamEvent::StreamCancelled(stream.stream_id),
-        );
+        events::emit_stream_cancelled(env, stream.stream_id);
 
         Ok(())
     }
@@ -6712,8 +6763,9 @@ impl FluxoraStream {
         save_stream(&env, &stream);
 
         // Emit event
-        env.events().publish(
-            (symbol_short!("rate_upd"), stream_id),
+        events::emit_rate_updated(
+            &env,
+            stream_id,
             RateUpdated {
                 stream_id,
                 old_rate_per_second: old_rate,
@@ -6969,8 +7021,9 @@ impl FluxoraStream {
             increment_total_keeper_fees_paid(&env, keeper_fee)?;
         }
 
-        env.events().publish(
-            (symbol_short!("kp_cncl"), stream.stream_id),
+        events::emit_keeper_cancelled(
+            &env,
+            stream.stream_id,
             KeeperCancelled {
                 stream_id: stream.stream_id,
                 keeper,
@@ -7126,8 +7179,9 @@ impl FluxoraStream {
             .instance()
             .set(&DataKey::LastPauseRecord(PauseKind::Stream), &record);
 
-        env.events().publish(
-            (symbol_short!("paused"), stream_id),
+        events::emit_stream_paused(
+            &env,
+            stream_id,
             StreamPaused {
                 stream_id,
                 reason: reason_str,
@@ -7188,10 +7242,7 @@ impl FluxoraStream {
         save_stream(&env, &stream);
         reconcile_paused_stream_count(&env, previous_status, stream.status);
 
-        env.events().publish(
-            (symbol_short!("resumed"), stream_id),
-            StreamEvent::Resumed(stream_id),
-        );
+        events::emit_stream_resumed(&env, stream_id);
         Ok(())
     }
 
@@ -7280,10 +7331,7 @@ impl FluxoraStream {
             save_stream(&env, &stream);
             reconcile_paused_stream_count(&env, previous_status, stream.status);
 
-            env.events().publish(
-                (symbol_short!("resumed"), stream_id),
-                StreamEvent::Resumed(stream_id),
-            );
+            events::emit_stream_resumed(&env, stream_id);
         }
 
         Ok(())
@@ -7309,10 +7357,7 @@ impl FluxoraStream {
             .set(&DataKey::GlobalEmergencyPaused, &paused);
         bump_instance_ttl(&env);
 
-        env.events().publish(
-            (symbol_short!("gl_pause"),),
-            GlobalEmergencyPauseChanged { paused },
-        );
+        events::emit_global_emergency_pause_changed(&env, GlobalEmergencyPauseChanged { paused });
     }
 
     /// Explicitly clear the **global emergency pause** and restore normal contract behaviour.
@@ -7360,8 +7405,8 @@ impl FluxoraStream {
             .set(&DataKey::GlobalEmergencyPaused, &false);
         bump_instance_ttl(&env);
 
-        env.events().publish(
-            (symbol_short!("gl_resume"),),
+        events::emit_global_resumed(
+            &env,
             GlobalResumed {
                 resumed_at: env.ledger().timestamp(),
             },
@@ -7390,10 +7435,7 @@ impl FluxoraStream {
             .set(&DataKey::CreationPaused, &paused);
         bump_instance_ttl(&env);
 
-        env.events().publish(
-            (symbol_short!("ct_pause"),),
-            ContractPauseChanged { paused },
-        );
+        events::emit_contract_pause_changed(&env, ContractPauseChanged { paused });
 
         Ok(())
     }
@@ -7460,8 +7502,9 @@ impl FluxoraStream {
         bump_instance_ttl(&env);
 
         // Emit ProtocolPaused event AFTER storage is written
-        env.events().publish(
-            (symbol_short!("pr_pause"), admin.clone()),
+        events::emit_protocol_paused(
+            &env,
+            admin.clone(),
             ProtocolPaused {
                 reason: reason_str,
                 paused_at: now,
@@ -7517,10 +7560,7 @@ impl FluxoraStream {
 
         // Emit ProtocolResumed event
         let now = env.ledger().timestamp();
-        env.events().publish(
-            (symbol_short!("pr_resume"), admin),
-            ProtocolResumed { resumed_at: now },
-        );
+        events::emit_protocol_resumed(&env, admin, ProtocolResumed { resumed_at: now });
 
         Ok(())
     }
@@ -7647,8 +7687,9 @@ impl FluxoraStream {
         }
 
         // CEI pattern: Emit event before transfer
-        env.events().publish(
-            (symbol_short!("ex_swept"), recipient.clone()),
+        events::emit_excess_swept(
+            &env,
+            recipient.clone(),
             ExcessSwept {
                 to: recipient.clone(),
                 amount: excess,
@@ -7728,8 +7769,9 @@ impl FluxoraStream {
         );
 
         // Emit event
-        env.events().publish(
-            (symbol_short!("ac_set"), stream_id),
+        events::emit_auto_claim_set(
+            &env,
+            stream_id,
             AutoClaimSet {
                 stream_id,
                 destination: destination.clone(),
@@ -7773,10 +7815,7 @@ impl FluxoraStream {
         env.storage().persistent().remove(&key);
 
         // Emit event
-        env.events().publish(
-            (symbol_short!("ac_revoke"), stream_id),
-            AutoClaimRevoked { stream_id },
-        );
+        events::emit_auto_claim_revoked(&env, stream_id);
 
         Ok(())
     }
@@ -7910,8 +7949,9 @@ impl FluxoraStream {
         write_total_liabilities(&env, liabilities);
 
         // Emit auto-claim triggered event
-        env.events().publish(
-            (symbol_short!("ac_trig"), stream_id),
+        events::emit_auto_claim_triggered(
+            &env,
+            stream_id,
             AutoClaimTriggered {
                 stream_id,
                 destination: destination.clone(),
@@ -7920,8 +7960,9 @@ impl FluxoraStream {
         );
 
         // Emit withdrawal event (for consistency with withdraw_to)
-        env.events().publish(
-            (symbol_short!("withdrew"), stream_id),
+        events::emit_withdrawal_to(
+            &env,
+            stream_id,
             WithdrawalTo {
                 stream_id,
                 recipient: stream.recipient.clone(),
@@ -7932,10 +7973,7 @@ impl FluxoraStream {
 
         // Emit completed event if applicable
         if stream.status == StreamStatus::Completed {
-            env.events().publish(
-                (symbol_short!("completed"), stream_id),
-                StreamEvent::StreamCompleted(stream_id),
-            );
+            events::emit_stream_completed(&env, stream_id);
         }
 
         // Acquire reentrancy lock
@@ -8170,6 +8208,10 @@ impl FluxoraStream {
         // ── 2. Load source stream ─────────────────────────────────────────────
         let source = load_stream(&env, stream_id)?;
 
+        if source.decommissioned.unwrap_or(false) {
+            return Err(ContractError::InvalidState);
+        }
+
         // ── 2.1. Status guard ─────────────────────────────────────────────────
         // Reject cloning from a terminal-state source (Cancelled or Completed).
         if source.status == StreamStatus::Cancelled || source.status == StreamStatus::Completed {
@@ -8237,8 +8279,9 @@ impl FluxoraStream {
         )?;
 
         // ── 9. Emit clone-specific event for indexer correlation ──────────────
-        env.events().publish(
-            (symbol_short!("cloned"), new_stream_id),
+        events::emit_stream_cloned(
+            &env,
+            new_stream_id,
             StreamCloned {
                 new_stream_id,
                 source_stream_id: stream_id,
@@ -8545,8 +8588,9 @@ impl FluxoraStream {
 
                 push_token(&env, &stream.recipient, recipient_accrual)?;
 
-                env.events().publish(
-                    (symbol_short!("withdrew"), stream_id),
+                events::emit_withdrawal(
+                    &env,
+                    stream_id,
                     Withdrawal {
                         stream_id,
                         recipient: stream.recipient.clone(),
@@ -8574,10 +8618,7 @@ impl FluxoraStream {
                 write_total_liabilities(&env, liabilities);
             }
 
-            env.events().publish(
-                (symbol_short!("cancelled"), stream_id),
-                StreamEvent::StreamCancelled(stream_id),
-            );
+            events::emit_stream_cancelled(&env, stream_id);
 
             maybe_emit_health_changed(&env, &stream, was_underfunded, now);
         }
@@ -8867,6 +8908,7 @@ impl FluxoraStream {
             is_pooled: None,
             delegation_depth: 0,
             parent_stream_id: None,
+            decommissioned: None,
         };
 
         save_stream(&env, &stream);
@@ -8881,8 +8923,9 @@ impl FluxoraStream {
         write_total_liabilities(&env, liabilities);
 
         // ── Emit events ───────────────────────────────────────────────────────
-        env.events().publish(
-            (symbol_short!("created"), offer_id),
+        events::emit_stream_created(
+            &env,
+            offer_id,
             StreamCreated {
                 stream_id: offer_id,
                 sender: offer.sender.clone(),
@@ -9052,8 +9095,9 @@ fn compute_stream_health(stream: &Stream, now: u64) -> (bool, i128, u64) {
 fn maybe_emit_health_changed(env: &Env, stream: &Stream, was_underfunded: bool, now: u64) {
     let (is_underfunded, remaining_balance, seconds_remaining) = compute_stream_health(stream, now);
     if is_underfunded != was_underfunded {
-        env.events().publish(
-            (symbol_short!("health"), stream.stream_id),
+        events::emit_stream_health_changed(
+            env,
+            stream.stream_id,
             StreamHealthChanged {
                 stream_id: stream.stream_id,
                 is_underfunded,
