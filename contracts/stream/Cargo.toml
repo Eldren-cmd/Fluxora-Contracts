@@ -93,7 +93,7 @@ test = true
 [[test]]
 name = "id_range"
 path = "tests/id_range.rs"
-test = false
+test = true
 
 [[test]]
 name = "metadata_limits_900"
