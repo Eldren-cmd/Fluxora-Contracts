@@ -184,6 +184,20 @@ def test_pinned_components_returns_list():
     assert "clippy" in components
     assert "rustfmt" in components
 
+
+def test_has_component_accepts_host_qualified_component_names():
+    installed = [
+        "rustfmt-x86_64-unknown-linux-gnu",
+        "clippy-x86_64-unknown-linux-gnu",
+    ]
+    assert verify_rust_version.has_component(installed, "rustfmt")
+    assert verify_rust_version.has_component(installed, "clippy")
+
+
+def test_has_component_rejects_absent_component():
+    installed = ["rustfmt-x86_64-unknown-linux-gnu"]
+    assert not verify_rust_version.has_component(installed, "clippy")
+
 def test_main_fails_in_process_when_missing_targets(monkeypatch, capsys):
     """Test that main() fails when required targets are missing."""
     monkeypatch.setenv("RUSTC_VERSION_OUTPUT", "rustc 1.94.1 (abcdef 2026-01-01)")
