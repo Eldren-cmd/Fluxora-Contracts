@@ -181,6 +181,22 @@ Auditors can use these as a checklist; the implementation is intended to preserv
 
 13. **Reentrancy Guard**
 
+    > **⚠️ OPEN / UNADDRESSED FINDING — This invariant is underspecified.**
+    >
+    > The header exists but no requirements, checks, or enforcement criteria
+    > are defined. See `docs/maintainer-security-checklist.md §14` for the
+    > full open-finding report and required maintainer follow-up.
+    >
+    > **Current implementation reality:**
+    > - A custom reentrancy lock (`DataKey::ReentrancyLock`) exists in storage
+    >   but is only used by `sweep_excess` and `trigger_auto_claim`.
+    > - `CEI_ANALYSIS.md` (Issue #262) claims `withdraw`, `withdraw_to`,
+    >   `batch_withdraw`, `cancel_stream`, and `cancel_stream_as_admin` are
+    >   wrapped in the lock, but the code does not reflect this.
+    > - All other token-transfer entrypoints rely solely on CEI ordering.
+    >
+    > **Action needed:** Specify this invariant's requirements and reconcile
+    > documentation with actual code coverage before the next formal audit.
 
 14. **Contract balance consistency**  
     Deposit is pulled in `create_stream`; refunds and withdrawals only move amounts derived from that deposit (unstreamed to sender, accrued to recipient). No minting or arbitrary transfers.
