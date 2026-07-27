@@ -14,25 +14,13 @@
 //! 4. Cross-checking `CONTRACT_VERSION` against the live `DataKey` variant count
 //!    (currently 36) to ensure versioning discipline when new variants are added.
 //!
-//! # V5 discriminant table (frozen — must never change)
+//! # Discriminant Table Overview (29 variants: 0–28)
 //!
-//! | Disc | Variant                     | Storage    |
-//! |-----:|:----------------------------|:-----------|
-//! |    0 | `Config`                    | Instance   |
-//! |    1 | `NextStreamId`              | Instance   |
-//! |    2 | `Stream(u64)`               | Persistent |
-//! |    3 | `RecipientStreams(Address)`  | Persistent |
-//! |    4 | `GlobalEmergencyPaused`     | Instance   |
-//! |    5 | `CreationPaused`            | Instance   |
-//! |    6 | `GlobalPauseReason`         | Instance   |
-//! |    7 | `GlobalPauseTimestamp`      | Instance   |
-//! |    8 | `GlobalPauseAdmin`          | Instance   |
-//! |    9 | `AutoClaimDestination(u64)` | Persistent |
-//! |   10 | `NextTemplateId`            | Instance   |
-//! |   11 | `ActiveTemplateCount`       | Instance   |
-//! |   12 | `StreamTemplate(u64)`       | Persistent |
-//! |   13 | `OwnerTemplateIds(Address)` | Persistent |
-//! |   14 | `TotalLiabilities`          | Instance   |
+//! | Disc | Variant                     | Storage    | Added |
+//! |-----:|:----------------------------|:-----------|:------|
+//! | 0–14 | V5 Frozen Keys              | Mixed      | V5    |
+//! |15–20 | V6 Extension Keys           | Mixed      | V6    |
+//! |21–28 | V7 Storage & Auditing Keys  | Mixed      | V7    |
 //!
 //! # V6 discriminant table (discriminants 15–20)
 //!
@@ -1288,6 +1276,123 @@ fn version_entry_point_works_on_v5_seeded_instance() {
 
     let v = ctx.client.version();
     assert_eq!(v, CONTRACT_VERSION);
+    assert_eq!(v, 7, "CONTRACT_VERSION must be 7");
+}
+
+// ---------------------------------------------------------------------------
+// V7 DataKey discriminant stability tests (discriminants 21–28)
+// ---------------------------------------------------------------------------
+
+/// Discriminant 21 (IdReservation) is absent on a V5-seeded instance.
+#[test]
+fn v7_id_reservation_absent_on_v5_instance() {
+    let ctx = Ctx::setup();
+    let addr = Address::generate(&ctx.env);
+    let cid = ctx.contract_id.clone();
+    ctx.env.as_contract(&cid, || {
+        let present = ctx
+            .env
+            .storage()
+            .persistent()
+            .has(&DataKey::IdReservation(addr.clone()));
+        assert!(!present, "IdReservation must be absent on a V5 instance");
+    });
+}
+
+/// Discriminant 22 (MaxRatePerSecond) is absent on a V5-seeded instance.
+#[test]
+fn v7_max_rate_per_second_absent_on_v5_instance() {
+    let ctx = Ctx::setup();
+    let cid = ctx.contract_id.clone();
+    ctx.env.as_contract(&cid, || {
+        let present = ctx.env.storage().instance().has(&DataKey::MaxRatePerSecond);
+        assert!(!present, "MaxRatePerSecond must be absent on a V5 instance");
+    });
+}
+
+/// Discriminant 23 (DelegatedWithdrawNonce) is absent on a V5-seeded instance.
+#[test]
+fn v7_delegated_withdraw_nonce_absent_on_v5_instance() {
+    let ctx = Ctx::setup();
+    let addr = Address::generate(&ctx.env);
+    let cid = ctx.contract_id.clone();
+    ctx.env.as_contract(&cid, || {
+        let present = ctx
+            .env
+            .storage()
+            .persistent()
+            .has(&DataKey::DelegatedWithdrawNonce(addr.clone()));
+        assert!(
+            !present,
+            "DelegatedWithdrawNonce must be absent on a V5 instance"
+        );
+    });
+}
+
+/// Discriminant 27 (PausedStreamCount) is absent on a V5-seeded instance.
+#[test]
+fn v7_paused_stream_count_absent_on_v5_instance() {
+    let ctx = Ctx::setup();
+    let cid = ctx.contract_id.clone();
+    ctx.env.as_contract(&cid, || {
+        let present = ctx.env.storage().instance().has(&DataKey::PausedStreamCount);
+        assert!(!present, "PausedStreamCount must be absent on a V5 instance");
+    });
+}
+
+/// Discriminant 28 (TotalKeeperFeesPaid) is absent on a V5-seeded instance.
+#[test]
+fn v7_total_keeper_fees_paid_absent_on_v5_instance() {
+    let ctx = Ctx::setup();
+    let cid = ctx.contract_id.clone();
+    ctx.env.as_contract(&cid, || {
+        let present = ctx
+            .env
+            .storage()
+            .instance()
+            .has(&DataKey::TotalKeeperFeesPaid);
+        assert!(!present, "TotalKeeperFeesPaid must be absent on a V5 instance");
+    });
+}
+
+/// Discriminant 27 (PausedStreamCount) round-trips correctly.
+#[test]
+fn discriminant_27_paused_stream_count_round_trips() {
+    let ctx = Ctx::setup();
+    let cid = ctx.contract_id.clone();
+    ctx.env.as_contract(&cid, || {
+        ctx.env
+            .storage()
+            .instance()
+            .set(&DataKey::PausedStreamCount, &42u64);
+        let val: u64 = ctx
+            .env
+            .storage()
+            .instance()
+            .get(&DataKey::PausedStreamCount)
+            .expect("PausedStreamCount must round-trip at discriminant 27");
+        assert_eq!(val, 42u64);
+    });
+}
+
+/// Discriminant 28 (TotalKeeperFeesPaid) round-trips correctly.
+#[test]
+fn discriminant_28_total_keeper_fees_paid_round_trips() {
+    let ctx = Ctx::setup();
+    let cid = ctx.contract_id.clone();
+    ctx.env.as_contract(&cid, || {
+        ctx.env
+            .storage()
+            .instance()
+            .set(&DataKey::TotalKeeperFeesPaid, &100_000_i128);
+        let val: i128 = ctx
+            .env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalKeeperFeesPaid)
+            .expect("TotalKeeperFeesPaid must round-trip at discriminant 28");
+        assert_eq!(val, 100_000_i128);
+    });
 }
 
 // ---------------------------------------------------------------------------
