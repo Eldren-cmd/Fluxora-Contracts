@@ -88,7 +88,7 @@ test = false
 [[test]]
 name = "health_matrix"
 path = "tests/health_matrix.rs"
-test = false
+test = true
 
 [[test]]
 name = "id_range"
