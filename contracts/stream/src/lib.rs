@@ -51,6 +51,9 @@ pub const MAX_RECIPIENT_PAGE_SIZE: u32 = RECIPIENT_STREAMS_PAGE_LIMIT;
 /// Maximum byte length for memo attached to a stream.
 pub const MAX_MEMO_BYTES: usize = 256;
 
+/// Maximum number of recipients allowed in a pooled stream creation.
+pub const MAX_POOL_RECIPIENTS: u32 = 100;
+
 /// Maximum byte length for pause-reason strings.
 pub const MAX_PAUSE_REASON_BYTES: usize = 256;
 
@@ -2672,7 +2675,7 @@ impl FluxoraStream {
 
         pull_token(&env, &sender, deposit_amount)?;
 
-        let stream_id = Self::persist_new_stream(
+        Self::persist_new_stream(
             &env,
             sender,
             recipient,
