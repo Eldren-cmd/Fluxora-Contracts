@@ -10,6 +10,12 @@ use soroban_sdk::{
     Address, Bytes, Env, Map,
 };
 
+// Per-invocation CPU budget (Soroban limit) with a 75% safety margin.
+// The budget assertion fails if measured cost exceeds this threshold,
+// guarding against inadvertent regressions (e.g. an increased MAX_PAGE_SIZE
+// that worsens the O(n²) duplicate-ID scan).
+const PER_INVOCATION_CPU_BUDGET: u64 = 25_000_000_000;
+
 // Grace period (mirrors KEEPER_GRACE_PERIOD_SECONDS in lib.rs).
 const KEEPER_GRACE: u64 = 604_800;
 
@@ -151,7 +157,137 @@ fn test_batch_withdraw_gas() {
             ctx.client.batch_withdraw(&ctx.recipient, &streams);
         });
 
+        assert!(
+            cost <= PER_INVOCATION_CPU_BUDGET,
+            "batch_withdraw at size {} exceeded per-invocation CPU budget: {} > {}",
+            size,
+            cost,
+            PER_INVOCATION_CPU_BUDGET,
+        );
+
         println!("GAS_MEASUREMENT: batch_withdraw: {}: {}", size, cost);
+    }
+}
+
+/// Gas regression baseline for `batch_withdraw_to`.
+///
+/// Uses a distinct destination address per withdrawal to exercise the
+/// per-entry destination validation path alongside the O(n²) duplicate-ID
+/// scan in `reject_duplicate_ids`.  The O(n²) scan costs roughly
+/// n*(n-1)/2 comparisons at batch size n, so at MAX_PAGE_SIZE (100) the
+/// worst case is ~4 950 element-by-element comparisons inside the helper.
+#[test]
+fn test_batch_withdraw_to_gas() {
+    let sizes = [1, 10, 50, 100];
+
+    for &size in &sizes {
+        let ctx = TestContext::setup();
+
+        let mut streams = soroban_sdk::Vec::new(&ctx.env);
+        let mut destinations = soroban_sdk::Vec::new(&ctx.env);
+        for _ in 0..size {
+            streams.push_back(ctx.create_default_stream());
+            destinations.push_back(Address::generate(&ctx.env));
+        }
+
+        let mut withdrawals = soroban_sdk::Vec::new(&ctx.env);
+        for i in 0..size {
+            withdrawals.push_back(WithdrawToParam {
+                stream_id: streams.get(i as u32).unwrap(),
+                destination: destinations.get(i as u32).unwrap(),
+            });
+        }
+
+        ctx.env.ledger().set_timestamp(500); // Accrue tokens for all
+
+        let cost = measure_gas(&ctx, |ctx| {
+            ctx.client.batch_withdraw_to(&ctx.recipient, &withdrawals);
+        });
+
+        assert!(
+            cost <= PER_INVOCATION_CPU_BUDGET,
+            "batch_withdraw_to at size {} exceeded per-invocation CPU budget: {} > {}",
+            size,
+            cost,
+            PER_INVOCATION_CPU_BUDGET,
+        );
+
+        println!("GAS_MEASUREMENT: batch_withdraw_to: {}: {}", size, cost);
+    }
+}
+
+/// Gas regression baseline for `bulk_resume_streams_as_admin`.
+///
+/// Creates streams, pauses each one (advancing the ledger far enough to
+/// clear the pause cooldown), then resumes them all in a single admin-authed
+/// call.  The O(n²) duplicate-ID scan in `reject_duplicate_ids` dominates the
+/// variable cost at large batch sizes.
+#[test]
+fn test_bulk_resume_streams_as_admin_gas() {
+    let sizes = [1, 10, 50, 100];
+
+    for &size in &sizes {
+        let ctx = TestContext::setup();
+
+        let mut streams = soroban_sdk::Vec::new(&ctx.env);
+        for _ in 0..size {
+            let id = ctx.create_default_stream();
+            // Advance past the pause/resume cooldown (17 ledgers) so the
+            // subsequent pause succeeds even if the ledger sequence is low.
+            ctx.env.ledger().with_mut(|l| l.sequence_number += 32);
+            ctx.client.pause_stream_as_admin(&id, &PauseReason::Administrative);
+            streams.push_back(id);
+        }
+
+        let cost = measure_gas(&ctx, |ctx| {
+            ctx.client.bulk_resume_streams_as_admin(&streams);
+        });
+
+        assert!(
+            cost <= PER_INVOCATION_CPU_BUDGET,
+            "bulk_resume_streams_as_admin at size {} exceeded per-invocation CPU budget: {} > {}",
+            size,
+            cost,
+            PER_INVOCATION_CPU_BUDGET,
+        );
+
+        println!("GAS_MEASUREMENT: bulk_resume_streams_as_admin: {}: {}", size, cost);
+    }
+}
+
+/// Gas regression baseline for `bulk_cancel_streams`.
+///
+/// Creates active streams owned by the sender then cancels them all in a
+/// single call.  The O(n²) duplicate-ID scan in `reject_duplicate_ids`
+/// contributes the variable-cost component that grows quadratically with
+/// batch size.
+#[test]
+fn test_bulk_cancel_streams_gas() {
+    let sizes = [1, 10, 50, 100];
+
+    for &size in &sizes {
+        let ctx = TestContext::setup();
+
+        let mut streams = soroban_sdk::Vec::new(&ctx.env);
+        for _ in 0..size {
+            streams.push_back(ctx.create_default_stream());
+        }
+
+        ctx.env.ledger().set_timestamp(500); // Accrue tokens so cancellation is non-trivial
+
+        let cost = measure_gas(&ctx, |ctx| {
+            ctx.client.bulk_cancel_streams(&ctx.sender, &streams);
+        });
+
+        assert!(
+            cost <= PER_INVOCATION_CPU_BUDGET,
+            "bulk_cancel_streams at size {} exceeded per-invocation CPU budget: {} > {}",
+            size,
+            cost,
+            PER_INVOCATION_CPU_BUDGET,
+        );
+
+        println!("GAS_MEASUREMENT: bulk_cancel_streams: {}: {}", size, cost);
     }
 }
 
