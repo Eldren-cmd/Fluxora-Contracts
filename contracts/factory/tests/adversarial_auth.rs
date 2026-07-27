@@ -75,12 +75,7 @@ impl<'a> Ctx<'a> {
         // Init both contracts under mock_all_auths, then drop it.
         env.mock_all_auths();
         stellar_asset.mint(&sender, &SENDER_FUNDING);
-        TokenClient::new(&env, &token_addr).approve(
-            &sender,
-            &stream_id,
-            &SENDER_FUNDING,
-            &100_000,
-        );
+        TokenClient::new(&env, &token_addr).approve(&sender, &stream_id, &SENDER_FUNDING, &100_000);
         stream.init(&token_addr, &stream_id);
         factory.init(&admin, &stream_id, &MAX_DEPOSIT, &MIN_DURATION);
         factory.set_allowlist(&recipient, &true);
@@ -141,7 +136,14 @@ fn test_create_stream_no_auth_fails() {
     ctx.env.mock_auths(&[]);
 
     let start = ctx.start();
-    let params = make_params(&ctx.recipient, DEPOSIT, RATE, start, start, start + DURATION);
+    let params = make_params(
+        &ctx.recipient,
+        DEPOSIT,
+        RATE,
+        start,
+        start,
+        start + DURATION,
+    );
 
     let result = ctx.factory.try_create_stream(&ctx.sender, &params);
 
@@ -164,7 +166,14 @@ fn test_create_stream_spoofed_sender_fails() {
     let attacker = Address::generate(&ctx.env);
     let start = ctx.start();
 
-    let params = make_params(&ctx.recipient, DEPOSIT, RATE, start, start, start + DURATION);
+    let params = make_params(
+        &ctx.recipient,
+        DEPOSIT,
+        RATE,
+        start,
+        start,
+        start + DURATION,
+    );
 
     ctx.env.mock_auths(&[MockAuth {
         address: &attacker,
@@ -196,7 +205,14 @@ fn test_create_stream_missing_sub_invocation_auth_fails() {
     let ctx = Ctx::setup();
     let start = ctx.start();
 
-    let params = make_params(&ctx.recipient, DEPOSIT, RATE, start, start, start + DURATION);
+    let params = make_params(
+        &ctx.recipient,
+        DEPOSIT,
+        RATE,
+        start,
+        start,
+        start + DURATION,
+    );
 
     ctx.env.mock_auths(&[MockAuth {
         address: &ctx.sender,
@@ -227,7 +243,14 @@ fn test_create_stream_correct_dual_auth_succeeds() {
     let ctx = Ctx::setup();
     let start = ctx.start();
 
-    let params = make_params(&ctx.recipient, DEPOSIT, RATE, start, start, start + DURATION);
+    let params = make_params(
+        &ctx.recipient,
+        DEPOSIT,
+        RATE,
+        start,
+        start,
+        start + DURATION,
+    );
 
     ctx.env.mock_auths(&[MockAuth {
         address: &ctx.sender,
@@ -266,9 +289,22 @@ fn test_create_stream_auth_recipient_mismatch_fails() {
     let start = ctx.start();
     let wrong_recipient = Address::generate(&ctx.env);
 
-    let params = make_params(&ctx.recipient, DEPOSIT, RATE, start, start, start + DURATION);
-    let wrong_params =
-        make_params(&wrong_recipient, DEPOSIT, RATE, start, start, start + DURATION);
+    let params = make_params(
+        &ctx.recipient,
+        DEPOSIT,
+        RATE,
+        start,
+        start,
+        start + DURATION,
+    );
+    let wrong_params = make_params(
+        &wrong_recipient,
+        DEPOSIT,
+        RATE,
+        start,
+        start,
+        start + DURATION,
+    );
 
     ctx.env.mock_auths(&[MockAuth {
         address: &ctx.sender,
@@ -307,7 +343,14 @@ fn test_create_stream_third_party_relay_fails() {
     let attacker = Address::generate(&ctx.env);
     let start = ctx.start();
 
-    let params = make_params(&ctx.recipient, DEPOSIT, RATE, start, start, start + DURATION);
+    let params = make_params(
+        &ctx.recipient,
+        DEPOSIT,
+        RATE,
+        start,
+        start,
+        start + DURATION,
+    );
 
     ctx.env.mock_auths(&[MockAuth {
         address: &attacker,

@@ -1,8 +1,8 @@
 // See docs/gas.md for the baseline update process and review bar.
 use fluxora_stream::{
-    CreateStreamParams, FluxoraStream, FluxoraStreamClient, StreamKind,
-    MAX_MEMO_BYTES, MAX_METADATA_BYTES, MAX_METADATA_KEY_BYTES,
-    MAX_METADATA_KEYS, MAX_METADATA_VALUE_BYTES, MAX_STREAM_ENTRY_BYTES,
+    CreateStreamParams, FluxoraStream, FluxoraStreamClient, StreamKind, MAX_MEMO_BYTES,
+    MAX_METADATA_BYTES, MAX_METADATA_KEYS, MAX_METADATA_KEY_BYTES, MAX_METADATA_VALUE_BYTES,
+    MAX_STREAM_ENTRY_BYTES,
 };
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
@@ -301,10 +301,10 @@ fn test_keeper_cancel_gas_fully_accrued() {
 /// 8 keys × 32 bytes = 256 bytes of keys.
 /// Remaining budget: 512 − 256 = 256 bytes for 8 values → 32 bytes each.
 fn worst_case_metadata(env: &Env) -> Map<Bytes, Bytes> {
-    let key_len = MAX_METADATA_KEY_BYTES as usize;           // 32
-    let total_budget = MAX_METADATA_BYTES as usize;          // 512
+    let key_len = MAX_METADATA_KEY_BYTES as usize; // 32
+    let total_budget = MAX_METADATA_BYTES as usize; // 512
     let total_key_bytes = (MAX_METADATA_KEYS as usize) * key_len; // 256
-    let value_budget = total_budget - total_key_bytes;       // 256
+    let value_budget = total_budget - total_key_bytes; // 256
     let value_len = value_budget / (MAX_METADATA_KEYS as usize); // 32
 
     let mut meta: Map<Bytes, Bytes> = Map::new(env);

@@ -65,7 +65,9 @@ impl<'a> GovCtx<'a> {
 
     fn propose_and_approve(&self, op: CallData) -> u32 {
         let calldata = op.to_xdr(&self.env);
-        let id = self.client.propose(&self.signer_a, &self.contract_id, &calldata);
+        let id = self
+            .client
+            .propose(&self.signer_a, &self.contract_id, &calldata);
         self.client.approve(&self.signer_a, &id);
         self.client.approve(&self.signer_b, &id);
         let now = self.env.ledger().timestamp();

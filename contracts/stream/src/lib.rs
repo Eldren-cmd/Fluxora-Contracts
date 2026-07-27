@@ -1706,7 +1706,9 @@ fn reconcile_paused_stream_count(env: &Env, previous: StreamStatus, next: Stream
 // IdReservation storage helpers — delegated to storage.rs
 // ---------------------------------------------------------------------------
 
-use storage::{load_id_reservation, next_stream_id_for, remove_id_reservation, save_id_reservation};
+use storage::{
+    load_id_reservation, next_stream_id_for, remove_id_reservation, save_id_reservation,
+};
 
 fn load_stream(env: &Env, stream_id: u64) -> Result<Stream, ContractError> {
     let key = DataKey::Stream(stream_id);
@@ -3684,13 +3686,7 @@ impl FluxoraStream {
         let effective_time = stream
             .cancelled_at
             .unwrap_or_else(|| env.ledger().timestamp());
-        withdrawable = apply_lookback_cap(
-            &env,
-            &stream,
-            effective_time,
-            accrued,
-            withdrawable,
-        );
+        withdrawable = apply_lookback_cap(&env, &stream, effective_time, accrued, withdrawable);
 
         // Cap by contract balance for safety (#39)
         let token_address = get_token(&env)?;
@@ -3944,13 +3940,7 @@ impl FluxoraStream {
         let effective_time = stream
             .cancelled_at
             .unwrap_or_else(|| env.ledger().timestamp());
-        withdrawable = apply_lookback_cap(
-            &env,
-            &stream,
-            effective_time,
-            accrued,
-            withdrawable,
-        );
+        withdrawable = apply_lookback_cap(&env, &stream, effective_time, accrued, withdrawable);
 
         // Cap by contract balance for safety (#39)
         let token_address = get_token(&env)?;
@@ -4373,8 +4363,6 @@ impl FluxoraStream {
         Ok(results)
     }
 
-
-
     /// Withdraw accrued tokens on behalf of a recipient using an ed25519 signature.
     ///
     /// A relayer (keeper, bot, or any third party) may call this entrypoint to
@@ -4415,12 +4403,8 @@ impl FluxoraStream {
     /// - `BelowMinimumAmount` (16): Withdrawable amount is below `expected_minimum_amount`.
     /// - `InvalidState`: Stream is paused (non-terminal) or completed.
     /// - `StreamNotFound`: `stream_id` does not exist.
-    
 
-
-
-
-  pub fn delegated_withdraw(
+    pub fn delegated_withdraw(
         env: Env,
         stream_id: u64,
         relayer: Address,
@@ -4781,13 +4765,7 @@ impl FluxoraStream {
         );
 
         let claimable = accrued - stream.withdrawn_amount;
-        let claimable = apply_lookback_cap(
-            &env,
-            &stream,
-            effective_time,
-            accrued,
-            claimable,
-        );
+        let claimable = apply_lookback_cap(&env, &stream, effective_time, accrued, claimable);
         Ok(if claimable > 0 { claimable } else { 0 })
     }
 
@@ -8061,13 +8039,7 @@ impl FluxoraStream {
                 );
 
                 let claimable = accrued.saturating_sub(stream.withdrawn_amount).max(0);
-                let claimable = apply_lookback_cap(
-                    &env,
-                    &stream,
-                    now,
-                    accrued,
-                    claimable,
-                );
+                let claimable = apply_lookback_cap(&env, &stream, now, accrued, claimable);
 
                 Ok(AutoClaimStatus::ValidDestination(AutoClaimValidPayload {
                     destination,
@@ -8381,8 +8353,7 @@ impl FluxoraStream {
     pub fn release_id_reservation(env: Env, caller: Address) -> Result<(), ContractError> {
         caller.require_auth();
 
-        let res =
-            load_id_reservation(&env, &caller).ok_or(ContractError::ReservationNotFound)?;
+        let res = load_id_reservation(&env, &caller).ok_or(ContractError::ReservationNotFound)?;
 
         Self::release_reservation(&env, &caller, &res);
         Ok(())
