@@ -183,6 +183,19 @@ def installed_components() -> list[str]:
     return [c.strip() for c in completed.stdout.splitlines() if c.strip()]
 
 
+def has_component(installed: list[str], required: str) -> bool:
+    """Return true when a required rustup component is installed.
+
+    `rustup component list --installed` commonly prints host-qualified names
+    such as `rustfmt-x86_64-unknown-linux-gnu`, while rust-toolchain.toml uses
+    bare component names like `rustfmt`. Accept either representation.
+    """
+    return any(
+        component == required or component.startswith(f"{required}-")
+        for component in installed
+    )
+
+
 def parse_rustc_version(version_output: str) -> str:
     match = re.match(r"^rustc\s+([^\s]+)", version_output.strip())
     if not match:
@@ -238,7 +251,9 @@ def main() -> int:
     required_components = pinned_components()
     if required_components:
         have_components = installed_components()
-        missing_components = [c for c in required_components if c not in have_components]
+        missing_components = [
+            c for c in required_components if not has_component(have_components, c)
+        ]
         if missing_components:
             print(
                 f"::error::Missing required components: {', '.join(missing_components)}",

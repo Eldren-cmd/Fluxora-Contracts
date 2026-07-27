@@ -78,7 +78,7 @@ test = true
 [[test]]
 name = "formal_verification_smoke"
 path = "tests/formal_verification_smoke.rs"
-test = false
+test = true
 
 [[test]]
 name = "governance_proptest"
@@ -88,12 +88,12 @@ test = false
 [[test]]
 name = "health_matrix"
 path = "tests/health_matrix.rs"
-test = false
+test = true
 
 [[test]]
 name = "id_range"
 path = "tests/id_range.rs"
-test = false
+test = true
 
 [[test]]
 name = "metadata_limits_900"
@@ -205,9 +205,9 @@ test = true
 [[test]]
 name = "governance_integration"
 path = "tests/governance_integration.rs"
-test = false
+test = true
 
 [[test]]
 name = "governance_ttl"
 path = "tests/governance_ttl.rs"
-test = false
+test = true

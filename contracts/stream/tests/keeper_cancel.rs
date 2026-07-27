@@ -108,12 +108,7 @@ impl Ctx {
 
         StellarAssetClient::new(&env, &token_id).mint(&sender, &1_000_000_i128);
 
-        TokenClient::new(&env, &token_id).approve(
-            &sender,
-            &contract_id,
-            &i128::MAX,
-            &200_000u32,
-        );
+        TokenClient::new(&env, &token_id).approve(&sender, &contract_id, &i128::MAX, &200_000u32);
 
         env.ledger().set_timestamp(0);
 
@@ -152,20 +147,15 @@ impl Ctx {
 fn make_stream(ctx: &Ctx, deposit: i128, rate: i128, end: u64) -> u64 {
     ctx.client().create_stream(
         &ctx.sender,
-        &CreateStreamParams {
-            recipient: ctx.recipient.clone(),
-            deposit_amount: deposit,
-            rate_per_second: rate,
-            start_time: 0,
-            cliff_time: 0,
-            end_time: end,
-            withdraw_dust_threshold: Some(0),
-            memo: None,
-            metadata: None,
-            kind: StreamKind::Linear,
-            irrevocable: None,
-            witness: None,
-        },
+        &ctx.recipient,
+        &deposit,
+        &rate,
+        &0u64, // start
+        &0u64, // cliff == start
+        &end,
+        &0_i128,
+        &None,
+        &StreamKind::Linear,
     )
 }
 
@@ -209,7 +199,10 @@ fn test_keeper_cancel_fully_accrued_no_prior_withdrawals() {
     assert_eq!(ctx.balance(&ctx.recipient), 1_000);
     assert_eq!(ctx.balance(&ctx.sender), 1_000_000 - 1_000);
     assert_eq!(ctx.balance(&ctx.keeper), 0);
-    assert_eq!(ctx.client().get_stream_state(&sid).status, StreamStatus::Cancelled);
+    assert_eq!(
+        ctx.client().get_stream_state(&sid).status,
+        StreamStatus::Cancelled
+    );
 }
 
 /// Partially-accrued stream: keeper receives fee from unstreamed sender refund.
@@ -232,7 +225,10 @@ fn test_keeper_cancel_partial_accrual_fee_paid() {
     assert_eq!(ctx.balance(&ctx.recipient), accrued);
     assert_eq!(ctx.balance(&ctx.sender), 1_000_000 - 10_000 + sender_refund);
     assert_eq!(ctx.balance(&ctx.keeper), keeper_fee);
-    assert_eq!(ctx.client().get_stream_state(&sid).status, StreamStatus::Cancelled);
+    assert_eq!(
+        ctx.client().get_stream_state(&sid).status,
+        StreamStatus::Cancelled
+    );
 }
 
 /// Prior partial withdrawal: keeper distributes only the remaining outstanding balance.
@@ -270,7 +266,10 @@ fn test_keeper_cancel_paused_stream_succeeds() {
     ctx.env.ledger().set_timestamp(2_000 + GRACE + 1);
     ctx.client().keeper_cancel(&sid, &ctx.keeper);
 
-    assert_eq!(ctx.client().get_stream_state(&sid).status, StreamStatus::Cancelled);
+    assert_eq!(
+        ctx.client().get_stream_state(&sid).status,
+        StreamStatus::Cancelled
+    );
 }
 
 /// `cancelled_at` timestamp is set to the ledger time of the keeper call.
@@ -427,7 +426,10 @@ fn test_keeper_cancel_event_payload_partial_accrual() {
     assert_eq!(ev.keeper_fee, expected_fee);
     assert_eq!(ev.recipient_amount, accrued);
     assert_eq!(ev.sender_refund, expected_refund);
-    assert_eq!(ev.keeper_fee + ev.recipient_amount + ev.sender_refund, 10_000);
+    assert_eq!(
+        ev.keeper_fee + ev.recipient_amount + ev.sender_refund,
+        10_000
+    );
 }
 
 /// Fully-accrued stream: event has keeper_fee == 0 and sender_refund == 0.
@@ -442,7 +444,10 @@ fn test_keeper_cancel_event_payload_fully_accrued_zero_fee() {
     assert_eq!(ev.keeper_fee, 0);
     assert_eq!(ev.sender_refund, 0);
     assert_eq!(ev.recipient_amount, 1_000);
-    assert_eq!(ev.keeper_fee + ev.recipient_amount + ev.sender_refund, 1_000);
+    assert_eq!(
+        ev.keeper_fee + ev.recipient_amount + ev.sender_refund,
+        1_000
+    );
 }
 
 /// Event amounts match actual token balance deltas.
@@ -459,7 +464,10 @@ fn test_keeper_cancel_event_matches_actual_transfers() {
     ctx.client().keeper_cancel(&sid, &ctx.keeper);
     let ev = find_keeper_cancelled(&ctx);
 
-    assert_eq!(ctx.balance(&ctx.recipient) - recipient_b, ev.recipient_amount);
+    assert_eq!(
+        ctx.balance(&ctx.recipient) - recipient_b,
+        ev.recipient_amount
+    );
     assert_eq!(ctx.balance(&ctx.sender) - sender_b, ev.sender_refund);
     assert_eq!(ctx.balance(&ctx.keeper) - keeper_b, ev.keeper_fee);
 }
@@ -474,7 +482,10 @@ fn test_keeper_cancel_event_emitted_after_terminal_state() {
 
     let ev = find_keeper_cancelled(&ctx);
     assert_eq!(ev.stream_id, sid);
-    assert_eq!(ctx.client().get_stream_state(&sid).status, StreamStatus::Cancelled);
+    assert_eq!(
+        ctx.client().get_stream_state(&sid).status,
+        StreamStatus::Cancelled
+    );
 }
 
 /// Event reconciles to deposit − withdrawn when recipient had prior withdrawals.
@@ -512,9 +523,10 @@ fn test_keeper_cancel_event_reconciles_with_prior_withdrawal() {
 fn linear_keeper_params() -> impl Strategy<Value = (i128, i128, u64)> {
     (1u64..=1_000u64, 1i128..=100i128).prop_flat_map(|(end, rate)| {
         let min_deposit = rate.saturating_mul(end as i128).max(1);
-        let max_deposit = min_deposit.saturating_add(min_deposit / 2).max(min_deposit + 1);
-        (Just(rate), Just(end), min_deposit..=max_deposit)
-            .prop_map(|(r, e, d)| (d, r, e))
+        let max_deposit = min_deposit
+            .saturating_add(min_deposit / 2)
+            .max(min_deposit + 1);
+        (Just(rate), Just(end), min_deposit..=max_deposit).prop_map(|(r, e, d)| (d, r, e))
     })
 }
 

@@ -13,10 +13,20 @@ mod types;
 pub use types::{ClaimOwnershipTransferred, CreateStreamRelativeParams, MAX_POOL_RECIPIENTS};
 
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env, Map};
+use soroban_sdk::xdr::ToXdr;
 pub use storage::*;
 use token_check::verify_token_behavior;
-pub use reject_duplicate_ids;
-// conflict resolved by Hermes agent on 2026-07-26
+
+pub fn reject_duplicate_ids(env: &Env, ids: &soroban_sdk::Vec<u64>) -> Result<(), ContractError> {
+    let mut seen = soroban_sdk::Map::new(env);
+    for id in ids.iter() {
+        if seen.contains_key(&id) {
+            return Err(ContractError::DuplicateStreamId);
+        }
+        seen.set(id, ());
+    }
+    Ok(())
+}
 
 // ---------------------------------------------------------------------------
 // TTL constants
@@ -50,6 +60,9 @@ pub const MAX_RECIPIENT_PAGE_SIZE: u32 = RECIPIENT_STREAMS_PAGE_LIMIT;
 
 /// Maximum byte length for memo attached to a stream.
 pub const MAX_MEMO_BYTES: usize = 256;
+
+/// Maximum number of recipients allowed in a pooled stream creation.
+pub const MAX_POOL_RECIPIENTS: u32 = 100;
 
 /// Maximum byte length for pause-reason strings.
 pub const MAX_PAUSE_REASON_BYTES: usize = 256;
@@ -758,6 +771,15 @@ pub struct SenderTransferred {
     pub new_sender: Address,
 }
 
+/// Emitted when a stream's claim ownership is transferred.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClaimOwnershipTransferred {
+    pub stream_id: u64,
+    pub old_owner: Option<Address>,
+    pub new_owner: Address,
+}
+
 /// Emitted when a stream's funding health status transitions between
 /// adequately funded and underfunded states.
 ///
@@ -1182,15 +1204,12 @@ pub struct CreateStreamOptions {
     pub duration: u64,
     /// Optional withdrawal threshold (raw units) to reduce fee spam.
     pub withdraw_dust_threshold: Option<i128>,
-    /// Optional bounded memo for indexer correlation (e.g. payroll batch ID).
-    /// Maximum `MAX_MEMO_BYTES` (64) bytes. Pass `None` to omit.
-    pub memo: Option<soroban_sdk::Bytes>,
-    /// Optional structured metadata for indexer consumption.
-    pub metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
-    /// The architectural style of the stream (Linear or CliffOnly).
+    /// The architectural style of the stream (Linear, CliffOnly, or CliffSlope).
     pub kind: StreamKind,
     /// If true, the stream cannot be cancelled or shortened. Defaults to false (None).
     pub irrevocable: Option<bool>,
+    /// Optional compliance witness authorized to cancel via signed attestation.
+    pub witness: Option<Address>,
 }
 
 /// Reusable relative schedule (offsets only). Amounts are supplied when creating a stream.
@@ -1202,6 +1221,46 @@ pub struct StreamScheduleTemplate {
     pub start_delay: u64,
     pub cliff_delay: u64,
     pub duration: u64,
+}
+
+/// Maximum number of recipients allowed in a single pooled stream.
+pub const MAX_POOL_RECIPIENTS: u32 = 100;
+
+/// Emitted when a stream's claim ownership is transferred.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClaimOwnershipTransferred {
+    pub stream_id: u64,
+    pub old_owner: Option<Address>,
+    pub new_owner: Address,
+}
+
+/// Relative-timing stream creation parameters (offsets from current timestamp).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreateStreamRelativeParams {
+    /// Address that will receive streamed tokens for this stream entry.
+    pub recipient: Address,
+    /// Total amount escrowed for this stream entry.
+    pub deposit_amount: i128,
+    /// Streaming speed in tokens per second for this stream entry.
+    pub rate_per_second: i128,
+    /// Delay (in seconds) before stream accrual starts, relative to current timestamp.
+    pub start_delay: u64,
+    /// Delay (in seconds) before withdrawals are allowed, relative to current timestamp.
+    pub cliff_delay: u64,
+    /// Total duration the stream runs (in seconds) from start_time to end_time.
+    pub duration: u64,
+    /// Optional withdrawal threshold (raw units) to reduce fee spam.
+    pub withdraw_dust_threshold: Option<i128>,
+    /// Optional bounded memo for indexer correlation (e.g. payroll batch ID).
+    pub memo: Option<soroban_sdk::Bytes>,
+    /// The architectural style of the stream (Linear or CliffOnly).
+    pub kind: StreamKind,
+    /// Optional structured metadata for indexer consumption.
+    pub metadata: Option<soroban_sdk::Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
+    /// If true, the stream cannot be cancelled or shortened. Defaults to false (None).
+    pub irrevocable: Option<bool>,
 }
 
 /// Namespace for all contract storage keys.
@@ -1648,7 +1707,9 @@ fn reconcile_paused_stream_count(env: &Env, previous: StreamStatus, next: Stream
 // IdReservation storage helpers — delegated to storage.rs
 // ---------------------------------------------------------------------------
 
-use storage::{load_id_reservation, next_stream_id_for, remove_id_reservation, save_id_reservation};
+use storage::{
+    load_id_reservation, next_stream_id_for, remove_id_reservation, save_id_reservation,
+};
 
 fn load_stream(env: &Env, stream_id: u64) -> Result<Stream, ContractError> {
     let key = DataKey::Stream(stream_id);
@@ -2126,6 +2187,9 @@ const KEEPER_FEE_BPS: u32 = 50;
 /// Maximum number of rotation entries stored in a per-stream history.
 const MAX_ROTATION_HISTORY: u32 = 50;
 
+/// Maximum number of recipients allowed in a single pooled stream.
+pub const MAX_POOL_RECIPIENTS: u32 = 100;
+
 // ---------------------------------------------------------------------------
 // Internal Helpers
 // ---------------------------------------------------------------------------
@@ -2228,6 +2292,8 @@ impl FluxoraStream {
         memo: Option<soroban_sdk::Bytes>,
         kind: StreamKind,
         metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
+        irrevocable: Option<bool>,
+        witness: Option<Address>,
     ) -> Result<u64, ContractError> {
         // Validate memo length before allocating a stream ID.
         if let Some(ref m) = memo {
@@ -2324,6 +2390,8 @@ impl FluxoraStream {
         memo: Option<soroban_sdk::Bytes>,
         kind: StreamKind,
         metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
+        irrevocable: Option<bool>,
+        witness: Option<Address>,
     ) -> Result<u64, ContractError> {
         if let Some(ref m) = memo {
             if m.len() as usize > MAX_MEMO_BYTES {
@@ -2394,6 +2462,23 @@ impl FluxoraStream {
         );
 
         Ok(stream_id)
+    }
+
+    /// Extract the ed25519 public key bytes from an `Address` that is known
+    /// to be an account-type address (G... strkey).
+    ///
+    /// Uses `Address::to_xdr` which serializes via the host function
+    /// `serialize_to_bytes`. The XDR encoding of an account `Address` is:
+    ///   - bytes  0..3: ScVal tag (Address = 18, big-endian u32)
+    ///   - bytes  4..7: ScAddress tag (Account = 0, big-endian u32)
+    ///   - bytes  8..11: PublicKey tag (PublicKeyTypeEd25519 = 0, big-endian u32)
+    ///   - bytes 12..43: ed25519 public key (32 bytes)
+    fn ed25519_pubkey_from_address(env: &Env, addr: &Address) -> [u8; 32] {
+        let xdr = addr.to_xdr(env);
+        let pk_bytes = xdr.slice(12..44);
+        let mut pk = [0u8; 32];
+        pk_bytes.copy_into_slice(&mut pk);
+        pk
     }
 }
 
@@ -2635,7 +2720,7 @@ impl FluxoraStream {
 
         pull_token(&env, &sender, deposit_amount)?;
 
-        let stream_id = Self::persist_new_stream(
+        Self::persist_new_stream(
             &env,
             sender,
             recipient,
@@ -3064,6 +3149,8 @@ impl FluxoraStream {
                 params.memo.clone(),
                 params.kind,
                 params.metadata.clone(),
+                params.irrevocable,
+                params.witness.clone(),
             )?;
             created_ids.push_back(stream_id);
 
@@ -3301,6 +3388,8 @@ impl FluxoraStream {
                 params.memo.clone(),
                 params.kind,
                 params.metadata.clone(),
+                params.irrevocable,
+                params.witness.clone(),
             );
 
             match stream_id {
@@ -3615,13 +3704,7 @@ impl FluxoraStream {
         let effective_time = stream
             .cancelled_at
             .unwrap_or_else(|| env.ledger().timestamp());
-        withdrawable = apply_lookback_cap(
-            &env,
-            &stream,
-            effective_time,
-            accrued,
-            withdrawable,
-        );
+        withdrawable = apply_lookback_cap(&env, &stream, effective_time, accrued, withdrawable);
 
         // Cap by contract balance for safety (#39)
         let token_address = get_token(&env)?;
@@ -3875,13 +3958,7 @@ impl FluxoraStream {
         let effective_time = stream
             .cancelled_at
             .unwrap_or_else(|| env.ledger().timestamp());
-        withdrawable = apply_lookback_cap(
-            &env,
-            &stream,
-            effective_time,
-            accrued,
-            withdrawable,
-        );
+        withdrawable = apply_lookback_cap(&env, &stream, effective_time, accrued, withdrawable);
 
         // Cap by contract balance for safety (#39)
         let token_address = get_token(&env)?;
@@ -4167,7 +4244,6 @@ impl FluxoraStream {
         recipient.require_auth();
 
         // --- Batch validation: reject duplicate stream IDs (O(n)) ---
-        // Extract stream IDs from WithdrawToParam structs
         let mut stream_ids = soroban_sdk::Vec::new(&env);
         for param in withdrawals.iter() {
             stream_ids.push_back(param.stream_id);
@@ -4188,7 +4264,6 @@ impl FluxoraStream {
         let mut results = soroban_sdk::Vec::new(&env);
 
         // Cache ledger timestamp once — it is constant within a single transaction.
-        // Avoids a redundant host-function call on every loop iteration (#515).
         let now = current_accrual_timestamp(&env)?;
 
         for param in withdrawals.iter() {
@@ -4203,9 +4278,6 @@ impl FluxoraStream {
             }
 
             let current_ledger = env.ledger().sequence();
-            // Enforce withdrawal frequency limit per stream in the batch.
-            // Each stream must respect its own last_withdraw_ledger independently.
-            // Use saturating_sub to prevent underflow from backward timestamp skew.
             if stream.last_withdraw_ledger != 0
                 && current_ledger.saturating_sub(stream.last_withdraw_ledger)
                     < MIN_WITHDRAW_INTERVAL_LEDGERS
@@ -4220,7 +4292,6 @@ impl FluxoraStream {
             let mut withdrawable = if stream.status == StreamStatus::Completed {
                 0
             } else {
-                // Use cached `now` instead of calling env.ledger().timestamp() per stream.
                 let effective_now = if stream.status == StreamStatus::Cancelled {
                     stream.cancelled_at.ok_or(ContractError::InvalidState)?
                 } else {
@@ -4250,7 +4321,7 @@ impl FluxoraStream {
             // Cap by running contract balance for safety
             withdrawable = withdrawable.min(contract_balance);
 
-            // Enforce dust threshold unless terminal state or final drain (#423)
+            // Enforce dust threshold unless terminal state or final drain
             if withdrawable > 0
                 && withdrawable < stream.withdraw_dust_threshold
                 && !is_terminal_state(&env, &stream)
@@ -4310,8 +4381,6 @@ impl FluxoraStream {
         Ok(results)
     }
 
-
-
     /// Withdraw accrued tokens on behalf of a recipient using an ed25519 signature.
     ///
     /// A relayer (keeper, bot, or any third party) may call this entrypoint to
@@ -4352,12 +4421,8 @@ impl FluxoraStream {
     /// - `BelowMinimumAmount` (16): Withdrawable amount is below `expected_minimum_amount`.
     /// - `InvalidState`: Stream is paused (non-terminal) or completed.
     /// - `StreamNotFound`: `stream_id` does not exist.
-    
 
-
-
-
-  pub fn delegated_withdraw(
+    pub fn delegated_withdraw(
         env: Env,
         stream_id: u64,
         relayer: Address,
@@ -4389,20 +4454,11 @@ impl FluxoraStream {
             return Err(ContractError::WithdrawalTooFrequent);
         }
 
-        // 4. Bind the supplied public key to the stream recipient.
+        // 4. Verify the supplied public key matches the stream recipient.
+        if Self::ed25519_pubkey_from_address(&env, &stream.recipient)
+            != recipient_public_key.to_array()
         {
-            use soroban_sdk::{
-                xdr::{AccountId, PublicKey, ScAddress, Uint256},
-                TryIntoVal,
-            };
-            let pk_arr = recipient_public_key.to_array();
-            let derived: Result<Address, _> =
-                ScAddress::Account(AccountId(PublicKey::PublicKeyTypeEd25519(Uint256(pk_arr))))
-                    .try_into_val(&env);
-            match derived {
-                Ok(addr) if addr == stream.recipient => {}
-                _ => return Err(ContractError::InvalidSignature),
-            }
+            return Err(ContractError::InvalidSignature);
         }
 
         // 5. Build the signed message payload (56 bytes total):
@@ -4718,13 +4774,7 @@ impl FluxoraStream {
         );
 
         let claimable = accrued - stream.withdrawn_amount;
-        let claimable = apply_lookback_cap(
-            &env,
-            &stream,
-            effective_time,
-            accrued,
-            claimable,
-        );
+        let claimable = apply_lookback_cap(&env, &stream, effective_time, accrued, claimable);
         Ok(if claimable > 0 { claimable } else { 0 })
     }
 
@@ -6771,19 +6821,10 @@ impl FluxoraStream {
             .as_ref()
             .ok_or(ContractError::InvalidParams)?;
 
+        if Self::ed25519_pubkey_from_address(&env, witness_addr)
+            != witness_public_key.to_array()
         {
-            use soroban_sdk::{
-                xdr::{AccountId, PublicKey, ScAddress, Uint256},
-                TryIntoVal,
-            };
-            let pk_arr = witness_public_key.to_array();
-            let derived: Result<Address, _> =
-                ScAddress::Account(AccountId(PublicKey::PublicKeyTypeEd25519(Uint256(pk_arr))))
-                    .try_into_val(&env);
-            match derived {
-                Ok(addr) if addr == *witness_addr => {}
-                _ => return Err(ContractError::InvalidSignature),
-            }
+            return Err(ContractError::InvalidSignature);
         }
 
         let msg = delegation::build_witnessed_cancel_message(&env, stream_id, deadline);
@@ -7998,13 +8039,7 @@ impl FluxoraStream {
                 );
 
                 let claimable = accrued.saturating_sub(stream.withdrawn_amount).max(0);
-                let claimable = apply_lookback_cap(
-                    &env,
-                    &stream,
-                    now,
-                    accrued,
-                    claimable,
-                );
+                let claimable = apply_lookback_cap(&env, &stream, now, accrued, claimable);
 
                 Ok(AutoClaimStatus::ValidDestination(AutoClaimValidPayload {
                     destination,
@@ -8202,6 +8237,8 @@ impl FluxoraStream {
             source.memo.clone(),
             source.kind,
             source.metadata.clone(),
+            source.irrevocable,
+            source.witness.clone(),
         )?;
 
         // ── 9. Emit clone-specific event for indexer correlation ──────────────
@@ -8316,8 +8353,7 @@ impl FluxoraStream {
     pub fn release_id_reservation(env: Env, caller: Address) -> Result<(), ContractError> {
         caller.require_auth();
 
-        let res =
-            load_id_reservation(&env, &caller).ok_or(ContractError::ReservationNotFound)?;
+        let res = load_id_reservation(&env, &caller).ok_or(ContractError::ReservationNotFound)?;
 
         Self::release_reservation(&env, &caller, &res);
         Ok(())
