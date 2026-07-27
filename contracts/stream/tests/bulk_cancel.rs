@@ -7,8 +7,8 @@ use soroban_sdk::{
 };
 
 use fluxora_stream::{
-    ContractError, CreateStreamParams, FluxoraStream, FluxoraStreamClient, PauseReason,
-    StreamKind, StreamStatus,
+    ContractError, CreateStreamParams, FluxoraStream, FluxoraStreamClient, PauseReason, StreamKind,
+    StreamStatus,
 };
 
 // ── Test helpers ───────────────────────────────────────────────────────────
@@ -425,8 +425,7 @@ fn test_bulk_cancel_requires_sender_auth() {
 
     let (env, client, _admin, sender, recipient) = setup_env();
     env.ledger().set_timestamp(0);
-    let stream_id =
-        create_test_stream(&env, &client, &sender, &recipient, 1000, 1, 0, 0, 1000);
+    let stream_id = create_test_stream(&env, &client, &sender, &recipient, 1000, 1, 0, 0, 1000);
 
     let attacker = Address::generate(&env);
     let result = std::panic::catch_unwind(AssertUnwindSafe(|| {

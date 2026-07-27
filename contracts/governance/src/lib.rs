@@ -226,16 +226,24 @@ fn set_threshold_internal(env: &Env, new_threshold: u32) -> Result<(), Governanc
         return Err(GovernanceError::InvalidThreshold);
     }
     let old_threshold = get_threshold(env)?;
-    env.storage().instance().set(&DataKey::Threshold, &new_threshold);
+    env.storage()
+        .instance()
+        .set(&DataKey::Threshold, &new_threshold);
     bump_instance(env);
 
     env.events().publish(
         (symbol_short!("thr_upd"),),
-        ThresholdUpdated { old_threshold, new_threshold },
+        ThresholdUpdated {
+            old_threshold,
+            new_threshold,
+        },
     );
     env.events().publish(
         (symbol_short!("quor_cfg"),),
-        QuorumConfig { threshold: new_threshold, signer_count: signers.len() },
+        QuorumConfig {
+            threshold: new_threshold,
+            signer_count: signers.len(),
+        },
     );
     Ok(())
 }
@@ -258,11 +266,15 @@ fn add_signer_internal(env: &Env, signer: Address) -> Result<(), GovernanceError
     save_signer_index(env, &signer_index);
     bump_instance(env);
 
-    env.events().publish((symbol_short!("sgnr_add"),), SignerAdded { signer });
+    env.events()
+        .publish((symbol_short!("sgnr_add"),), SignerAdded { signer });
     let threshold = get_threshold(env)?;
     env.events().publish(
         (symbol_short!("quor_cfg"),),
-        QuorumConfig { threshold, signer_count: signers.len() },
+        QuorumConfig {
+            threshold,
+            signer_count: signers.len(),
+        },
     );
     Ok(())
 }
@@ -294,7 +306,8 @@ fn remove_signer_internal(env: &Env, signer: Address) -> Result<(), GovernanceEr
     save_signer_index(env, &signer_index);
     bump_instance(env);
 
-    env.events().publish((symbol_short!("sgnr_rm"),), SignerRemoved { signer });
+    env.events()
+        .publish((symbol_short!("sgnr_rm"),), SignerRemoved { signer });
     Ok(())
 }
 
@@ -384,10 +397,10 @@ fn dispatch_call(env: &Env, target: &Address, calldata: &Bytes) -> Result<(), Go
             set_threshold_internal(env, new_threshold)?;
         }
         CallData::GovAddSigner(signer) => {
-            FluxoraGovernance::add_signer_internal(env, signer)?;
+            add_signer_internal(env, signer)?;
         }
         CallData::GovRemoveSigner(signer) => {
-            FluxoraGovernance::remove_signer_internal(env, signer)?;
+            remove_signer_internal(env, signer)?;
         }
     }
     Ok(())
@@ -2017,7 +2030,7 @@ mod tests {
         assert_eq!(ctx.client.get_threshold(), 2);
     }
 
-   /// Reproduces the exact attack sequence from issue #1136: a compromised
+    /// Reproduces the exact attack sequence from issue #1136: a compromised
     /// admin key adds itself as a co-signer, collapses the threshold to 1,
     /// then solo proposes+approves. Confirms the attack now FAILS because
     /// there is no public entrypoint for add_signer/set_threshold that
@@ -2050,7 +2063,9 @@ mod tests {
         // collapsing the threshold still requires a second signer's approval
         // and the 48h timelock — solo propose+approve is insufficient.
         let collapse_calldata = CallData::GovSetThreshold(1u32).to_xdr(&ctx.env);
-        let id = ctx.client.propose(&ctx.signer_a, &ctx.contract_id, &collapse_calldata);
+        let id = ctx
+            .client
+            .propose(&ctx.signer_a, &ctx.contract_id, &collapse_calldata);
         ctx.client.approve(&ctx.signer_a, &id);
         // Only 1 of 2 required approvals — quorum not reached.
         let executor = Address::generate(&ctx.env);
@@ -2066,12 +2081,12 @@ mod tests {
         ctx.client.execute(&executor, &id);
         assert_eq!(ctx.client.get_threshold(), 1);
     }
-    
+
     #[test]
     fn test_set_threshold_after_signer_removal_respects_current_count() {
         let ctx = Ctx::setup(); // 3 signers, threshold=2
         ctx.client.test_only_remove_signer(&ctx.signer_c); // Now 2 signers
-                                                 // Setting threshold to 2 should succeed (2 <= 2)
+                                                           // Setting threshold to 2 should succeed (2 <= 2)
         ctx.client.test_only_set_threshold(&2u32);
         assert_eq!(ctx.client.get_threshold(), 2);
         // Setting threshold to 3 should fail (3 > 2)
@@ -2098,7 +2113,7 @@ mod tests {
     fn test_remove_signer_below_threshold_errors() {
         let ctx = Ctx::setup(); // 3 signers, threshold=2
         ctx.client.test_only_remove_signer(&ctx.signer_c); // 2 signers left
-                                                 // Trying to remove another signer would leave 1 < threshold=2
+                                                           // Trying to remove another signer would leave 1 < threshold=2
         let result = ctx.client.try_test_only_remove_signer(&ctx.signer_b);
         assert_eq!(result, Err(Ok(GovernanceError::QuorumWouldBreak)));
         // Verify signer set is unchanged.

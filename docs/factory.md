@@ -128,6 +128,8 @@ The factory enforces an early memo length guard (Guard 8) on both `create_stream
 
 This guard directly references the shared constant `fluxora_stream::MAX_MEMO_BYTES` at compile time, guaranteeing that any update to the stream contract's maximum memo length is automatically reflected in factory validation without risk of version drift or stale limits. Oversized memos are rejected on the factory error surface before initiating cross-contract calls or side-effects.
 
+Regression coverage for this behavior lives in `contracts/factory/tests/factory_stream_e2e.rs`: the suite now asserts that the factory memo guard tracks the shared `fluxora_stream::MAX_MEMO_BYTES` constant and that a memo one byte over the limit is rejected as `FactoryError::InvalidMemo` before the cross-contract call is made. This protects the factory from silently drifting away from the stream contract's own memo limit if the shared constant is ever changed.
+
 For `CliffOnly` streams the `rate_per_second` argument is ignored — the stream
 contract sets the effective rate to `0` internally.
 
