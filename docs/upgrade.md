@@ -16,7 +16,7 @@ Version policy, migration runbook, and audit notes for operators, integrators, a
 ### Current value
 
 ```
-CONTRACT_VERSION = 7
+CONTRACT_VERSION = 9
 ```
 
 ### Version history
@@ -60,9 +60,9 @@ For the exhaustive, category-by-category breakdown see **[`docs/ABI_STABILITY.md
 - Changing TTL bump constants (`INSTANCE_BUMP_AMOUNT`, `PERSISTENT_BUMP_AMOUNT`).
 - Changing internal helper functions with no external surface.
 - Appending new `DataKey` storage variants (append-only; existing entries stay
-  byte-identical and readable). See the "Why `CONTRACT_VERSION` was not bumped
-  to 7" note in `contracts/stream/src/checksum.rs`'s module doc-comment for the
-  full analysis of the V7 additions (discriminants 21–28).
+  byte-identical and readable). See the version-specific rationale in
+  `contracts/stream/src/checksum.rs`'s module doc-comment for why some additive
+  `DataKey` growth did not require an immediate version bump.
 
 > **Note (transfer_sender):** The `transfer_sender` entry-point is a purely additive
 > new entry-point. Old clients that do not call it are unaffected. `CONTRACT_VERSION`
@@ -192,7 +192,7 @@ Before interacting with any Fluxora contract instance:
 
 5. **Token address immutability.** The token is fixed at `init` time. A new contract version that needs a different token requires a new `init` call with the new token address — existing streams on the old instance are unaffected.
 
-6. **Machine-checked `CONTRACT_VERSION` vs `DataKey` variant count cross-check.** To prevent version drift when new storage keys are appended, `contracts/stream/tests/storage_key_compat.rs` enforces a machine-checked mapping between `CONTRACT_VERSION` and expected `DataKey` variant count (currently **36** for version 9). Whenever a new `DataKey` variant is appended or `CONTRACT_VERSION` is incremented, developers MUST update:
+6. **Machine-checked `CONTRACT_VERSION` vs `DataKey` variant count cross-check.** To prevent version drift when new storage keys are appended, `contracts/stream/tests/storage_key_compat.rs` enforces a machine-checked mapping between `CONTRACT_VERSION` and expected `DataKey` variant count (currently **36** for `CONTRACT_VERSION = 9`). Whenever a new `DataKey` variant is appended or `CONTRACT_VERSION` is incremented, developers MUST update:
    - `expected_datakey_count_for_version()` and `all_live_datakey_variants()` in `contracts/stream/tests/storage_key_compat.rs`
    - Discriminant tables & variant count tests in `contracts/stream/src/checksum.rs`
    - Version history & policy table in `docs/upgrade.md`
