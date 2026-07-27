@@ -63,6 +63,26 @@ Metadata is also propagated through `create_streams`, `create_streams_relative`,
 - No token movement occurs if metadata validation fails.
 - `StreamCreated` event includes the `metadata` field for indexer consumption.
 
+#### Compatibility rules (which operations preserve metadata)
+
+Metadata is written once at stream creation and **never mutated** by any subsequent
+operation. The table below documents which entry-points preserve the metadata map
+and which are unaffected (metadata is not read or written):
+
+| Operation | Metadata behavior |
+|---|---|
+| `pause_stream` / `resume_stream` | Unchanged — metadata is not read or written. |
+| `cancel_stream` | Unchanged — metadata persists in storage for post-terminal queries. |
+| `withdraw` / `batch_withdraw` | Unchanged — withdrawal only touches `withdrawn_amount`. |
+| `top_up_stream` | Unchanged — only `deposit_amount` is modified. |
+| `update_rate_per_second` / `decrease_rate_per_second` | Unchanged — rate fields are modified; metadata is untouched. |
+| `extend_stream_end_time` | Unchanged — `end_time` and `deposit_amount` are modified. |
+| `transfer_sender` | Unchanged — only the `sender` field is rotated. |
+| `update_recipient` | Unchanged — only the `recipient` field is rotated. |
+| `delegate_recipient_share` | Unchanged — delegation splits the rate, not metadata. |
+| `clone_stream` | **Inherited** — the cloned stream receives `source.metadata.clone()`. |
+| `create_stream_from_template` | **Passed through** — caller-supplied metadata is validated and stored. |
+
 #### Example (Rust client)
 
 ```rust
