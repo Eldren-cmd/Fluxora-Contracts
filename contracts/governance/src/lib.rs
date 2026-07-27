@@ -1400,6 +1400,8 @@ impl FluxoraGovernance {
         let index = get_signer_index(env)?;
         Ok(index.contains_key(addr.clone()))
     }
+}
+
 #[contractimpl]
 #[cfg(test)]
 impl FluxoraGovernance {

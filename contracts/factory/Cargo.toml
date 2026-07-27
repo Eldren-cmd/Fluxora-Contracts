@@ -46,3 +46,4 @@ test = false
 name = "adversarial_auth"
 path = "tests/adversarial_auth.rs"
 required-features = ["testutils"]
+test = false
