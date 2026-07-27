@@ -14,6 +14,7 @@ use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env, Map};
 pub use storage::*;
 use token_check::verify_token_behavior;
+use types::{ClaimOwnershipTransferred, MAX_POOL_RECIPIENTS};
 
 pub fn reject_duplicate_ids(env: &Env, ids: &soroban_sdk::Vec<u64>) -> Result<(), ContractError> {
     let mut seen = soroban_sdk::Vec::<u64>::new(env);
@@ -2811,6 +2812,7 @@ impl FluxoraStream {
             withdraw_dust_threshold,
             params.memo,
             params.kind,
+            params.metadata,
             params.irrevocable,
             params.witness,
             max_lookback_ledgers,
@@ -4441,14 +4443,15 @@ impl FluxoraStream {
                 total_liabilities = total_liabilities.checked_sub(withdrawable).unwrap_or(0);
                 liabilities_changed = true;
 
-                push_token(&env, &stream.recipient, withdrawable)?;
+                push_token(&env, &param.destination, withdrawable)?;
 
-                events::emit_withdrawal(
+                events::emit_withdrawal_to(
                     &env,
                     param.stream_id,
-                    Withdrawal {
+                    WithdrawalTo {
                         stream_id: param.stream_id,
                         recipient: stream.recipient.clone(),
+                        destination: param.destination.clone(),
                         amount: withdrawable,
                     },
                 );
@@ -5620,6 +5623,7 @@ impl FluxoraStream {
             is_pooled: None,
             parent_stream_id: Some(stream_id),
             delegation_depth: stream.delegation_depth + 1,
+            decommissioned: None,
         };
 
         save_stream(&env, &child_stream);
@@ -7945,7 +7949,11 @@ impl FluxoraStream {
         env.storage().persistent().remove(&key);
 
         // Emit event
-        events::emit_auto_claim_revoked(&env, stream_id);
+        events::emit_auto_claim_revoked(
+            &env,
+            stream_id,
+            AutoClaimRevoked { stream_id },
+        );
 
         Ok(())
     }
