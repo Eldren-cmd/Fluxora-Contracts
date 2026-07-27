@@ -117,6 +117,55 @@ pub const MAX_METADATA_KEY_BYTES: u32 = 32;
 /// Maximum byte length of a single metadata value.
 pub const MAX_METADATA_VALUE_BYTES: u32 = 128;
 
+/// Ceiling on the XDR-serialized byte size of a single persistent `Stream` entry.
+///
+/// # Rationale
+///
+/// Every `Stream` is stored as a persistent Soroban ledger entry. Soroban charges
+/// rent proportional to the byte size of each entry (via the ledger-entry TTL/rent
+/// mechanism), so unbounded entry growth directly inflates the per-stream rent cost
+/// for the protocol and all of its users.
+///
+/// The `Stream` struct has grown from 12 fields (V5) to 19 fields (V9).  Two of those
+/// fields — `memo` and `metadata` — are caller-controlled and can each approach their
+/// maximums independently:
+///
+/// | Variable field         | Input cap                                               | Approx. XDR contribution |
+/// |------------------------|---------------------------------------------------------|--------------------------|
+/// | `memo`                 | `MAX_MEMO_BYTES` = 256 bytes                            | ~268 bytes (length prefix + data + padding) |
+/// | `metadata` (aggregate) | `MAX_METADATA_BYTES` = 512 bytes of keys + values       | ~680 bytes (map framing + 8 ScMap entries) |
+///
+/// Fixed fields (stream_id, sender, recipient, amounts, timestamps, status flags,
+/// enums, optional scalars) contribute approximately **480 bytes** in the worst case.
+///
+/// Adding it all up:
+/// - Fixed fields: ~480 bytes
+/// - `memo` at max: ~268 bytes
+/// - `metadata` at max (8 entries × (32-byte key + 128-byte value) + framing): ~680 bytes
+/// - **Raw structural total: ~1,428 bytes**
+///
+/// The ceiling is set at **4,096 bytes**, providing a ~2.9× safety margin above the
+/// measured worst-case baseline (~1,428 bytes). This generous margin accounts for:
+/// - Future additive fields that do not trigger a V10 version bump
+/// - Soroban ScVal type tags, XDR padding, and length prefixes that vary by SDK version
+/// - Host-side encoding overhead that is not directly observable from Rust test code
+///
+/// # Enforcement
+///
+/// The constant is enforced by the test
+/// `contracts/stream/tests/gas_regression.rs::test_stream_entry_xdr_size_worst_case`.
+/// That test constructs a `Stream` with every optional field populated at its maximum
+/// allowed size and asserts `serialized_len <= MAX_STREAM_ENTRY_BYTES`.
+///
+/// # How to update this constant
+///
+/// If the `Stream` struct gains new fields and the regression test fails:
+/// 1. Run `cargo test -p fluxora_stream gas_regression -- --nocapture` to see the actual size.
+/// 2. Add ~25% headroom, round up to the next 512-byte boundary.
+/// 3. Update this constant, the table in `docs/gas.md`, and the PR description.
+/// 4. Confirm the version policy in `CONTRACT_VERSION` has been followed for the struct change.
+pub const MAX_STREAM_ENTRY_BYTES: usize = 4_096;
+
 /// Minimum interval (in ledgers) between successive pause/resume operations.
 ///
 /// Prevents rapid-toggle DoS attacks where a malicious sender repeatedly pauses
