@@ -479,11 +479,154 @@ fn test_close_last_stream_empty_index_graceful() {
     assert_eq!(index_after.len(), 0);
 
     // Paginated query also returns empty with next_cursor == 0.
-    let page = ctx.client.get_recipient_streams_paginated(
-        &ctx.recipient,
-        &0,
-        &MAX_RECIPIENT_PAGE_SIZE,
-    );
+    let page =
+        ctx.client
+            .get_recipient_streams_paginated(&ctx.recipient, &0, &MAX_RECIPIENT_PAGE_SIZE);
     assert_eq!(page.stream_ids.len(), 0);
     assert_eq!(page.next_cursor, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Issue #1215 Decommission mode tests
+// ---------------------------------------------------------------------------
+
+/// Test set_stream_decommissioned blocks update_rate_per_second, decrease_rate_per_second,
+/// top_up_stream, extend_stream_end_time, and clone_stream (returning ContractError::InvalidState),
+/// while leaving withdraw, pause_stream/resume_stream, and cancel_stream fully functional.
+#[test]
+fn test_set_stream_decommissioned_blocks_mutations_only() {
+    let ctx = Ctx::setup();
+    let stream_id = ctx.create_stream(1000);
+
+    // Flag stream as decommissioned by sender
+    ctx.client
+        .set_stream_decommissioned(&stream_id, &ctx.sender, &true);
+
+    // Verify stream state has decommissioned == Some(true)
+    let state = ctx.client.get_stream_state(&stream_id);
+    assert_eq!(state.decommissioned, Some(true));
+
+    // 1. update_rate_per_second must fail with InvalidState
+    let res_rate = ctx.client.try_update_rate_per_second(&stream_id, &2_i128);
+    assert_eq!(res_rate, Err(Ok(ContractError::InvalidState)));
+
+    // 2. decrease_rate_per_second must fail with InvalidState
+    let res_dec = ctx.client.try_decrease_rate_per_second(&stream_id, &1_i128);
+    assert_eq!(res_dec, Err(Ok(ContractError::InvalidState)));
+
+    // 3. top_up_stream must fail with InvalidState
+    let res_topup = ctx
+        .client
+        .try_top_up_stream(&stream_id, &ctx.sender, &100_i128);
+    assert_eq!(res_topup, Err(Ok(ContractError::InvalidState)));
+
+    // 4. extend_stream_end_time must fail with InvalidState
+    let res_extend = ctx.client.try_extend_stream_end_time(&stream_id, &2000_u64);
+    assert_eq!(res_extend, Err(Ok(ContractError::InvalidState)));
+
+    // 5. clone_stream must fail with InvalidState
+    let new_rec = Address::generate(&ctx.env);
+    let res_clone = ctx
+        .client
+        .try_clone_stream(&stream_id, &new_rec, &0u64, &1000u64, &1000_i128, &false);
+    assert_eq!(res_clone, Err(Ok(ContractError::InvalidState)));
+
+    // --- Allowed operations ---
+
+    // 1. pause_stream & resume_stream work
+    ctx.env.ledger().with_mut(|l| l.sequence_number += 100);
+    ctx.client
+        .pause_stream(&stream_id, &PauseReason::Operational);
+    assert_eq!(
+        ctx.client.get_stream_state(&stream_id).status,
+        StreamStatus::Paused
+    );
+
+    ctx.env.ledger().with_mut(|l| l.sequence_number += 100);
+    ctx.client.resume_stream(&stream_id);
+    assert_eq!(
+        ctx.client.get_stream_state(&stream_id).status,
+        StreamStatus::Active
+    );
+
+    // 2. withdraw works
+    ctx.env.ledger().with_mut(|l| l.timestamp += 10);
+    let withdrawn = ctx.client.withdraw(&stream_id);
+    assert!(withdrawn > 0);
+
+    // 3. cancel_stream works
+    ctx.client.cancel_stream(&stream_id);
+    assert_eq!(
+        ctx.client.get_stream_state(&stream_id).status,
+        StreamStatus::Cancelled
+    );
+}
+
+/// Test reversibility of decommission mode, and precedence of irrevocable flag.
+#[test]
+fn test_set_stream_decommissioned_reversibility_and_irrevocable_precedence() {
+    let ctx = Ctx::setup();
+    let stream_id = ctx.create_stream(1000);
+
+    // Decommission
+    ctx.client
+        .set_stream_decommissioned(&stream_id, &ctx.sender, &true);
+    assert_eq!(
+        ctx.client.get_stream_state(&stream_id).decommissioned,
+        Some(true)
+    );
+
+    // Revert back to false
+    ctx.client
+        .set_stream_decommissioned(&stream_id, &ctx.sender, &false);
+    assert_eq!(
+        ctx.client.get_stream_state(&stream_id).decommissioned,
+        Some(false)
+    );
+
+    // After setting back to false, top_up_stream succeeds again
+    let res_topup = ctx
+        .client
+        .try_top_up_stream(&stream_id, &ctx.sender, &100_i128);
+    assert!(res_topup.is_ok());
+
+    // --- Irrevocable stream behavior ---
+    let irr_stream_id = ctx.create_irrevocable_stream(1000);
+
+    // Decommission the irrevocable stream
+    ctx.client
+        .set_stream_decommissioned(&irr_stream_id, &ctx.sender, &true);
+    assert_eq!(
+        ctx.client.get_stream_state(&irr_stream_id).decommissioned,
+        Some(true)
+    );
+
+    // Attempting to reverse decommission on irrevocable stream fails with Unauthorized
+    let res_revert = ctx
+        .client
+        .try_set_stream_decommissioned(&irr_stream_id, &ctx.sender, &false);
+    assert_eq!(res_revert, Err(Ok(ContractError::Unauthorized)));
+}
+
+/// Test set_stream_decommissioned authorization and terminal state guards.
+#[test]
+fn test_set_stream_decommissioned_guards() {
+    let ctx = Ctx::setup();
+    let stream_id = ctx.create_stream(1000);
+
+    // Non-sender cannot set decommissioned
+    let attacker = Address::generate(&ctx.env);
+    let res_auth = ctx
+        .client
+        .try_set_stream_decommissioned(&stream_id, &attacker, &true);
+    assert_eq!(res_auth, Err(Ok(ContractError::Unauthorized)));
+
+    // Cancel stream
+    ctx.client.cancel_stream(&stream_id);
+
+    // Cannot set decommissioned on cancelled stream
+    let res_terminal = ctx
+        .client
+        .try_set_stream_decommissioned(&stream_id, &ctx.sender, &true);
+    assert_eq!(res_terminal, Err(Ok(ContractError::InvalidState)));
 }

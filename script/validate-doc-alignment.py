@@ -172,7 +172,7 @@ _RE_CONTRACT_ERROR_BODY = re.compile(
 )
 
 _RE_CONTRACTIMPL_BLOCK = re.compile(
-    r"#\[contractimpl\][\s\S]*?impl\s+[A-Za-z_][A-Za-z0-9_]*\s*\{",
+    r"#\[(?:cfg_attr\(.*?contractimpl.*?\)|contractimpl)\][\s\S]*?impl\s+[A-Za-z_][A-Za-z0-9_]*\s*\{",
     re.MULTILINE,
 )
 
@@ -359,7 +359,7 @@ def validate(
             except ValueError:
                 display = audit_doc
             print(
-                f"STALE DOC: '{ident}' (audit entrypoint) listed in '{display}' "
+                f"STALE AUDIT DOC: '{ident}' (audit entrypoint) listed in '{display}' "
                 "but not in contractimpl"
             )
             drift_found = True

@@ -569,8 +569,9 @@ pub(crate) fn maybe_emit_health_changed(
 ) {
     let (is_underfunded, remaining_balance, seconds_remaining) = compute_stream_health(stream, now);
     if is_underfunded != was_underfunded {
-        env.events().publish(
-            (soroban_sdk::symbol_short!("hlth_chg"), stream.stream_id),
+        events::emit_stream_health_changed(
+            env,
+            stream.stream_id,
             StreamHealthChanged {
                 stream_id: stream.stream_id,
                 is_underfunded,
@@ -826,12 +827,12 @@ pub(crate) fn read_pooled_stream_withdrawn(env: &Env, stream_id: u64, recipient:
 pub fn reject_duplicate_ids(
     env: &Env,
     stream_ids: &soroban_sdk::Vec<u64>,
-) -> Result<(), crate::types::ContractError> {
+) -> Result<(), ContractError> {
     let mut seen = soroban_sdk::Vec::<u64>::new(env);
     for id in stream_ids.iter() {
         for s in seen.iter() {
             if s == id {
-                return Err(crate::types::ContractError::DuplicateStreamId);
+                return Err(ContractError::DuplicateStreamId);
             }
         }
         seen.push_back(id);

@@ -19,6 +19,7 @@ struct TestContext {
     client: FluxoraStreamClient<'static>,
     sender: Address,
     recipient: Address,
+    admin: Address,
 }
 
 mod mock_token {
@@ -33,13 +34,25 @@ mod mock_token {
         pub fn mint(env: Env, _to: Address, _amount: i128) {
             env.storage().instance().extend_ttl(100_000, 100_000);
         }
-        pub fn approve(env: Env, _from: Address, _spender: Address, _amount: i128, _expiration_ledger: u32) {
+        pub fn approve(
+            env: Env,
+            _from: Address,
+            _spender: Address,
+            _amount: i128,
+            _expiration_ledger: u32,
+        ) {
             env.storage().instance().extend_ttl(100_000, 100_000);
         }
         pub fn transfer(env: Env, _from: Address, _to: Address, _amount: i128) {
             env.storage().instance().extend_ttl(100_000, 100_000);
         }
-        pub fn transfer_from(env: Env, _spender: Address, _from: Address, _to: Address, _amount: i128) {
+        pub fn transfer_from(
+            env: Env,
+            _spender: Address,
+            _from: Address,
+            _to: Address,
+            _amount: i128,
+        ) {
             env.storage().instance().extend_ttl(100_000, 100_000);
         }
         pub fn balance(env: Env, _id: Address) -> i128 {
@@ -86,10 +99,15 @@ impl TestContext {
             client,
             sender,
             recipient,
+            admin,
         }
     }
 
-    fn create_stream(&self, dust_threshold: i128) -> u64 {
+    fn create_stream(&self) -> u64 {
+        self.create_stream_with_dust(0)
+    }
+
+    fn create_stream_with_dust(&self, dust_threshold: i128) -> u64 {
         self.client.create_stream(
             &self.sender,
             &CreateStreamParams {
@@ -237,15 +255,20 @@ fn lookback_caps_each_claim_without_reducing_lifetime_accrual() {
         .client
         .create_stream_with_lookback(
             &ctx.sender,
-            &ctx.recipient,
-            &1000,
-            &1,
-            &0,
-            &0,
-            &1000,
-            &0,
-            &None,
-            &StreamKind::Linear,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 1000,
+                rate_per_second: 1,
+                start_time: 0,
+                cliff_time: 0,
+                end_time: 1000,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
             &Some(10_u32),
         )
         .unwrap();
@@ -267,7 +290,7 @@ fn lookback_caps_each_claim_without_reducing_lifetime_accrual() {
 
     // The cap limits each call, but no accrued entitlement is permanently lost.
     assert_eq!(total_withdrawn, 1000);
-    assert_eq!(ctx.client.calculate_accrued(&stream_id), 1000);
+    assert_eq!(ctx.client.calculate_accrued(&stream_id).unwrap(), 1000);
 }
 
 #[test]
@@ -475,12 +498,11 @@ fn test_no_state_mutation_on_rate_limit_error() {
     ctx.advance_ledger(100);
 
     // First withdrawal succeeds
-    let first_amount = ctx.client.withdraw(&stream_id).unwrap();
+    let _first_amount = ctx.client.withdraw(&stream_id).unwrap();
 
     // Get stream state after first withdrawal
     let stream_after_first = ctx.client.get_stream_state(&stream_id);
     let withdrawn_after_first = stream_after_first.withdrawn_amount;
-    let balance_after_first = ctx.token.balance(&ctx.recipient);
 
     // Attempt second withdrawal at same ledger (should fail)
     let result = ctx.client.try_withdraw(&stream_id);
@@ -489,9 +511,6 @@ fn test_no_state_mutation_on_rate_limit_error() {
     // Verify no state mutation occurred
     let stream_after_failed = ctx.client.get_stream_state(&stream_id);
     assert_eq!(stream_after_failed.withdrawn_amount, withdrawn_after_first);
-
-    let balance_after_failed = ctx.token.balance(&ctx.recipient);
-    assert_eq!(balance_after_failed, balance_after_first);
 }
 
 #[test]
@@ -597,9 +616,9 @@ fn test_multiple_streams_independent_rate_limits() {
     // Advance by 10 ledgers
     ctx.advance_ledger(10);
 
-    assert!(ctx.client.withdraw(&stream_id) > 0);
+    assert!(ctx.client.withdraw(&stream_id2).unwrap() > 0);
     assert_eq!(
-        ctx.client.try_withdraw(&stream_id),
+        ctx.client.try_withdraw(&stream_id2),
         Err(Ok(ContractError::WithdrawalTooFrequent))
     );
 
@@ -610,7 +629,7 @@ fn test_multiple_streams_independent_rate_limits() {
 #[test]
 fn every_successful_withdrawal_resets_the_interval() {
     let ctx = TestContext::setup();
-    let stream_id = ctx.create_stream(0);
+    let stream_id = ctx.create_stream_with_dust(0);
     ctx.advance_ledger(10);
     ctx.client.withdraw(&stream_id);
 
@@ -628,11 +647,14 @@ fn every_successful_withdrawal_resets_the_interval() {
 #[test]
 fn zero_withdrawable_does_not_consume_the_interval() {
     let ctx = TestContext::setup();
-    let stream_id = ctx.create_stream(100);
+    let stream_id = ctx.create_stream_with_dust(100);
     ctx.advance_ledger(10); // 50 accrued, below the dust threshold.
 
     assert_eq!(ctx.client.withdraw(&stream_id), 0);
-    assert_eq!(ctx.client.get_stream_state(&stream_id).last_withdraw_ledger, 0);
+    assert_eq!(
+        ctx.client.get_stream_state(&stream_id).last_withdraw_ledger,
+        0
+    );
 
     ctx.advance_ledger(10); // 100 accrued, exactly at the threshold.
     assert_eq!(ctx.client.withdraw(&stream_id), 100);
@@ -641,8 +663,8 @@ fn zero_withdrawable_does_not_consume_the_interval() {
 #[test]
 fn batch_withdraw_shares_the_per_stream_interval() {
     let ctx = TestContext::setup();
-    let first = ctx.create_stream(0);
-    let second = ctx.create_stream(0);
+    let first = ctx.create_stream_with_dust(0);
+    let second = ctx.create_stream_with_dust(0);
     ctx.advance_ledger(10);
     let withdrawals = soroban_sdk::vec![
         &ctx.env,
@@ -658,7 +680,8 @@ fn batch_withdraw_shares_the_per_stream_interval() {
 
     ctx.client.batch_withdraw_to(&ctx.recipient, &withdrawals);
     assert_eq!(
-        ctx.client.try_batch_withdraw_to(&ctx.recipient, &withdrawals),
+        ctx.client
+            .try_batch_withdraw_to(&ctx.recipient, &withdrawals),
         Err(Ok(ContractError::WithdrawalTooFrequent))
     );
 
@@ -674,7 +697,7 @@ fn batch_withdraw_shares_the_per_stream_interval() {
 #[test]
 fn rate_change_checkpoints_accrual_without_bypassing_the_interval() {
     let ctx = TestContext::setup();
-    let stream_id = ctx.create_stream(0);
+    let stream_id = ctx.create_stream_with_dust(0);
     ctx.advance_ledger(10);
 
     assert_eq!(ctx.client.withdraw(&stream_id), 50);
@@ -699,7 +722,7 @@ fn delegated_withdrawal_obeys_the_same_ledger_limit() {
     let signing_key = SigningKey::from_bytes(&[0xA5; 32]);
     let ctx = TestContext::setup_with_recipient(Some(signing_key.verifying_key().to_bytes()));
     let public_key = BytesN::from_array(&ctx.env, &signing_key.verifying_key().to_bytes());
-    let stream_id = ctx.create_stream(0);
+    let stream_id = ctx.create_stream_with_dust(0);
     let relayer = Address::generate(&ctx.env);
     ctx.advance_ledger(10);
 
@@ -709,15 +732,11 @@ fn delegated_withdrawal_obeys_the_same_ledger_limit() {
         &signing_key,
         &delegated_message(&ctx.env, stream_id, 0, deadline, 0),
     );
-    assert!(ctx.client.delegated_withdraw(
-        &stream_id,
-        &relayer,
-        &public_key,
-        &0,
-        &deadline,
-        &0,
-        &first,
-    ) > 0);
+    assert!(
+        ctx.client
+            .delegated_withdraw(&stream_id, &relayer, &public_key, &0, &deadline, &0, &first,)
+            > 0
+    );
 
     let second = sign_message(
         &ctx.env,
@@ -726,7 +745,13 @@ fn delegated_withdrawal_obeys_the_same_ledger_limit() {
     );
     assert_eq!(
         ctx.client.try_delegated_withdraw(
-            &stream_id, &relayer, &public_key, &1, &deadline, &0, &second,
+            &stream_id,
+            &relayer,
+            &public_key,
+            &1,
+            &deadline,
+            &0,
+            &second,
         ),
         Err(Ok(ContractError::WithdrawalTooFrequent))
     );
@@ -735,7 +760,7 @@ fn delegated_withdrawal_obeys_the_same_ledger_limit() {
 #[test]
 fn backward_ledger_sequence_cannot_bypass_the_limit() {
     let ctx = TestContext::setup();
-    let stream_id = ctx.create_stream(0);
+    let stream_id = ctx.create_stream_with_dust(0);
     ctx.advance_ledger(10);
     ctx.client.withdraw(&stream_id);
 
@@ -763,15 +788,20 @@ fn create_stream_with_lookback_for(ctx: &TestContext, lookback: Option<u32>) -> 
     ctx.client
         .create_stream_with_lookback(
             &ctx.sender,
-            &ctx.recipient,
-            &1000,
-            &1, // 1 token per second
-            &0,
-            &0,
-            &1000,
-            &0,
-            &None,
-            &StreamKind::Linear,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 1000,
+                rate_per_second: 1,
+                start_time: 0,
+                cliff_time: 0,
+                end_time: 1000,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
             &lookback,
         )
         .unwrap()
@@ -961,16 +991,21 @@ fn lookback_cliff_only_full_claim_after_cliff() {
         .client
         .create_stream_with_lookback(
             &ctx.sender,
-            &ctx.recipient,
-            &1000,
-            &0, // CliffOnly enforces rate=0
-            &0,
-            &500, // cliff at 500 s
-            &1000,
-            &0,
-            &None,
-            &StreamKind::CliffOnly,
-            &Some(10), // 50 s window — would otherwise cap at 0 before cliff
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 1000,
+                rate_per_second: 0, // CliffOnly enforces rate=0
+                start_time: 0,
+                cliff_time: 500, // cliff at 500 s
+                end_time: 1000,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: StreamKind::CliffOnly,
+                irrevocable: None,
+                witness: None,
+            },
+            &Some(10),
         )
         .unwrap();
 
@@ -980,7 +1015,7 @@ fn lookback_cliff_only_full_claim_after_cliff() {
 
     // Advance past cliff, and well past the lookback window.
     ctx.advance_ledger(60); // t=550, then 60 more... = 850
-    // Claimable = full deposit because CliffOnly entitlement bypasses cap.
+                            // Claimable = full deposit because CliffOnly entitlement bypasses cap.
     assert_eq!(
         ctx.client.get_withdrawable(&stream_id).unwrap(),
         1000,

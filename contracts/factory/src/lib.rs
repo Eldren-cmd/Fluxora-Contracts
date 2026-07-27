@@ -1,11 +1,23 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
 
-use fluxora_stream::{ContractError as StreamContractErr, FluxoraStreamClient, StreamKind};
+use fluxora_stream::{ContractError as StreamContractErr, CreateStreamParams, StreamKind};
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, vec, Address, Bytes, Env,
-    Vec,
+    contract, contractclient, contracterror, contractimpl, contracttype, symbol_short, vec,
+    Address, Bytes, Env, Vec,
 };
+
+#[contractclient(name = "FluxoraStreamClient")]
+pub trait FluxoraStreamInterface {
+    fn version(env: Env) -> u32;
+    fn is_paused(env: Env) -> bool;
+    fn create_stream(
+        env: Env,
+        sender: Address,
+        params: CreateStreamParams,
+    ) -> Result<u64, fluxora_stream::ContractError>;
+    fn create_streams(env: Env, sender: Address, streams: Vec<CreateStreamParams>) -> Vec<u64>;
+}
 
 /// Maximum number of stream IDs returned per page in `get_factory_streams_paginated`.
 ///

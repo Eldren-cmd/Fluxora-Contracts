@@ -8,7 +8,7 @@ use fluxora_factory::{
 };
 use fluxora_stream::{CreateStreamParams, FluxoraStream, FluxoraStreamClient, StreamKind};
 use soroban_sdk::{
-    testutils::{Address as _, MockAuth, MockAuthInvoke},
+    testutils::{Address as _, Ledger as _, MockAuth, MockAuthInvoke},
     token::{Client as TokenClient, StellarAssetClient},
     Address, Bytes, Env, IntoVal, Vec,
 };
@@ -1220,8 +1220,8 @@ fn test_policy_tightening_grandfathers_existing_streams() {
     );
 
     // ── 2. Tighten all policy dimensions ──────────────────────────────────
-    ctx.factory.set_cap(&2_000);              // lower cap: 10_000 → 2_000
-    ctx.factory.set_min_duration(&2_000);     // raise min_duration: 100 → 2_000
+    ctx.factory.set_cap(&2_000); // lower cap: 10_000 → 2_000
+    ctx.factory.set_min_duration(&2_000); // raise min_duration: 100 → 2_000
     ctx.factory.set_rate_bounds(&Some(1), &Some(5)); // restrict rate: unset → [1, 5]
 
     // confirm policy was persisted

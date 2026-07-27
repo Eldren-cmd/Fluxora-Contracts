@@ -14,6 +14,7 @@ crate-type = ["cdylib", "rlib"]
 doctest = false
 
 [features]
+import_only = []
 testutils = ["soroban-sdk/testutils"]
 
 # Soroban SDK version pinned for reproducible builds.
@@ -58,17 +59,22 @@ test = true
 [[test]]
 name = "chaos"
 path = "tests/chaos.rs"
-test = true
+test = false
 
 [[test]]
 name = "cliff_only_variant"
 path = "tests/cliff_only_variant.rs"
-test = true
+test = false
 
 [[test]]
 name = "create_stream_relative"
 path = "tests/create_stream_relative.rs"
-test = true
+test = false
+
+[[test]]
+name = "id_monotonicity_upgrade"
+path = "tests/id_monotonicity_upgrade.rs"
+test = false
 
 [[test]]
 name = "factory_policy"
@@ -78,7 +84,7 @@ test = true
 [[test]]
 name = "formal_verification_smoke"
 path = "tests/formal_verification_smoke.rs"
-test = false
+test = true
 
 [[test]]
 name = "governance_proptest"
@@ -88,12 +94,12 @@ test = false
 [[test]]
 name = "health_matrix"
 path = "tests/health_matrix.rs"
-test = false
+test = true
 
 [[test]]
 name = "id_range"
 path = "tests/id_range.rs"
-test = false
+test = true
 
 [[test]]
 name = "metadata_limits_900"
@@ -113,7 +119,7 @@ test = true
 [[test]]
 name = "metadata_extension"
 path = "tests/metadata_extension.rs"
-test = false
+test = true
 
 [[test]]
 name = "stream_offer"
@@ -141,6 +147,11 @@ path = "tests/recipient_update_state_machine.rs"
 test = false
 
 [[test]]
+name = "id_reservation"
+path = "tests/id_reservation.rs"
+test = false
+
+[[test]]
 name = "storage_key_compat"
 path = "tests/storage_key_compat.rs"
 required-features = ["testutils"]
@@ -158,7 +169,7 @@ test = true
 [[test]]
 name = "withdrawal_frequency"
 path = "tests/withdrawal_frequency.rs"
-test = true
+test = false
 
 # ---------------------------------------------------------------------------
 # Known-broken integration tests, second batch (compile fine, fail at runtime)

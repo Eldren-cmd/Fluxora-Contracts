@@ -32,7 +32,6 @@ The public entrypoint table below is kept in sync with every `pub fn` on the `Fl
 | `create_stream_from_template` | `env: Env`, `sender: Address`, `template_id: u64`, `recipient: Address`, `deposit_amount: i128`, `rate_per_second: i128`, `withdraw_dust_threshold: i128`, `memo: Option<Bytes>`, `metadata: Option<Map<Bytes, Bytes>>`, `kind: StreamKind`, `irrevocable: Option<bool>` | `u64` | Sender | Create a stream using a registered schedule template plus caller-funded amounts. |
 | `create_stream_offer` | `env: Env`, `sender: Address`, `recipient: Address`, `deposit_amount: i128`, `rate_per_second: i128`, `start_time: u64`, `cliff_time: u64`, `end_time: u64`, `withdraw_dust_threshold: i128`, `memo: Option<Bytes>`, `kind: StreamKind`, `metadata: Option<Map<Bytes, Bytes>>`, `expiry_time: Option<u64>` | `u64` | Sender | Create a signed offer for a recipient to later accept; deposit escrowed at creation. |
 | `create_stream_relative` | `env: Env`, `sender: Address`, `params: CreateStreamRelativeParams` | `u64` | Sender | Create a stream with timing expressed relative to the current ledger timestamp. |
-| `create_stream_with_lookback` | `env: Env`, `sender: Address`, `recipient: Address`, `deposit_amount: i128`, `rate_per_second: i128`, `start_time: u64`, `cliff_time: u64`, `end_time: u64`, `withdraw_dust_threshold: i128`, `memo: Option<Bytes>`, `kind: StreamKind`, `max_lookback_ledgers: Option<u32>` | `u64` | Sender | Create a stream with an optional per-withdrawal lookback bound; `Some(0)` is rejected, `None` removes any bound. |
 | `create_streams` | `env: Env`, `sender: Address`, `streams: Vec<CreateStreamParams>` | `Vec<u64>` | Sender | Atomically create multiple streams with a single sender authorization and deposit pull. |
 | `create_streams_partial` | `env: Env`, `sender: Address`, `streams: Vec<CreateStreamParams>` | `Vec<CreateStreamResult>` | Sender | Batch create with per-entry success/failure results instead of all-or-nothing semantics. |
 | `create_streams_relative` | `env: Env`, `sender: Address`, `streams_relative: Vec<CreateStreamRelativeParams>` | `Vec<u64>` | Sender | Batch create using relative timing parameters converted to absolute timestamps. |
@@ -96,6 +95,7 @@ The public entrypoint table below is kept in sync with every `pub fn` on the `Fl
 | `set_global_emergency_paused` | `env: Env`, `paused: bool` | — | Admin | Toggle global emergency pause blocking operational mutations. |
 | `set_lookback_window` | `env: Env`, `stream_id: u64`, `sender: Address`, `max_lookback_ledgers: Option<u32>` | — | Sender | Set or clear the per-stream lookback bound; rejects `Some(0)` and rejects Cancelled streams. |
 | `set_max_rate_per_second` | `env: Env`, `max_rate: i128` | — | Admin | Set maximum allowed stream rate for future rate updates. |
+| `set_stream_decommissioned` | `env: Env`, `stream_id: u64`, `sender: Address`, `decommissioned: bool` | — | Sender | Flag or clear stream decommission mode; blocks schedule and funding mutations while preserving withdrawals, pause/resume, and cancellation. |
 | `shorten_stream_end_time` | `env: Env`, `stream_id: u64`, `new_end_time: u64` | — | Sender | Reduce `end_time` and refund unstreamed tokens to sender; Active or Paused only. |
 | `sweep_excess` | `env: Env`, `recipient: Address` | `i128` | Admin | Recover token balance exceeding tracked liabilities to an admin-chosen address. |
 | `top_up_stream` | `env: Env`, `stream_id: u64`, `funder: Address`, `amount: i128` | — | Funder | Pull additional tokens into stream deposit; Active or Paused only. |
@@ -110,7 +110,6 @@ The public entrypoint table below is kept in sync with every `pub fn` on the `Fl
 | `cancel_stream_offer` | env: Env, offer_id: u64 | — | Sender | Cancel a pending stream offer before acceptance. |
 | `create_pooled_stream` | env: Env, sender: Address, params: CreateStreamParams | u64 | Sender | Create a stream that distributes to a participant pool. |
 | `create_stream_offer` | env: Env, sender: Address, recipient: Address, params: CreateStreamParams | u64 | Sender | Create a stream offer that requires recipient acceptance. |
-| `create_stream_with_lookback` | env: Env, sender: Address, params: CreateStreamParams | u64 | Sender | Create a stream enforcing a claim lookback window. |
 | `delegate_recipient_share` | env: Env, stream_id: u64, delegate: Address, share_bps: u32 | — | Recipient | Delegate a share of future recipient yield to another address. |
 | `get_auto_renew` | env: Env, stream_id: u64 | bool | Anyone (view) | Return whether auto-renew is currently enabled for a stream. |
 | `get_lookback_window` | env: Env | u32 | Anyone (view) | Return the protocol-wide claim lookback window setting. |
@@ -181,6 +180,22 @@ Auditors can use these as a checklist; the implementation is intended to preserv
 
 13. **Reentrancy Guard**
 
+    > **⚠️ OPEN / UNADDRESSED FINDING — This invariant is underspecified.**
+    >
+    > The header exists but no requirements, checks, or enforcement criteria
+    > are defined. See `docs/maintainer-security-checklist.md §14` for the
+    > full open-finding report and required maintainer follow-up.
+    >
+    > **Current implementation reality:**
+    > - A custom reentrancy lock (`DataKey::ReentrancyLock`) exists in storage
+    >   but is only used by `sweep_excess` and `trigger_auto_claim`.
+    > - `CEI_ANALYSIS.md` (Issue #262) claims `withdraw`, `withdraw_to`,
+    >   `batch_withdraw`, `cancel_stream`, and `cancel_stream_as_admin` are
+    >   wrapped in the lock, but the code does not reflect this.
+    > - All other token-transfer entrypoints rely solely on CEI ordering.
+    >
+    > **Action needed:** Specify this invariant's requirements and reconcile
+    > documentation with actual code coverage before the next formal audit.
 
 14. **Contract balance consistency**  
     Deposit is pulled in `create_stream`; refunds and withdrawals only move amounts derived from that deposit (unstreamed to sender, accrued to recipient). No minting or arbitrary transfers.
