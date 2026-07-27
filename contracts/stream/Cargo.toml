@@ -113,7 +113,7 @@ test = true
 [[test]]
 name = "metadata_extension"
 path = "tests/metadata_extension.rs"
-test = false
+test = true
 
 [[test]]
 name = "stream_offer"
