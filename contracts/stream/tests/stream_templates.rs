@@ -391,4 +391,3 @@ fn auto_renew_inherits_irrevocable_and_witness_settings() {
     assert_eq!(renewed.irrevocable, Some(true));
     assert_eq!(renewed.witness, Some(witness));
 }
-

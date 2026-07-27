@@ -333,7 +333,10 @@ fn test_keeper_cancel_exactly_at_grace_period() {
     ctx.client().keeper_cancel(&sid, &ctx.keeper);
 
     assert_eq!(ctx.balance(&ctx.recipient), 1_000);
-    assert_eq!(ctx.client().get_stream_state(&sid).status, StreamStatus::Cancelled);
+    assert_eq!(
+        ctx.client().get_stream_state(&sid).status,
+        StreamStatus::Cancelled
+    );
 }
 
 /// Already cancelled → `InvalidState`.

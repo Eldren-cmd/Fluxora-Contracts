@@ -12,8 +12,8 @@ mod types;
 
 pub use types::{ClaimOwnershipTransferred, CreateStreamRelativeParams, MAX_POOL_RECIPIENTS};
 
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env, Map};
 use soroban_sdk::xdr::ToXdr;
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env, Map};
 pub use storage::*;
 use token_check::verify_token_behavior;
 
@@ -60,8 +60,6 @@ pub const MAX_RECIPIENT_PAGE_SIZE: u32 = RECIPIENT_STREAMS_PAGE_LIMIT;
 
 /// Maximum byte length for memo attached to a stream.
 pub const MAX_MEMO_BYTES: usize = 256;
-
-
 
 /// Maximum byte length for pause-reason strings.
 pub const MAX_PAUSE_REASON_BYTES: usize = 256;
@@ -770,8 +768,6 @@ pub struct SenderTransferred {
     pub new_sender: Address,
 }
 
-
-
 /// Emitted when a stream's funding health status transitions between
 /// adequately funded and underfunded states.
 ///
@@ -1214,10 +1210,6 @@ pub struct StreamScheduleTemplate {
     pub cliff_delay: u64,
     pub duration: u64,
 }
-
-
-
-
 
 /// Namespace for all contract storage keys.
 ///
@@ -2142,8 +2134,6 @@ const KEEPER_FEE_BPS: u32 = 50;
 
 /// Maximum number of rotation entries stored in a per-stream history.
 const MAX_ROTATION_HISTORY: u32 = 50;
-
-
 
 // ---------------------------------------------------------------------------
 // Internal Helpers
@@ -6787,9 +6777,7 @@ impl FluxoraStream {
             .as_ref()
             .ok_or(ContractError::InvalidParams)?;
 
-        if Self::ed25519_pubkey_from_address(&env, witness_addr)
-            != witness_public_key.to_array()
-        {
+        if Self::ed25519_pubkey_from_address(&env, witness_addr) != witness_public_key.to_array() {
             return Err(ContractError::InvalidSignature);
         }
 
