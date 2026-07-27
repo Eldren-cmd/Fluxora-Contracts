@@ -20,7 +20,7 @@ use token_check::verify_token_behavior;
 pub fn reject_duplicate_ids(env: &Env, ids: &soroban_sdk::Vec<u64>) -> Result<(), ContractError> {
     let mut seen = soroban_sdk::Map::new(env);
     for id in ids.iter() {
-        if seen.contains_key(&id) {
+        if seen.contains_key(id) {
             return Err(ContractError::DuplicateStreamId);
         }
         seen.set(id, ());
@@ -61,8 +61,7 @@ pub const MAX_RECIPIENT_PAGE_SIZE: u32 = RECIPIENT_STREAMS_PAGE_LIMIT;
 /// Maximum byte length for memo attached to a stream.
 pub const MAX_MEMO_BYTES: usize = 256;
 
-/// Maximum number of recipients allowed in a pooled stream creation.
-pub const MAX_POOL_RECIPIENTS: u32 = 100;
+
 
 /// Maximum byte length for pause-reason strings.
 pub const MAX_PAUSE_REASON_BYTES: usize = 256;
@@ -771,14 +770,7 @@ pub struct SenderTransferred {
     pub new_sender: Address,
 }
 
-/// Emitted when a stream's claim ownership is transferred.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ClaimOwnershipTransferred {
-    pub stream_id: u64,
-    pub old_owner: Option<Address>,
-    pub new_owner: Address,
-}
+
 
 /// Emitted when a stream's funding health status transitions between
 /// adequately funded and underfunded states.
@@ -1223,45 +1215,9 @@ pub struct StreamScheduleTemplate {
     pub duration: u64,
 }
 
-/// Maximum number of recipients allowed in a single pooled stream.
-pub const MAX_POOL_RECIPIENTS: u32 = 100;
 
-/// Emitted when a stream's claim ownership is transferred.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ClaimOwnershipTransferred {
-    pub stream_id: u64,
-    pub old_owner: Option<Address>,
-    pub new_owner: Address,
-}
 
-/// Relative-timing stream creation parameters (offsets from current timestamp).
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CreateStreamRelativeParams {
-    /// Address that will receive streamed tokens for this stream entry.
-    pub recipient: Address,
-    /// Total amount escrowed for this stream entry.
-    pub deposit_amount: i128,
-    /// Streaming speed in tokens per second for this stream entry.
-    pub rate_per_second: i128,
-    /// Delay (in seconds) before stream accrual starts, relative to current timestamp.
-    pub start_delay: u64,
-    /// Delay (in seconds) before withdrawals are allowed, relative to current timestamp.
-    pub cliff_delay: u64,
-    /// Total duration the stream runs (in seconds) from start_time to end_time.
-    pub duration: u64,
-    /// Optional withdrawal threshold (raw units) to reduce fee spam.
-    pub withdraw_dust_threshold: Option<i128>,
-    /// Optional bounded memo for indexer correlation (e.g. payroll batch ID).
-    pub memo: Option<soroban_sdk::Bytes>,
-    /// The architectural style of the stream (Linear or CliffOnly).
-    pub kind: StreamKind,
-    /// Optional structured metadata for indexer consumption.
-    pub metadata: Option<soroban_sdk::Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
-    /// If true, the stream cannot be cancelled or shortened. Defaults to false (None).
-    pub irrevocable: Option<bool>,
-}
+
 
 /// Namespace for all contract storage keys.
 ///
@@ -2187,8 +2143,7 @@ const KEEPER_FEE_BPS: u32 = 50;
 /// Maximum number of rotation entries stored in a per-stream history.
 const MAX_ROTATION_HISTORY: u32 = 50;
 
-/// Maximum number of recipients allowed in a single pooled stream.
-pub const MAX_POOL_RECIPIENTS: u32 = 100;
+
 
 // ---------------------------------------------------------------------------
 // Internal Helpers
@@ -2332,8 +2287,8 @@ impl FluxoraStream {
             metadata: metadata.clone(),
             memo: memo.clone(),
             kind,
-            irrevocable: None,
-            witness: None,
+            irrevocable,
+            witness,
             delegation_depth: 0,
             parent_stream_id: None,
         };
@@ -2429,8 +2384,8 @@ impl FluxoraStream {
             metadata: metadata.clone(),
             memo: memo.clone(),
             kind,
-            irrevocable: None,
-            witness: None,
+            irrevocable,
+            witness,
             delegation_depth: 0,
             parent_stream_id: None,
         };
@@ -2720,7 +2675,7 @@ impl FluxoraStream {
 
         pull_token(&env, &sender, deposit_amount)?;
 
-        Self::persist_new_stream(
+        let stream_id = Self::persist_new_stream(
             &env,
             sender,
             recipient,
@@ -2733,6 +2688,8 @@ impl FluxoraStream {
             memo,
             kind,
             None,
+            irrevocable,
+            witness,
         )?;
 
         Ok(stream_id)
@@ -2843,6 +2800,8 @@ impl FluxoraStream {
             params.memo,
             params.kind,
             params.metadata,
+            params.irrevocable,
+            None,
         )
     }
 
@@ -5953,6 +5912,11 @@ impl FluxoraStream {
         set_auto_renew_enabled(&env, stream_id, false);
         pull_token(&env, &stream.sender, stream.deposit_amount)?;
 
+        // Inherit irrevocable and witness settings from the source stream.
+        // If a stream was designated irrevocable or assigned a compliance witness
+        // originally, auto-renewal carries forward these safety and governance
+        // protections so that sender-side cancellation rules and witness attestations
+        // remain in force for the renewed stream period rather than silently lapsing.
         let new_stream_id = Self::persist_new_stream(
             &env,
             stream.sender.clone(),
@@ -5966,6 +5930,8 @@ impl FluxoraStream {
             stream.memo.clone(),
             stream.kind,
             stream.metadata.clone(),
+            stream.irrevocable,
+            stream.witness.clone(),
         )?;
         set_auto_renew_enabled(&env, new_stream_id, true);
 
