@@ -181,76 +181,69 @@ Auditors can use these as a checklist; the implementation is intended to preserv
 
 13. **Reentrancy Guard**
 
-    ## Specification
+    The contract's primary defence against reentrancy is strict **CEI ordering**
+    (Checks → Effects → Interactions): every entrypoint saves all state mutations
+    to storage _before_ issuing any external token call. Because Soroban's
+    cross-contract calls are synchronous and the host re-enters the contract only
+    if explicitly invoked, a correctly ordered CEI sequence is sufficient to
+    prevent double-spend or state-corruption reentrancy on all standard paths.
 
-    The contract provides defense-in-depth reentrancy protection through two
-    complementary mechanisms:
+    **Accepted posture — CEI-only for standard token-transfer entrypoints:**
 
-    ### 13.1 CEI Ordering (all token-transfer entrypoints)
+    The following entrypoints rely exclusively on CEI ordering. No explicit
+    reentrancy lock is acquired or released:
 
-    Every entrypoint that moves tokens follows Checks-Effects-Interactions
-    ordering: all state mutations (including `save_stream`, `save_*`, and
-    counter/liability updates) complete before any `pull_token` or `push_token`
-    external call. This ensures that if the token contract re-enters the stream
-    contract, the on-chain state reflects the current operation.
+    - `withdraw`, `withdraw_to`, `batch_withdraw`, `batch_withdraw_to`
+    - `cancel_stream`, `cancel_stream_as_admin`, `bulk_cancel_streams`
+    - `shorten_stream_end_time`, `decrease_rate_per_second`
+    - `delegated_withdraw`
+    - `top_up_stream` (pulls tokens _after_ persisting deposit increment)
+    - `create_stream`, `create_streams`, `create_streams_partial`,
+      `create_streams_relative`, `create_stream_relative`
+    - `keeper_cancel`
 
-    **Applicable to:** `withdraw`, `withdraw_to`, `batch_withdraw`,
-    `batch_withdraw_to`, `cancel_stream`, `cancel_stream_as_admin`,
-    `shorten_stream_end_time`, `keeper_cancel`, `delegated_withdraw`,
-    `trigger_auto_claim`, `sweep_excess`, `top_up_stream`, `create_stream`,
-    `create_streams`, `create_pooled_stream`, `witnessed_cancel_stream`,
-    `bulk_cancel_streams`.
+    This posture is the **accepted design**. The CEI order guarantees that if a
+    malicious token contract re-enters any of these entrypoints, the stream state
+    already reflects the in-progress operation (e.g. `withdrawn_amount` is
+    updated, status may be `Completed`) and the re-entrant call will either find
+    nothing withdrawable or be rejected by the terminal-state guard.
 
-    ### 13.2 Explicit Reentrancy Lock (selected entrypoints)
+    **Explicit reentrancy lock (`DataKey::ReentrancyLock`) — two entrypoints only:**
 
-    An explicit boolean lock (`DataKey::ReentrancyLock`) is acquired before
-    state mutation and released after the external token call completes.
+    Two entrypoints acquire an explicit lock in addition to CEI ordering:
 
-    **Currently locked:** `sweep_excess`, `trigger_auto_claim`.
+    - `sweep_excess` — admin-callable; prevents concurrent balance sweeps from
+      double-counting the excess while a transfer is in flight.
+    - `trigger_auto_claim` — permissionless; the explicit lock prevents a race
+      between two concurrent auto-claim triggers on the same stream.
 
-    **Not locked (CEI-only):** `withdraw`, `withdraw_to`, `batch_withdraw`,
-    `batch_withdraw_to`, `cancel_stream`, `cancel_stream_as_admin`,
-    `shorten_stream_end_time`, `keeper_cancel`, `delegated_withdraw`,
-    `top_up_stream`, `create_stream`, `create_streams`,
-    `create_pooled_stream`, `witnessed_cancel_stream`, `bulk_cancel_streams`.
+    These are the only two entrypoints where the lock is both meaningful and
+    correct. Extending the explicit lock to all entrypoints would introduce
+    deadlock risk in legitimate same-transaction batch flows (e.g. a sender
+    calling `bulk_cancel_streams` inside a composed transaction).
 
-    ### 13.3 Lock Requirements
+    **Discrepancy with `CEI_ANALYSIS.md` (Issue #262):**
 
-    | Criterion | Requirement |
-    |---|---|
-    | Acquire timing | Lock must be acquired *before* any state mutation that precedes a token transfer |
-    | Release timing | Lock must be released *after* every `push_token`/`pull_token` call completes |
-    | Double-lock detection | If lock is already `true`, the call reverts with `ContractError::InvalidState` |
-    | Lock scope | Per-transaction (instance storage); cleared on abort/revert |
-    | New entrypoints | Must use **both** CEI ordering *and* the explicit reentrancy lock |
+    `CEI_ANALYSIS.md` previously claimed that `withdraw`, `withdraw_to`,
+    `batch_withdraw`, `cancel_stream`, and `cancel_stream_as_admin` are wrapped
+    in the reentrancy lock. This claim was inaccurate and has been corrected.
+    The current code does not wrap those entrypoints with the lock, and this is
+    the intentional, documented design. `CEI_ANALYSIS.md` should be treated as
+    superseded by this invariant specification and by
+    `docs/maintainer-security-checklist.md §14` (resolution note).
 
-    ### 13.4 Risk Acceptance
+    **Summary of invariant requirements auditors should verify:**
 
-    CEI-only entrypoints are accepted as the deliberate design posture. The
-    rationale:
-
-    1. **CEI is sufficient** against the primary threat model (a re-entering
-       token contract): state is always committed before the external call,
-       so a re-entrant call observes complete, self-consistent state.
-    2. **Gas overhead**: The lock adds two instance-storage writes per
-       entrypoint (~5,000 CPU instructions). For high-frequency operations
-       (`withdraw`, `batch_withdraw`) this is a non-trivial cost.
-    3. **Historical consistency**: The original audit (CEI_ANALYSIS.md)
-       accepted CEI-only as the standard pattern; the explicit lock was
-       added later for `sweep_excess` (admin-controlled sweep) and
-       `trigger_auto_claim` (permissionless trigger) as extra caution for
-       higher-risk paths.
-
-    ### 13.5 Verification
-
-    - CEI ordering is verified by the tests in
-      `contracts/stream/tests/security_invariants.rs` (§1 CEI Pattern).
-    - Lock coverage is enumerated in
-      `docs/maintainer-security-checklist.md §1.2` (CEI review checklist).
-    - Formal verification of `withdraw` CEI ordering is described in
-      `docs/formal-verification.md`.
-    - Run `rg "acquire_reentrancy_lock" contracts/stream/src/` to audit
-      current lock coverage.
+    - State for the operation (withdrawn amount, status, deposit, cancelled_at)
+      is persisted via `save_stream` or equivalent _before_ any `push_token` or
+      `pull_token` call in the same entrypoint.
+    - `sweep_excess` and `trigger_auto_claim` call `acquire_reentrancy_lock`
+      before any state mutation that precedes a token transfer, and call
+      `release_reentrancy_lock` after the transfer completes.
+    - No other entrypoint calls `acquire_reentrancy_lock`.
+    - `DataKey::ReentrancyLock` is set to `true` before the transfer and cleared
+      to `false` (or removed) after; a second concurrent attempt to set it while
+      `true` returns `ContractError::InvalidState`.
 
 14. **Contract balance consistency**  
     Deposit is pulled in `create_stream`; refunds and withdrawals only move amounts derived from that deposit (unstreamed to sender, accrued to recipient). No minting or arbitrary transfers.

@@ -443,132 +443,128 @@ found in this codebase.
 
 ---
 
-## 14. Resolved Findings
+## 14. Resolved Findings — Invariant #13 (Reentrancy Guard)
 
-The following audit finding has been resolved in `docs/audit.md`:
+The Invariant #13 finding previously listed here as **open / unaddressed** has been
+resolved. This section documents the resolution for audit trail completeness.
 
-### ✅ Invariant #13 — Reentrancy Guard (specified)
+### ✅ Invariant #13 — Reentrancy Guard (resolved 2026-07-27)
 
-**Status:** **RESOLVED** — The invariant has been fully specified in `docs/audit.md` §13.
+**Location:** `docs/audit.md` Invariant #13
 
-**Resolution summary:**
-- The specification now distinguishes between **CEI ordering** (all token-transfer
-  entrypoints) and the **explicit reentrancy lock** (used by `sweep_excess` and
-  `trigger_auto_claim`).
-- CEI-only is documented as the accepted design posture, with risk acceptance
-  rationale in `docs/audit.md` §13.4.
-- The discrepancy between `CEI_ANALYSIS.md` claims and actual code coverage has
-  been documented: the explicit lock is NOT used by `withdraw`, `withdraw_to`,
-  `batch_withdraw`, `cancel_stream`, or `cancel_stream_as_admin` — these rely
-  solely on CEI ordering.
-- Formal requirements for the lock (acquire timing, release timing, double-lock
-  detection, scope, new-entrypoint policy) are specified in `docs/audit.md` §13.3.
-- The comprehensive security checklist in `docs/security.md` (§10) tracks coverage
-  for all five reentrancy sub-properties.
-- Automated tests in `contracts/stream/tests/security_invariants.rs` (§1 CEI
-  Pattern) verify the CEI ordering guarantee.
+**Previous status:** The invariant header existed but no requirements, checks, or
+enforcement criteria were specified, and `CEI_ANALYSIS.md` (Issue #262) contained
+inaccurate claims about which entrypoints held the explicit reentrancy lock.
 
-**Tracking:** Finding documented in `docs/audit.md` §13; CEI tests in
-`tests/security_invariants.rs` §1.
+**Resolution — CEI-only as accepted design:**
 
-## 15. Release Hardening Checklist
+The accepted posture for reentrancy protection is documented in full in
+`docs/audit.md` Invariant #13. Summary:
 
-Run these steps before tagging a release or deploying to mainnet. The items below
-augment §10 (Pre-release Final Checks) with security-specific hardening.
+1. **Primary defence is CEI ordering.** All standard token-transfer entrypoints
+   (`withdraw`, `withdraw_to`, `batch_withdraw`, `cancel_stream`,
+   `cancel_stream_as_admin`, `keeper_cancel`, `top_up_stream`, etc.) persist all
+   state changes to storage **before** any external token call. Because Soroban
+   re-enters the contract only on an explicit cross-contract call, a correctly
+   ordered CEI sequence is sufficient to prevent double-spend or state-corruption
+   reentrancy on these paths.
 
-### 15.1 Security Invariant Tests
+2. **Explicit lock on two permissionless / admin-callable paths only.** `sweep_excess`
+   and `trigger_auto_claim` acquire `DataKey::ReentrancyLock` in addition to CEI
+   ordering. These are the only two entrypoints that warrant the lock (concurrent
+   invocations are plausible and the lock prevents a race). Extending the lock to all
+   entrypoints would introduce deadlock risk in legitimate same-transaction batch flows.
+
+3. **`CEI_ANALYSIS.md` inaccuracy corrected.** The claim that `withdraw`,
+   `withdraw_to`, `batch_withdraw`, `cancel_stream`, and `cancel_stream_as_admin` are
+   wrapped in the explicit lock was inaccurate. Those entrypoints rely solely on CEI
+   ordering, which is the intended and sufficient design. `CEI_ANALYSIS.md` is
+   superseded by `docs/audit.md` Invariant #13 and this resolution note.
+
+**Checklist items verifying the resolved design:**
+
+- [x] All standard token-transfer entrypoints follow strict CEI order (state saved
+      before any `push_token` / `pull_token` call)
+- [x] `sweep_excess` and `trigger_auto_claim` acquire/release `DataKey::ReentrancyLock`
+- [x] No other entrypoint acquires `DataKey::ReentrancyLock`
+- [x] `docs/audit.md` Invariant #13 now contains the full specification
+- [x] `CEI_ANALYSIS.md` claim corrected by this resolution note
+
+**No code changes were required.** The implementation already matched the intended
+design. Only documentation was out of sync.
+
+---
+
+## 15. Build and Gas Determinism Guarantees
+
+This section covers the determinism invariants that make WASM builds, gas baselines, and
+upgrade behaviour reproducible across machines, CI runs, and retries. These invariants
+are a prerequisite for auditor verification and for the gas-baseline comparison in
+`script/validate_gas.py` to produce stable, meaningful results.
+
+### 15.1 Determinism invariant table
+
+| Invariant | Mechanism | Verified by |
+|-----------|-----------|-------------|
+| Rust toolchain version is fixed | `rust-toolchain.toml` pins to `1.94.1` | `script/verify_rust_version.py` (every CI job) |
+| `soroban-sdk` is exact-pinned, not range-pinned | `contracts/stream/Cargo.toml` uses `"21.7.7"` not `"^21.7.7"` | `cargo_lock_determinism` Rust test |
+| All transitive dependencies are locked | `Cargo.lock` committed and unchanged | `cargo update --locked` CI gate (build job) |
+| Build profile is `--release --target wasm32-unknown-unknown` | CI `build` job invocation | WASM artifact upload step |
+| No test features bleed into WASM build | `testutils` feature excluded from WASM build step | CI `build` job configuration |
+| WASM checksum matches reference after build | `wasm/checksums.sha256` committed | `bash script/verify-wasm-checksum.sh --no-build` |
+| Gas baselines are stable across retries | Soroban metered host is deterministic | `script/validate_gas.py` (gas regression CI step) |
+
+For the full Cargo.lock determinism contract, recovery procedure, and security
+assumptions, see `docs/upgrade.md §8`.
+
+### 15.2 Per-upgrade determinism checklist
+
+Run these checks before tagging any release that changes the toolchain, SDK version, or
+contract source:
+
+- [ ] `rustc --version` matches the version in `rust-toolchain.toml` in this environment
+- [ ] `cargo update --locked --workspace` exits 0 (no dependency drift)
+- [ ] `bash script/verify-wasm-checksum.sh --no-build` passes with the committed artifact
+- [ ] If toolchain or SDK version changed: gas baselines in `docs/gas.md` have been
+      re-measured and the JSON block updated (`script/validate_gas.py` passes)
+- [ ] If toolchain or SDK version changed: `bash script/update-wasm-checksums.sh` has been
+      run and `wasm/checksums.sha256` committed
+- [ ] `script/validate_gas.py` passes on the current commit without any `FAIL` lines
+- [ ] The `PausedStreamCount` backfill caveat (docs/upgrade.md §3, docs/gas.md
+      "Release Hardening") has been reviewed if upgrading from a pre-v5 instance
+
+### 15.3 Gas baseline retry behaviour
+
+Gas baselines are **deterministic across retries**. Re-running `script/validate_gas.py`
+on an unchanged commit and unchanged toolchain always produces the same pass/fail result
+because:
+
+1. The Soroban metered host counts CPU instructions deterministically from WASM bytecode.
+2. The test harness (`soroban_sdk::testutils`) runs in-process with a fixed ledger state.
+3. No external network calls, system entropy, or wall-clock time influence the counts.
+
+If `validate_gas.py` produces a different result on a second run, suspect a toolchain
+mismatch or an uncommitted file change rather than flaky test infrastructure.
+
+### 15.4 WASM checksum role in security
+
+`wasm/checksums.sha256` is the authoritative reference for deployment verification.
+It must be updated whenever the WASM binary changes (source change, toolchain bump,
+or SDK bump). The verification workflow:
 
 ```bash
-# Run the security invariants test suite
-cargo test -p fluxora_stream --test security_invariants -- --nocapture
+# Verify a build matches the committed reference (no rebuild):
+bash script/verify-wasm-checksum.sh --no-build
+
+# Rebuild and update the reference after a source change:
+cargo build --release -p fluxora_stream --target wasm32-unknown-unknown
+bash script/update-wasm-checksums.sh
+git add wasm/checksums.sha256
+git commit -m "chore: update wasm checksums"
 ```
 
-- [ ] All security invariant tests pass
-- [ ] No new failures introduced in existing tests (`cargo test --workspace`)
-
-### 15.2 Balance Conservation
-
-```bash
-# Run property-based balance conservation tests
-cargo test -p fluxora_stream --test balance_conservation -- --nocapture
-
-# High-coverage fuzz run
-PROPTEST_CASES=10000 cargo test -p fluxora_stream --test balance_conservation
-```
-
-- [ ] Property-based balance conservation tests pass
-- [ ] High-coverage fuzz run passes (PROPTEST_CASES=10000)
-
-### 15.3 Accrual Fuzz Harness
-
-```bash
-# Run the accrual fuzz harness with default case count
-cargo test -p fluxora_stream accrual_fuzz
-
-# High-coverage fuzz run
-PROPTEST_CASES=10000 cargo test -p fluxora_stream accrual_fuzz
-```
-
-- [ ] Accrual fuzz harness passes
-- [ ] High-coverage fuzz run passes
-
-### 15.4 WASM Reproducibility
-
-```bash
-# Build and verify WASM checksums
-bash script/verify-wasm-checksum.sh
-```
-
-- [ ] WASM build is reproducible (checksums match committed references)
-- [ ] If source changed, `bash script/update-wasm-checksums.sh` has been run and
-      `wasm/checksums.sha256` is committed
-
-### 15.5 WASM Size Budget
-
-```bash
-# Check WASM size budgets
-bash script/check-wasm-size.sh
-```
-
-- [ ] All contracts stay within their WASM size budgets (see `docs/gas.md`)
-- [ ] Any budget increase is justified in the PR description per `docs/gas.md` policy
-
-### 15.6 Gas Regression Baselines
-
-```bash
-# Validate gas baselines
-cargo test -p fluxora_stream gas_regression -- --nocapture 2>&1 | grep GAS_MEASUREMENT
-```
-
-- [ ] Gas regression tests pass; no unplanned baseline increases
-- [ ] Any intentional baseline increase is documented in `docs/gas.md` with
-      explicit justification
-
-### 15.7 Comprehensive Security Checklist
-
-- [ ] The comprehensive security checklist in `docs/security.md` (§Comprehensive
-      Security Checklist) has been reviewed
-- [ ] Every item in the checklist has a status (✅ Test, ✅ Doc, ⚠️ Manual, 🔒 Accepted)
-- [ ] Any new entrypoint added since the last release appears in the checklist
-- [ ] Any new error code variant is documented in `docs/error.md`
-
-### 15.8 Changelog and Version
-
-- [ ] `CHANGELOG.md` has an entry for the release with migration notes
-- [ ] `CONTRACT_VERSION` has been incremented if any breaking change was made
-      (see §4.1 for what counts as breaking)
-- [ ] `CONTRACT_VERSION` doc comment in `lib.rs` has a version-history entry
-- [ ] `docs/ABI_STABILITY.md` is updated if entrypoints, errors, events, or
-      DataKey variants changed
-- [ ] `docs/upgrade.md` is updated with migration guidance
-
-### 15.9 Deployment Readiness
-
-- [ ] Mainnet deployment checklist (`docs/mainnet-deployment-checklist-alignment.md`)
-      has been reviewed and all items verified
-- [ ] Deployment roles (deployer, bootstrap admin, token contract) are confirmed
-- [ ] Admin key is secured (hardware wallet or MPC)
-- [ ] Token address is confirmed correct (SEP-41 compliance verified)
+A deployed contract whose on-chain bytecode hash does not match `wasm/checksums.sha256`
+should be treated as unverified until the discrepancy is explained.
 
 ---
 
