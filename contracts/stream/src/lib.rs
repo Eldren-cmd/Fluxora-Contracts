@@ -1091,6 +1091,10 @@ pub struct Stream {
     /// If true, the stream is decommissioned and restricted to cancel-or-no-op.
     /// Defaults to false (None) for backward compatibility with existing streams.
     pub decommissioned: Option<bool>,
+    /// Ledger timestamp when the stream was last paused (0 if not paused).
+    pub paused_at_timestamp: u64,
+    /// Total seconds the stream has been in Paused state across all pause cycles.
+    pub cumulative_paused_duration: u64,
 }
 
 /// Pagination result for recipient stream listing
@@ -2331,6 +2335,9 @@ impl FluxoraStream {
             witness,
             delegation_depth: 0,
             parent_stream_id: None,
+            decommissioned: None,
+            paused_at_timestamp: 0,
+            cumulative_paused_duration: 0,
         };
 
         save_stream(env, &stream);
@@ -2429,6 +2436,9 @@ impl FluxoraStream {
             witness,
             delegation_depth: 0,
             parent_stream_id: None,
+            decommissioned: None,
+            paused_at_timestamp: 0,
+            cumulative_paused_duration: 0,
         };
 
         save_stream(env, &stream);
@@ -3004,6 +3014,8 @@ impl FluxoraStream {
             parent_stream_id: None,
             is_pooled: Some(true),
             decommissioned: None,
+            paused_at_timestamp: 0,
+            cumulative_paused_duration: 0,
         };
 
         save_stream(&env, &stream);
@@ -3541,6 +3553,7 @@ impl FluxoraStream {
         let previous_status = stream.status;
         stream.status = StreamStatus::Paused;
         stream.last_pause_toggle_ledger = current_ledger;
+        stream.paused_at_timestamp = env.ledger().timestamp();
         save_stream(&env, &stream);
         reconcile_paused_stream_count(&env, previous_status, stream.status);
 
@@ -3611,6 +3624,12 @@ impl FluxoraStream {
         }
 
         let previous_status = stream.status;
+        let paused_duration = env.ledger().timestamp().saturating_sub(stream.paused_at_timestamp);
+        stream.cumulative_paused_duration = stream
+            .cumulative_paused_duration
+            .checked_add(paused_duration)
+            .ok_or(ContractError::ArithmeticOverflow)?;
+        stream.paused_at_timestamp = 0;
         stream.status = StreamStatus::Active;
         stream.last_pause_toggle_ledger = current_ledger;
         save_stream(&env, &stream);
@@ -5008,6 +5027,27 @@ impl FluxoraStream {
     ///   - `Cancelled`: Terminated early, unstreamed tokens refunded, terminal state
     pub fn get_stream_state(env: Env, stream_id: u64) -> Result<Stream, ContractError> {
         load_stream(&env, stream_id)
+    }
+
+    /// Returns the total duration (in seconds) the stream has been in Paused state.
+    ///
+    /// This includes all past pause cycles. If the stream is currently paused,
+    /// the ongoing pause duration is included in the returned value.
+    ///
+    /// # Parameters
+    /// - `stream_id`: Unique identifier of the stream.
+    ///
+    /// # Returns
+    /// Total paused duration in seconds.
+    pub fn get_paused_duration(env: Env, stream_id: u64) -> Result<u64, ContractError> {
+        let stream = load_stream(&env, stream_id)?;
+        let total = if stream.status == StreamStatus::Paused {
+            let current = env.ledger().timestamp().saturating_sub(stream.paused_at_timestamp);
+            stream.cumulative_paused_duration.saturating_add(current)
+        } else {
+            stream.cumulative_paused_duration
+        };
+        Ok(total)
     }
 
     /// Returns a structured health summary for a stream.
@@ -7237,6 +7277,7 @@ impl FluxoraStream {
         let previous_status = stream.status;
         stream.status = StreamStatus::Paused;
         stream.last_pause_toggle_ledger = current_ledger;
+        stream.paused_at_timestamp = env.ledger().timestamp();
         save_stream(&env, &stream);
         reconcile_paused_stream_count(&env, previous_status, stream.status);
 
@@ -7313,6 +7354,12 @@ impl FluxoraStream {
         }
 
         let previous_status = stream.status;
+        let paused_duration = env.ledger().timestamp().saturating_sub(stream.paused_at_timestamp);
+        stream.cumulative_paused_duration = stream
+            .cumulative_paused_duration
+            .checked_add(paused_duration)
+            .ok_or(ContractError::ArithmeticOverflow)?;
+        stream.paused_at_timestamp = 0;
         stream.status = StreamStatus::Active;
         stream.last_pause_toggle_ledger = current_ledger;
         save_stream(&env, &stream);
@@ -7398,10 +7445,17 @@ impl FluxoraStream {
         }
 
         // ── Phase 2: Apply resumes ───────────────────────────────────────────
+        let now = env.ledger().timestamp();
         for i in 0..n {
             let mut stream = streams.get(i).unwrap();
             let stream_id = stream.stream_id;
             let previous_status = stream.status;
+            let paused_duration = now.saturating_sub(stream.paused_at_timestamp);
+            stream.cumulative_paused_duration = stream
+                .cumulative_paused_duration
+                .checked_add(paused_duration)
+                .ok_or(ContractError::ArithmeticOverflow)?;
+            stream.paused_at_timestamp = 0;
             stream.status = StreamStatus::Active;
             stream.last_pause_toggle_ledger = current_ledger;
             save_stream(&env, &stream);
@@ -8985,6 +9039,8 @@ impl FluxoraStream {
             delegation_depth: 0,
             parent_stream_id: None,
             decommissioned: None,
+            paused_at_timestamp: 0,
+            cumulative_paused_duration: 0,
         };
 
         save_stream(&env, &stream);
