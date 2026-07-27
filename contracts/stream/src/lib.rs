@@ -761,6 +761,15 @@ pub struct SenderTransferred {
     pub new_sender: Address,
 }
 
+/// Emitted when a stream's claim ownership is transferred.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClaimOwnershipTransferred {
+    pub stream_id: u64,
+    pub old_owner: Option<Address>,
+    pub new_owner: Address,
+}
+
 /// Emitted when a stream's funding health status transitions between
 /// adequately funded and underfunded states.
 ///
@@ -2166,6 +2175,9 @@ const KEEPER_FEE_BPS: u32 = 50;
 /// Maximum number of rotation entries stored in a per-stream history.
 const MAX_ROTATION_HISTORY: u32 = 50;
 
+/// Maximum number of recipients allowed in a single pooled stream.
+pub const MAX_POOL_RECIPIENTS: u32 = 100;
+
 // ---------------------------------------------------------------------------
 // Internal Helpers
 // ---------------------------------------------------------------------------
@@ -2268,6 +2280,8 @@ impl FluxoraStream {
         memo: Option<soroban_sdk::Bytes>,
         kind: StreamKind,
         metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
+        irrevocable: Option<bool>,
+        witness: Option<Address>,
     ) -> Result<u64, ContractError> {
         // Validate memo length before allocating a stream ID.
         if let Some(ref m) = memo {
@@ -2364,6 +2378,8 @@ impl FluxoraStream {
         memo: Option<soroban_sdk::Bytes>,
         kind: StreamKind,
         metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
+        irrevocable: Option<bool>,
+        witness: Option<Address>,
     ) -> Result<u64, ContractError> {
         if let Some(ref m) = memo {
             if m.len() as usize > MAX_MEMO_BYTES {
@@ -3104,6 +3120,8 @@ impl FluxoraStream {
                 params.memo.clone(),
                 params.kind,
                 params.metadata.clone(),
+                params.irrevocable,
+                params.witness.clone(),
             )?;
             created_ids.push_back(stream_id);
 
@@ -3341,6 +3359,8 @@ impl FluxoraStream {
                 params.memo.clone(),
                 params.kind,
                 params.metadata.clone(),
+                params.irrevocable,
+                params.witness.clone(),
             );
 
             match stream_id {
@@ -8242,6 +8262,8 @@ impl FluxoraStream {
             source.memo.clone(),
             source.kind,
             source.metadata.clone(),
+            source.irrevocable,
+            source.witness.clone(),
         )?;
 
         // ── 9. Emit clone-specific event for indexer correlation ──────────────
