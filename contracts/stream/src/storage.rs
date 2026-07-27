@@ -569,8 +569,9 @@ pub(crate) fn maybe_emit_health_changed(
 ) {
     let (is_underfunded, remaining_balance, seconds_remaining) = compute_stream_health(stream, now);
     if is_underfunded != was_underfunded {
-        env.events().publish(
-            (soroban_sdk::symbol_short!("hlth_chg"), stream.stream_id),
+        events::emit_stream_health_changed(
+            env,
+            stream.stream_id,
             StreamHealthChanged {
                 stream_id: stream.stream_id,
                 is_underfunded,
