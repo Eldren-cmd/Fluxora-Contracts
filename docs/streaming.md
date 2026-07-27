@@ -41,21 +41,25 @@ project codes, and external reference URIs.
 
 #### API Entrypoints & Types
 
-| Entrypoint                       | Description                                                         |
-|----------------------------------|---------------------------------------------------------------------|
-| `create_stream(…, metadata)`     | Pass `Some(map)` to attach metadata at creation, or `None` to omit. |
-| `get_stream_metadata(stream_id)` | Returns `Option<Map<Bytes, Bytes>>`. Permissionless read.           |
+| Entrypoint / Struct | Description |
+|---|---|
+| `create_stream(…, metadata)` | Pass `Some(map)` to attach metadata at creation, or `None` to omit. |
+| `get_stream_metadata(stream_id)` | Permissionless read: returns `Option<Map<Bytes, Bytes>>`. Returns `ContractError::StreamNotFound` for invalid IDs. |
+| `CreateStreamParams.metadata` | Field on batch entrypoint params struct (`create_streams`, `create_streams_partial`). |
+| `CreateStreamRelativeParams.metadata` | Field on relative batch entrypoint params struct (`create_streams_relative`). |
+| `create_stream_from_template(…, metadata)` | Attaches caller-supplied metadata when instantiating a schedule template. |
+| `StreamCreated.metadata` | Emitted in the `StreamCreated` event for off-chain indexer consumption. |
 
 #### Size Bounds & Validation Fail-Fast Rules
 
 Validation is executed via `validate_metadata()` at creation time before any state or counter mutation. Any violation immediately reverts the call with `ContractError::MetadataTooLarge` (code 32).
 
-| Bound                                       | Constant                   | Value |
-|---------------------------------------------|----------------------------|-------|
-| Maximum key-value pair count                | `MAX_METADATA_KEYS`        | 8     |
-| Maximum aggregate (all keys + values) bytes | `MAX_METADATA_BYTES`       | 512   |
-| Maximum single key length                   | `MAX_METADATA_KEY_BYTES`   | 32    |
-| Maximum single value length                 | `MAX_METADATA_VALUE_BYTES` | 128   |
+| Bound | Constant | Value | Enforcement Rule |
+|---|---|---|---|
+| Maximum key-value pair count | `MAX_METADATA_KEYS` | 8 | `metadata.len() <= 8` |
+| Maximum single key length | `MAX_METADATA_KEY_BYTES` | 32 | `key.len() <= 32` |
+| Maximum single value length | `MAX_METADATA_VALUE_BYTES` | 128 | `value.len() <= 128` |
+| Maximum aggregate byte size | `MAX_METADATA_BYTES` | 512 | `sum(key.len() + val.len()) <= 512` |
 
 ##### Fail-Fast & Validation Sequence
 1. Check key count: `metadata.len() <= 8`.
@@ -81,31 +85,6 @@ Validation is executed via `validate_metadata()` at creation time before any sta
 - **Storage Key**: Stored as part of the `Stream` struct under `DataKey::Stream(u64)` in persistent storage with standard threshold TTL bumps.
 - **WASM Upgrade Safety**: Pre-v4 streams stored prior to metadata support deserialize cleanly with `metadata: None`. Upgrading contract WASM is fully backward compatible.
 - **Gas Impact**: Bounded at 8 keys / 512 aggregate bytes to ensure negligible CPU and storage footprint overhead during stream creation and queries.
-
-#### Compatibility rules (which operations preserve metadata)
-
-Metadata is written once at stream creation and **never mutated** by any subsequent
-operation. The table below documents which entry-points preserve the metadata map
-and which are unaffected (metadata is not read or written):
-
-| Operation | Metadata behavior |
-|---|---|
-| `pause_stream` / `resume_stream` | Unchanged — metadata is not read or written. |
-| `cancel_stream` | Unchanged — metadata persists in storage for post-terminal queries. |
-| `withdraw` / `batch_withdraw` | Unchanged — withdrawal only touches `withdrawn_amount`. |
-| `top_up_stream` | Unchanged — only `deposit_amount` is modified. |
-| `update_rate_per_second` / `decrease_rate_per_second` | Unchanged — rate fields are modified; metadata is untouched. |
-| `extend_stream_end_time` | Unchanged — `end_time` and `deposit_amount` are modified. |
-| `shorten_stream_end_time` | Unchanged — schedule fields modified; metadata untouched. |
-| `create_stream_offer` | **Set on offer** — validated and stored on pending offer. |
-| `accept_stream_offer` | **Copied** — offer metadata becomes stream metadata. |
-| `reject_stream_offer` / `cancel_stream_offer` | Unaffected — no stream created. |
-| `set_auto_renew` / `get_auto_renew` | Unchanged — auto-renew flag only. |
-| `transfer_sender` | Unchanged — only the `sender` field is rotated. |
-| `update_recipient` | Unchanged — only the `recipient` field is rotated. |
-| `delegate_recipient_share` | Unchanged — delegation splits the rate, not metadata. |
-| `clone_stream` | **Inherited** — the cloned stream receives `source.metadata.clone()`. |
-| `create_stream_from_template` | **Passed through** — caller-supplied metadata is validated and stored. |
 
 #### Example (Rust client)
 

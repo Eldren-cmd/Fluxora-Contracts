@@ -1901,6 +1901,11 @@ impl FluxoraStream {
             storage::validate_metadata(meta)?;
         }
 
+        // Validate metadata if present (fail-before-allocate).
+        if let Some(ref meta) = metadata {
+            storage::validate_metadata(meta)?;
+        }
+
         let stream_id = next_stream_id_for(env, &sender);
 
         let stream = Stream {
@@ -1921,6 +1926,8 @@ impl FluxoraStream {
             withdraw_dust_threshold,
             last_pause_toggle_ledger: 0,
             last_withdraw_ledger: 0,
+            metadata: metadata.clone(),
+            witness: witness.clone(),
             last_rate_change_ledger: 0,
             is_pooled: None,
             metadata: metadata.clone(),
@@ -2021,6 +2028,8 @@ impl FluxoraStream {
             withdraw_dust_threshold,
             last_pause_toggle_ledger: 0,
             last_withdraw_ledger: 0,
+            metadata: metadata.clone(),
+            witness: witness.clone(),
             last_rate_change_ledger: 0,
             is_pooled: None,
             metadata: metadata.clone(),
@@ -2298,7 +2307,7 @@ impl FluxoraStream {
         metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
         irrevocable: Option<bool>,
         witness: Option<Address>,
-        max_lookback_ledgers: Option<u32>,
+        metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
     ) -> Result<u64, ContractError> {
         sender.require_auth();
         require_not_creation_paused(&env)?;
@@ -2342,74 +2351,7 @@ impl FluxoraStream {
             metadata,
             irrevocable,
             witness,
-        )?;
-
-        if max_lookback_ledgers.is_some() {
-            set_max_lookback_ledgers(&env, stream_id, max_lookback_ledgers)?;
-        }
-
-        Ok(stream_id)
-    }
-
-    /// Create a new payment stream with an optional per-stream lookback window.
-    ///
-    /// Identical to [`create_stream`] in every respect except that
-    /// `max_lookback_ledgers` is written atomically with stream creation so
-    /// the bound is active from the very first withdrawal call.
-    ///
-    /// # Parameters
-    /// - `sender`               : Address funding the stream (must authorize).
-    /// - `params`               : Full `CreateStreamParams` (same as `create_stream`).
-    /// - `max_lookback_ledgers` : Optional lookback cap.
-    ///   - `None`    – no bound; behaviour is identical to `create_stream`.
-    ///   - `Some(n)` – each single claim is capped to accrual earned during
-    ///                 the most recent `n` ledgers. Older unclaimed accrual
-    ///                 remains accessible in subsequent windows.
-    ///   - `Some(0)` – rejected with `ContractError::InvalidParams`.
-    ///
-    /// # Accrual vs. claimability distinction
-    /// `calculate_accrued` always returns the total lifetime entitlement and
-    /// is never affected by this setting. Only the per-call payout reported by
-    /// `get_withdrawable`, `get_claimable_at`, and the `withdraw*` family is
-    /// bounded.
-    ///
-    /// # No permanent loss guarantee
-    /// The cap limits *velocity*, not *total entitlement*. Repeated calls
-    /// across successive lookback windows eventually recover 100% of the
-    /// accrued amount; see `docs/streaming.md §Lookback-bounded withdrawals`
-    /// for the proof sketch.
-    ///
-    /// # CliffOnly bypass
-    /// `CliffOnly` streams bypass the cap once the cliff has elapsed so a
-    /// recipient whose first query arrives after `cliff_time + window_size`
-    /// does not permanently strand funds.
-    ///
-    /// # Errors
-    /// Same as `create_stream`, plus:
-    /// - `ContractError::InvalidParams` (3) when `max_lookback_ledgers == Some(0)`.
-    pub fn create_stream_with_lookback(
-        env: Env,
-        sender: Address,
-        params: CreateStreamParams,
-        max_lookback_ledgers: Option<u32>,
-    ) -> Result<u64, ContractError> {
-        let withdraw_dust_threshold = params.withdraw_dust_threshold.unwrap_or(0);
-        Self::create_stream_internal(
-            env,
-            sender,
-            params.recipient,
-            params.deposit_amount,
-            params.rate_per_second,
-            params.start_time,
-            params.cliff_time,
-            params.end_time,
-            withdraw_dust_threshold,
-            params.memo,
-            params.kind,
-            params.metadata,
-            params.irrevocable,
-            params.witness,
-            max_lookback_ledgers,
+            metadata,
         )
     }
 
@@ -3120,7 +3062,8 @@ impl FluxoraStream {
                 params.kind,
                 params.metadata.clone(),
                 params.irrevocable,
-                params.witness.clone(),
+                params.witness,
+                params.metadata,
             );
 
             match stream_id {
@@ -5789,9 +5732,9 @@ impl FluxoraStream {
             stream.withdraw_dust_threshold,
             stream.memo.clone(),
             stream.kind,
-            stream.metadata.clone(),
             stream.irrevocable,
             stream.witness.clone(),
+            stream.metadata.clone(),
         )?;
         set_auto_renew_enabled(&env, new_stream_id, true);
 

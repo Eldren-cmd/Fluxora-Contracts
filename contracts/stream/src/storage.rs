@@ -835,20 +835,25 @@ pub fn push_token(env: &Env, to: &Address, amount: i128) -> Result<(), ContractE
 
 /// Validate a per-stream metadata map against all size bounds.
 ///
-/// Called from stream creation paths (`persist_new_stream`, offer creation, etc.)
-/// **before** any stream ID is allocated or tokens are transferred. A violation
-/// therefore never leaves partial state.
+/// Called from `persist_new_stream` / `persist_new_stream_skip_index` before any
+/// state is written, so a violation never allocates a stream ID or transfers tokens.
 ///
-/// # Validation order
-/// 1. Key count `<= MAX_METADATA_KEYS` (8)
-/// 2. Per entry: key length `<= MAX_METADATA_KEY_BYTES` (32)
-/// 3. Per entry: value length `<= MAX_METADATA_VALUE_BYTES` (128)
-/// 4. Running sum of all key + value bytes `<= MAX_METADATA_BYTES` (512)
+/// # Validation Sequence & Fail-Fast Order
+/// 1. Key count check: `metadata.len() <= MAX_METADATA_KEYS` (8)
+/// 2. Iterative key & value bound checks:
+///    - `key.len() <= MAX_METADATA_KEY_BYTES` (32)
+///    - `value.len() <= MAX_METADATA_VALUE_BYTES` (128)
+/// 3. Checked aggregate byte total accumulation:
+///    - `total_bytes = total_bytes + key.len() + value.len()`
+///    - Returns `ContractError::MetadataTooLarge` on arithmetic overflow or if `total_bytes > MAX_METADATA_BYTES` (512)
 ///
-/// # Immutability
-/// Metadata validated here is stored on the `Stream` struct and is never modified
-/// by subsequent operations. See [`docs/metadata-extension.md`](../../../docs/metadata-extension.md)
-/// for the full operation compatibility matrix.
+/// # Edge Case & Compatibility Semantics
+/// - **Deduplication**: `soroban_sdk::Map` enforces unique keys. Duplicate key insertions overwrite
+///   prior values, so `metadata.len()` reflects unique keys and `total_bytes` reflects unique pair total.
+/// - **Zero-Length Entries**: Empty keys (`b""`) and empty values (`b""`) are syntactically valid
+///   and pass validation provided total bounds are met.
+/// - **Fail-Before-Allocate**: Validation executes before `read_stream_count` / `set_stream_count`
+///   and before `pull_token`, guaranteeing fail-fast security without side effects.
 ///
 /// # Errors
 /// Returns [`ContractError::MetadataTooLarge`] on any bound violation.
