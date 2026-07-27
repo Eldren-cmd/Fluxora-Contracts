@@ -173,3 +173,14 @@ pub(crate) fn emit_keeper_cancelled(env: &Env, stream_id: u64, payload: KeeperCa
     env.events()
         .publish((symbol_short!("kp_cncl"), stream_id), payload);
 }
+
+/// Emit the `decomm` event when a stream's decommissioned state is set.
+pub(crate) fn emit_stream_decommissioned(env: &Env, stream_id: u64, decommissioned: bool) {
+    env.events().publish(
+        (symbol_short!("decomm"), stream_id),
+        StreamDecommissioned {
+            stream_id,
+            decommissioned,
+        },
+    );
+}

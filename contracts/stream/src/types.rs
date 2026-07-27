@@ -494,6 +494,17 @@ pub struct Stream {
     /// Ledger sequence number of the last rate change (or creation).
     /// Used to enforce MIN_RATE_INTERVAL_LEDGERS cooldown.
     pub last_rate_change_ledger: u32,
+    /// If true, the stream is decommissioned and restricted to cancel-or-no-op.
+    /// Defaults to false (None) for backward compatibility with existing streams.
+    pub decommissioned: Option<bool>,
+}
+
+/// Event payload emitted when a stream's decommissioned status is updated.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StreamDecommissioned {
+    pub stream_id: u64,
+    pub decommissioned: bool,
 }
 
 /// Pagination result for recipient stream listing

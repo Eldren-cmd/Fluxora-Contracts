@@ -1088,6 +1088,9 @@ pub struct Stream {
     /// Parent stream id when this stream is a delegated child of another stream.
     /// `None` for root streams.
     pub parent_stream_id: Option<u64>,
+    /// If true, the stream is decommissioned and restricted to cancel-or-no-op.
+    /// Defaults to false (None) for backward compatibility with existing streams.
+    pub decommissioned: Option<bool>,
 }
 
 /// Pagination result for recipient stream listing
@@ -2905,6 +2908,7 @@ impl FluxoraStream {
             delegation_depth: 0,
             parent_stream_id: None,
             is_pooled: Some(true),
+            decommissioned: None,
         };
 
         save_stream(&env, &stream);
@@ -5085,6 +5089,10 @@ impl FluxoraStream {
         require_not_globally_paused(&env)?;
         let mut stream = load_stream(&env, stream_id)?;
 
+        if stream.decommissioned.unwrap_or(false) {
+            return Err(ContractError::InvalidState);
+        }
+
         if stream.kind != StreamKind::Linear {
             return Err(ContractError::UnsupportedStreamKind);
         }
@@ -5223,6 +5231,10 @@ impl FluxoraStream {
     ) -> Result<(), ContractError> {
         require_not_globally_paused(&env)?;
         let mut stream = load_stream(&env, stream_id)?;
+
+        if stream.decommissioned.unwrap_or(false) {
+            return Err(ContractError::InvalidState);
+        }
 
         if stream.kind != StreamKind::Linear {
             return Err(ContractError::UnsupportedStreamKind);
@@ -5646,6 +5658,10 @@ impl FluxoraStream {
         require_not_globally_paused(&env)?;
         let mut stream = load_stream(&env, stream_id)?;
 
+        if stream.decommissioned.unwrap_or(false) {
+            return Err(ContractError::InvalidState);
+        }
+
         if stream.kind != StreamKind::Linear {
             return Err(ContractError::UnsupportedStreamKind);
         }
@@ -5755,6 +5771,10 @@ impl FluxoraStream {
 
         let stream = load_stream(&env, stream_id)?;
 
+        if stream.decommissioned.unwrap_or(false) {
+            return Err(ContractError::InvalidState);
+        }
+
         if stream.kind != StreamKind::Linear {
             return Err(ContractError::UnsupportedStreamKind);
         }
@@ -5810,6 +5830,55 @@ impl FluxoraStream {
                 new_end_time,
             },
         );
+        Ok(())
+    }
+
+    /// Flag a stream for wind-down or clear its decommissioned status.
+    ///
+    /// When `decommissioned == true`, mutation entrypoints (`update_rate_per_second`,
+    /// `decrease_rate_per_second`, `top_up_stream`, `extend_stream_end_time`, and
+    /// `clone_stream`) are blocked, returning `ContractError::InvalidState`.
+    /// Withdrawals, pause/resume, and cancellation remain fully functional.
+    ///
+    /// # Authorization
+    /// - Requires authorization from the stream's original sender.
+    ///
+    /// # Reversibility & Irrevocable Precedence
+    /// - Setting `decommissioned` to `false` reverses decommission mode, unless the
+    ///   stream is marked `irrevocable` (`irrevocable == Some(true)`), in which case
+    ///   reversal is blocked and returns `ContractError::Unauthorized`.
+    ///
+    /// # Errors
+    /// - `StreamNotFound` if the stream does not exist.
+    /// - `Unauthorized` if the caller is not the sender or if reversal is attempted on an irrevocable stream.
+    /// - `InvalidState` if the stream is terminal (`Completed` or `Cancelled`).
+    pub fn set_stream_decommissioned(
+        env: Env,
+        stream_id: u64,
+        sender: Address,
+        decommissioned: bool,
+    ) -> Result<(), ContractError> {
+        require_not_globally_paused(&env)?;
+        let mut stream = load_stream(&env, stream_id)?;
+
+        sender.require_auth();
+        if stream.sender != sender {
+            return Err(ContractError::Unauthorized);
+        }
+
+        if stream.status == StreamStatus::Completed || stream.status == StreamStatus::Cancelled {
+            return Err(ContractError::InvalidState);
+        }
+
+        if !decommissioned && stream.irrevocable.unwrap_or(false) {
+            return Err(ContractError::Unauthorized);
+        }
+
+        stream.decommissioned = Some(decommissioned);
+        save_stream(&env, &stream);
+
+        events::emit_stream_decommissioned(&env, stream_id, decommissioned);
+
         Ok(())
     }
 
@@ -8110,6 +8179,10 @@ impl FluxoraStream {
         // ── 2. Load source stream ─────────────────────────────────────────────
         let source = load_stream(&env, stream_id)?;
 
+        if source.decommissioned.unwrap_or(false) {
+            return Err(ContractError::InvalidState);
+        }
+
         // ── 2.1. Status guard ─────────────────────────────────────────────────
         // Reject cloning from a terminal-state source (Cancelled or Completed).
         if source.status == StreamStatus::Cancelled || source.status == StreamStatus::Completed {
@@ -8806,6 +8879,7 @@ impl FluxoraStream {
             is_pooled: None,
             delegation_depth: 0,
             parent_stream_id: None,
+            decommissioned: None,
         };
 
         save_stream(&env, &stream);
