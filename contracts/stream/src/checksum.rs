@@ -15,7 +15,7 @@
 //! The following invariants must hold for a build to be reproducible:
 //!
 //! 1. **Rust toolchain** is pinned via `rust-toolchain.toml` to a specific
-//!    channel (`stable`) and target set (`wasm32-unknown-unknown`).
+//!    channel (`1.94.1`) and target set (`wasm32-unknown-unknown`).
 //! 2. **soroban-sdk** version is pinned in `contracts/stream/Cargo.toml`
 //!    (currently `21.7.7`).
 //! 3. **Build profile** is `--release` with `wasm32-unknown-unknown` target.
@@ -372,5 +372,32 @@ mod tests {
     fn stream_struct_has_21_fields_with_is_pooled_and_irrevocable() {
         const TOTAL_STREAM_FIELDS: usize = 21;
         assert_eq!(TOTAL_STREAM_FIELDS, 21);
+    }
+
+    /// Verify the doc-comment's toolchain channel matches `rust-toolchain.toml`.
+    /// This prevents doc drift: if someone bumps the pinned version in the
+    /// toolchain file, this test will fail until the doc-comment is updated too.
+    #[test]
+    fn doc_comment_toolchain_channel_matches_rust_toolchain_toml() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let toolchain_path =
+            std::path::Path::new(manifest_dir).join("../../rust-toolchain.toml");
+        let content = std::fs::read_to_string(&toolchain_path)
+            .expect("failed to read rust-toolchain.toml");
+        let expected_channel = content
+            .lines()
+            .find_map(|line| {
+                let line = line.trim();
+                line.strip_prefix("channel")
+                    .and_then(|rest| rest.strip_prefix('='))
+                    .map(|rest| rest.trim().trim_matches('"').to_string())
+            })
+            .expect("no channel found in rust-toolchain.toml");
+        assert!(
+            include_str!("checksum.rs").contains(&expected_channel),
+            "doc-comment toolchain channel drift: checksum.rs does not mention \
+             the current pinned channel ({})",
+            expected_channel
+        );
     }
 }
