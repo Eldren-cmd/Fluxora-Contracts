@@ -237,15 +237,20 @@ fn lookback_caps_each_claim_without_reducing_lifetime_accrual() {
         .client
         .create_stream_with_lookback(
             &ctx.sender,
-            &ctx.recipient,
-            &1000,
-            &1,
-            &0,
-            &0,
-            &1000,
-            &0,
-            &None,
-            &StreamKind::Linear,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 1000,
+                rate_per_second: 1,
+                start_time: 0,
+                cliff_time: 0,
+                end_time: 1000,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
             &Some(10_u32),
         )
         .unwrap();
@@ -763,15 +768,20 @@ fn create_stream_with_lookback_for(ctx: &TestContext, lookback: Option<u32>) -> 
     ctx.client
         .create_stream_with_lookback(
             &ctx.sender,
-            &ctx.recipient,
-            &1000,
-            &1, // 1 token per second
-            &0,
-            &0,
-            &1000,
-            &0,
-            &None,
-            &StreamKind::Linear,
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 1000,
+                rate_per_second: 1,
+                start_time: 0,
+                cliff_time: 0,
+                end_time: 1000,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
             &lookback,
         )
         .unwrap()
@@ -961,16 +971,21 @@ fn lookback_cliff_only_full_claim_after_cliff() {
         .client
         .create_stream_with_lookback(
             &ctx.sender,
-            &ctx.recipient,
-            &1000,
-            &0, // CliffOnly enforces rate=0
-            &0,
-            &500, // cliff at 500 s
-            &1000,
-            &0,
-            &None,
-            &StreamKind::CliffOnly,
-            &Some(10), // 50 s window — would otherwise cap at 0 before cliff
+            &CreateStreamParams {
+                recipient: ctx.recipient.clone(),
+                deposit_amount: 1000,
+                rate_per_second: 0, // CliffOnly enforces rate=0
+                start_time: 0,
+                cliff_time: 500, // cliff at 500 s
+                end_time: 1000,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: StreamKind::CliffOnly,
+                irrevocable: None,
+                witness: None,
+            },
+            &Some(10),
         )
         .unwrap();
 

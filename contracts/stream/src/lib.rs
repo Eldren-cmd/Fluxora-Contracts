@@ -15,8 +15,17 @@ pub use types::{ClaimOwnershipTransferred, CreateStreamRelativeParams, MAX_POOL_
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env, Map};
 pub use storage::*;
 use token_check::verify_token_behavior;
-pub use reject_duplicate_ids;
-// conflict resolved by Hermes agent on 2026-07-26
+
+pub fn reject_duplicate_ids(env: &Env, ids: &soroban_sdk::Vec<u64>) -> Result<(), ContractError> {
+    let mut seen = soroban_sdk::Map::new(env);
+    for id in ids.iter() {
+        if seen.contains_key(&id) {
+            return Err(ContractError::DuplicateStreamId);
+        }
+        seen.set(id, ());
+    }
+    Ok(())
+}
 
 // ---------------------------------------------------------------------------
 // TTL constants
@@ -4227,7 +4236,6 @@ impl FluxoraStream {
         recipient.require_auth();
 
         // --- Batch validation: reject duplicate stream IDs (O(n)) ---
-        // Extract stream IDs from WithdrawToParam structs
         let mut stream_ids = soroban_sdk::Vec::new(&env);
         for param in withdrawals.iter() {
             stream_ids.push_back(param.stream_id);
@@ -4248,7 +4256,6 @@ impl FluxoraStream {
         let mut results = soroban_sdk::Vec::new(&env);
 
         // Cache ledger timestamp once — it is constant within a single transaction.
-        // Avoids a redundant host-function call on every loop iteration (#515).
         let now = current_accrual_timestamp(&env)?;
 
         for param in withdrawals.iter() {
@@ -4263,9 +4270,6 @@ impl FluxoraStream {
             }
 
             let current_ledger = env.ledger().sequence();
-            // Enforce withdrawal frequency limit per stream in the batch.
-            // Each stream must respect its own last_withdraw_ledger independently.
-            // Use saturating_sub to prevent underflow from backward timestamp skew.
             if stream.last_withdraw_ledger != 0
                 && current_ledger.saturating_sub(stream.last_withdraw_ledger)
                     < MIN_WITHDRAW_INTERVAL_LEDGERS
@@ -4280,7 +4284,6 @@ impl FluxoraStream {
             let mut withdrawable = if stream.status == StreamStatus::Completed {
                 0
             } else {
-                // Use cached `now` instead of calling env.ledger().timestamp() per stream.
                 let effective_now = if stream.status == StreamStatus::Cancelled {
                     stream.cancelled_at.ok_or(ContractError::InvalidState)?
                 } else {
@@ -4310,7 +4313,7 @@ impl FluxoraStream {
             // Cap by running contract balance for safety
             withdrawable = withdrawable.min(contract_balance);
 
-            // Enforce dust threshold unless terminal state or final drain (#423)
+            // Enforce dust threshold unless terminal state or final drain
             if withdrawable > 0
                 && withdrawable < stream.withdraw_dust_threshold
                 && !is_terminal_state(&env, &stream)
