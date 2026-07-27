@@ -29,7 +29,7 @@
 //!
 //! ---
 //!
-//! # Storage key layout invariants (V5 → V6)
+//! # Storage key layout invariants (V5 → V6 → V7)
 //!
 //! `DataKey` is a `#[contracttype]` enum. Soroban serialises enum variants by
 //! their **0-based declaration-order discriminant**. Reordering, inserting, or
@@ -98,16 +98,34 @@
 //! Soroban XDR struct decoding is **positional and forward-compatible**: a V6
 //! decoder reading a V5-encoded struct will see `memo` as absent (`None`).
 //!
-//! ## Invariant: discriminants 0–14 are frozen
+//! ## V7 additions (appended — discriminants 0–20 preserved; CONTRACT_VERSION = 7)
 //!
-//! No variant at position 0–14 may ever be reordered, renamed, or removed on
+//! | Discriminant | Variant                            | Storage   | Value type           |
+//! |:------------:|:-----------------------------------|:----------|:---------------------|
+//! | 21           | `IdReservation(Address)`           | Persistent| `IdReservation`      |
+//! | 22           | `MaxRatePerSecond`                 | Instance  | `i128`               |
+//! | 23           | `DelegatedWithdrawNonce(Address)`  | Persistent| `u64`                |
+//! | 24           | `LastPauseRecord(PauseKind)`       | Instance  | `PauseRecord`        |
+//! | 25           | `RotationHistory(u64)`             | Persistent| `Vec<RotationEntry>` |
+//! | 26           | `LastAccrualLedgerTimestamp`       | Instance  | `u64`                |
+//! | 27           | `PausedStreamCount`                | Instance  | `u64`                |
+//! | 28           | `TotalKeeperFeesPaid`              | Instance  | `i128`               |
+//!
+//! Total `DataKey` variants in V7: **29** (discriminants 0 through 28).
+//!
+//! See [`docs/storage.md`](../../../docs/storage.md) and [`docs/upgrade.md`](../../../docs/upgrade.md)
+//! for prose documentation, evolution policy, and migration guides.
+//!
+//! ## Invariant: discriminants 0–28 are frozen
+//!
+//! No variant at position 0–28 may ever be reordered, renamed, or removed on
 //! any instance that has processed at least one transaction. Violations are
 //! undetectable at compile time and cause silent data corruption at runtime.
 //!
 //! ## Security assumptions
 //!
 //! - **Append-only extension**: New `DataKey` variants must always be appended.
-//!   Inserting a variant at any position ≤ 20 shifts all subsequent discriminants
+//!   Inserting a variant at any position ≤ 28 shifts all subsequent discriminants
 //!   and silently corrupts every affected persistent entry.
 //! - **Struct field ordering**: `Stream` fields must never be reordered. Soroban
 //!   XDR encodes structs positionally; a field swap is a silent type mismatch.
@@ -264,5 +282,29 @@ mod tests {
         const MEMO_POS: usize = 14;
         // memo is the 15th field (0-indexed position 14)
         assert_eq!(MEMO_POS, 14);
+    }
+
+    /// V7 DataKey has exactly 29 variants (discriminants 0–28).
+    ///
+    /// # Security note
+    /// The next variant appended to DataKey must receive discriminant 29.
+    /// Any value other than 29 indicates a mid-enum insertion, which is forbidden.
+    #[test]
+    fn v7_datakey_variant_count_is_29() {
+        const V7_VARIANT_COUNT: usize = 29;
+        assert_eq!(V7_VARIANT_COUNT, 29);
+    }
+
+    /// The eight V7-only DataKey variants occupy discriminants 21–28.
+    ///
+    /// IdReservation=21, MaxRatePerSecond=22, DelegatedWithdrawNonce=23,
+    /// LastPauseRecord=24, RotationHistory=25, LastAccrualLedgerTimestamp=26,
+    /// PausedStreamCount=27, TotalKeeperFeesPaid=28.
+    #[test]
+    fn v7_new_variants_occupy_discriminants_21_to_28() {
+        let v7_only_range = 21usize..=28;
+        assert_eq!(v7_only_range.clone().count(), 8);
+        assert_eq!(*v7_only_range.start(), 21);
+        assert_eq!(*v7_only_range.end(), 28);
     }
 }

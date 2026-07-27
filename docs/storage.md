@@ -13,38 +13,40 @@ All storage keys are defined in the `DataKey` enum:
 ```rust
 #[contracttype]
 pub enum DataKey {
-    Config,                    // Instance storage for global settings (admin/token).
-    NextStreamId,              // Instance storage for the auto-incrementing ID counter.
-    Stream(u64),               // Persistent storage for individual stream data (O(1) lookup).
-    RecipientStreams(Address), // Persistent storage for recipient stream index (sorted by stream_id).
-    PauseState,                // Instance storage: protocol-wide pause state (enum).
-    WithdrawNonce(Address),    // Persistent storage: per-recipient nonce for delegated-withdraw replay protection.
-    ReentrancyLock,            // Instance storage: reentrancy guard flag (bool).
+    Config,                    // 0: Instance storage for global settings (admin/token).
+    NextStreamId,              // 1: Instance storage for the auto-incrementing ID counter.
+    Stream(u64),               // 2: Persistent storage for individual stream data (O(1) lookup).
+    RecipientStreams(Address), // 3: Persistent storage for recipient stream index (sorted by stream_id).
+    GlobalEmergencyPaused,     // 4: Instance storage for emergency pause flag (DEPRECATED).
+    CreationPaused,            // 5: Instance storage for soft creation pause flag (DEPRECATED).
+    GlobalPauseReason,         // 6: Instance storage for protocol pause reason string.
+    GlobalPauseTimestamp,      // 7: Instance storage for protocol pause timestamp.
+    GlobalPauseAdmin,          // 8: Instance storage for protocol pause admin address.
+    AutoClaimDestination(u64), // 9: Persistent storage for auto-claim destination per stream.
+    NextTemplateId,            // 10: Instance storage for monotonic template ID counter.
+    ActiveTemplateCount,       // 11: Instance storage for active template count.
+    StreamTemplate(u64),       // 12: Persistent storage for registered relative schedule template.
+    OwnerTemplateIds(Address), // 13: Persistent storage for template IDs owned by an address.
+    TotalLiabilities,          // 14: Instance storage for sum of outstanding deposit liabilities.
+    WithdrawNonce(Address),    // 15: Persistent storage for per-recipient nonce counter.
+    PauseState,                // 16: Instance storage for current protocol-wide pause state enum.
+    ReentrancyLock,            // 17: Instance storage for reentrancy guard flag (bool).
+    RecipientStreamPage(Address, u32), // 18: Persistent storage for paged recipient stream index.
+    RecipientStreamPageCount(Address), // 19: Persistent storage for page count of recipient index.
+    PendingRecipientUpdate(u64),       // 20: Persistent storage for pending recipient update proposal.
+    IdReservation(Address),            // 21: Persistent storage for caller ID reservation.
+    MaxRatePerSecond,                  // 22: Instance storage for per-stream max rate cap.
+    DelegatedWithdrawNonce(Address),   // 23: Persistent storage for per-recipient delegated withdraw nonce.
+    LastPauseRecord(PauseKind),        // 24: Instance storage for last pause record.
+    RotationHistory(u64),              // 25: Persistent storage for recipient/sender rotation history.
+    LastAccrualLedgerTimestamp,        // 26: Instance storage for last accrual ledger timestamp.
+    PausedStreamCount,                 // 27: Instance storage for count of currently paused streams.
+    TotalKeeperFeesPaid,               // 28: Instance storage for aggregate sum of keeper fees paid.
 }
 ```
 
 > **Append-only rule**: new variants are always appended at the end to avoid shifting
 > existing discriminant values, which would corrupt live storage on mainnet.
-
-## Storage Types and Usage
-
-    Config,                    // discriminant 0 — instance
-    NextStreamId,              // discriminant 1 — instance
-    Stream(u64),               // discriminant 2 — persistent
-    RecipientStreams(Address), // discriminant 3 — persistent
-    GlobalEmergencyPaused,     // discriminant 4 — instance (DEPRECATED)
-    CreationPaused,            // discriminant 5 — instance (DEPRECATED)
-    GlobalPauseReason,         // discriminant 6 — instance
-    GlobalPauseTimestamp,      // discriminant 7 — instance
-    GlobalPauseAdmin,          // discriminant 8 — instance
-    AutoClaimDestination(u64), // discriminant 9 — persistent
-    StreamMemo(u64),           // discriminant 10 — persistent
-    PauseState,                // discriminant 11 — instance
-    ReentrancyLock,            // discriminant 12 — instance
-
-}
-
-````
 
 ### Current discriminant table
 
@@ -60,9 +62,25 @@ pub enum DataKey {
 | 7 | `GlobalPauseTimestamp` | Instance | `u64` | `pause_protocol` | `resume_protocol` (removes) |
 | 8 | `GlobalPauseAdmin` | Instance | `Address` | `pause_protocol` | `resume_protocol` (removes) |
 | 9 | `AutoClaimDestination(u64)` | Persistent | `Address` | auto-claim opt-in | auto-claim revoke |
-| 10 | `StreamMemo(u64)` | Persistent | `Bytes` (max 64 bytes) | `create_stream`, `create_streams` | `close_completed_stream` (removes) |
-| 11 | `PauseState` | Instance | `PauseState` enum | `set_global_emergency_paused`, `set_contract_paused`, `pause_protocol` | `resume_protocol` (Active) |
-| 12 | `ReentrancyLock` | Instance | `bool` | `acquire_reentrancy_lock` | `release_reentrancy_lock` |
+| 10 | `NextTemplateId` | Instance | `u64` | `init` (→ 0) | `create_template` |
+| 11 | `ActiveTemplateCount` | Instance | `u64` | `init` (→ 0) | `create_template`, `delete_template` |
+| 12 | `StreamTemplate(u64)` | Persistent | `StreamScheduleTemplate` | `create_template` | `delete_template` (removes) |
+| 13 | `OwnerTemplateIds(Address)` | Persistent | `Vec<u64>` | `create_template` | `delete_template` |
+| 14 | `TotalLiabilities` | Instance | `i128` | `init` (→ 0) | `create_stream`, `cancel_stream`, `withdraw` |
+| 15 | `WithdrawNonce(Address)` | Persistent | `u64` | `delegated_withdraw` | `delegated_withdraw` |
+| 16 | `PauseState` | Instance | `PauseState` enum | `set_global_emergency_paused`, `set_contract_paused`, `pause_protocol` | `resume_protocol` (Active) |
+| 17 | `ReentrancyLock` | Instance | `bool` | `acquire_reentrancy_lock` | `release_reentrancy_lock` |
+| 18 | `RecipientStreamPage(Address, u32)` | Persistent | `Vec<u64>` | `add_stream_to_recipient_index` | `remove_stream_from_recipient_index` |
+| 19 | `RecipientStreamPageCount(Address)` | Persistent | `u32` | `add_stream_to_recipient_index` | `remove_stream_from_recipient_index` |
+| 20 | `PendingRecipientUpdate(u64)` | Persistent | `Address` | `propose_recipient_update` | `accept_recipient_update`, `cancel_recipient_update` |
+| 21 | `IdReservation(Address)` | Persistent | `IdReservation` | `reserve_stream_ids` | `create_stream`, `cancel_reservation` |
+| 22 | `MaxRatePerSecond` | Instance | `i128` | `set_max_rate_per_second` | `set_max_rate_per_second` |
+| 23 | `DelegatedWithdrawNonce(Address)` | Persistent | `u64` | `delegated_withdraw` | `delegated_withdraw` |
+| 24 | `LastPauseRecord(PauseKind)` | Instance | `PauseRecord` | `pause_stream`, `pause_protocol` | `resume_stream`, `resume_protocol` |
+| 25 | `RotationHistory(u64)` | Persistent | `Vec<RotationEntry>` | `transfer_sender`, `accept_recipient_update` | rotation events |
+| 26 | `LastAccrualLedgerTimestamp` | Instance | `u64` | `current_accrual_timestamp` | `current_accrual_timestamp` |
+| 27 | `PausedStreamCount` | Instance | `u64` | `pause_stream`, `resume_stream`, `cancel_stream` | pause transitions |
+| 28 | `TotalKeeperFeesPaid` | Instance | `i128` | `init` (→ 0) | `keeper_cancel` |
 
 ---
 
@@ -291,9 +309,26 @@ V6 `Stream` struct adds one field at the end:
 | -------: | :----- | :-------------- | :--------------------------------------------------------------------- |
 |       14 | `memo` | `Option<Bytes>` | Optional indexer correlation memo (max 64 bytes); `None` in V5 entries |
 
+### V6 → V7 transition
+
+V7 appended eight new `DataKey` variants (discriminants 21–28) while preserving all prior discriminants 0–20:
+
+| Discriminant | Variant | Storage type | Value type | Notes |
+|---|---|---|---|---|
+| 21 | `IdReservation(Address)` | Persistent | `IdReservation` | Active caller ID reservation |
+| 22 | `MaxRatePerSecond` | Instance | `i128` | Per-stream max rate cap |
+| 23 | `DelegatedWithdrawNonce(Address)` | Persistent | `u64` | Per-recipient delegated withdraw nonce |
+| 24 | `LastPauseRecord(PauseKind)` | Instance | `PauseRecord` | Last pause record for stream or protocol pause |
+| 25 | `RotationHistory(u64)` | Persistent | `Vec<RotationEntry>` | Recipient/sender rotation audit trail |
+| 26 | `LastAccrualLedgerTimestamp` | Instance | `u64` | Last ledger timestamp for accrual clock regression detection |
+| 27 | `PausedStreamCount` | Instance | `u64` | Protocol-wide count of streams currently in `StreamStatus::Paused` |
+| 28 | `TotalKeeperFeesPaid` | Instance | `i128` | Aggregate keeper fees paid via `keeper_cancel` |
+
+Code-level invariant verification for all 29 variants is maintained in [`contracts/stream/src/checksum.rs`](../contracts/stream/src/checksum.rs).
+
 ### Forward-compatibility guarantee
 
-All V5 persistent `Stream` entries remain decodable on a V6 instance. Soroban XDR struct decoding is **positional and forward-compatible**: a V6 decoder reading a V5-encoded struct decodes the first 14 fields correctly and treats the absent 15th field as `None` (for `Option<Bytes>`).
+All V5 persistent `Stream` entries remain decodable on a V6/V7 instance. Soroban XDR struct decoding is **positional and forward-compatible**: a V6/V7 decoder reading a V5-encoded struct decodes the first 14 fields correctly and treats the absent 15th field as `None` (for `Option<Bytes>`).
 
 This guarantee holds **only** because:
 

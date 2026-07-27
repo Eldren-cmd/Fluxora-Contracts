@@ -185,7 +185,12 @@ const MIN_PAUSE_INTERVAL_LEDGERS: u32 = 17;
 /// resume/cancel/complete transitions; `get_paused_stream_count()` O(1) view added;
 /// duplicate `ContractError` discriminant 23 resolved and the previously-missing
 /// variants declared.
-pub const CONTRACT_VERSION: u32 = 6;
+///
+/// Bumped to 7: `DataKey` expanded to 29 variants (discriminants 21–28 added: `IdReservation`,
+/// `MaxRatePerSecond`, `DelegatedWithdrawNonce`, `LastPauseRecord`, `RotationHistory`,
+/// `LastAccrualLedgerTimestamp`, `PausedStreamCount`, `TotalKeeperFeesPaid`); reconciled
+/// CONTRACT_VERSION against docs/upgrade.md versioning policy for additive entrypoints and storage keys.
+pub const CONTRACT_VERSION: u32 = 7;
 
 // ---------------------------------------------------------------------------
 // Data types
