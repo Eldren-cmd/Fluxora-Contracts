@@ -161,13 +161,22 @@ def test_main_fails_when_rustc_version_output_is_unparseable(monkeypatch, capsys
     assert "::error::" in captured.err
 
 
-def test_rustc_version_falls_back_to_invoking_real_rustc(monkeypatch):
+def test_rustc_version_falls_back_to_invoking_rustc(monkeypatch):
     # No RUSTC_VERSION_OUTPUT override: exercises the `subprocess.run(["rustc",
-    # "--version"])` fallback path. Requires a real `rustc` on PATH, which is
-    # guaranteed true here since this whole workspace is a Rust CI target.
+    # "--version"])` fallback path without requiring Rust in docs-only CI jobs.
+    class Completed:
+        stdout = "rustc 1.94.1 (abcdef 2026-01-01)"
+
+    def fake_run(args, check, capture_output, text):
+        assert args == ["rustc", "--version"]
+        assert check is True
+        assert capture_output is True
+        assert text is True
+        return Completed()
+
     monkeypatch.delenv("RUSTC_VERSION_OUTPUT", raising=False)
-    version = verify_rust_version.rustc_version()
-    assert version
+    monkeypatch.setattr(verify_rust_version.subprocess, "run", fake_run)
+    assert verify_rust_version.rustc_version() == "1.94.1"
 
 
 def test_pinned_targets_returns_list():
