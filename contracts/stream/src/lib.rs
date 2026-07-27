@@ -1182,15 +1182,12 @@ pub struct CreateStreamOptions {
     pub duration: u64,
     /// Optional withdrawal threshold (raw units) to reduce fee spam.
     pub withdraw_dust_threshold: Option<i128>,
-    /// Optional bounded memo for indexer correlation (e.g. payroll batch ID).
-    /// Maximum `MAX_MEMO_BYTES` (64) bytes. Pass `None` to omit.
-    pub memo: Option<soroban_sdk::Bytes>,
-    /// Optional structured metadata for indexer consumption.
-    pub metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
-    /// The architectural style of the stream (Linear or CliffOnly).
+    /// The architectural style of the stream (Linear, CliffOnly, or CliffSlope).
     pub kind: StreamKind,
     /// If true, the stream cannot be cancelled or shortened. Defaults to false (None).
     pub irrevocable: Option<bool>,
+    /// Optional compliance witness authorized to cancel via signed attestation.
+    pub witness: Option<Address>,
 }
 
 /// Reusable relative schedule (offsets only). Amounts are supplied when creating a stream.
@@ -1202,6 +1199,46 @@ pub struct StreamScheduleTemplate {
     pub start_delay: u64,
     pub cliff_delay: u64,
     pub duration: u64,
+}
+
+/// Maximum number of recipients allowed in a single pooled stream.
+pub const MAX_POOL_RECIPIENTS: u32 = 100;
+
+/// Emitted when a stream's claim ownership is transferred.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClaimOwnershipTransferred {
+    pub stream_id: u64,
+    pub old_owner: Option<Address>,
+    pub new_owner: Address,
+}
+
+/// Relative-timing stream creation parameters (offsets from current timestamp).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreateStreamRelativeParams {
+    /// Address that will receive streamed tokens for this stream entry.
+    pub recipient: Address,
+    /// Total amount escrowed for this stream entry.
+    pub deposit_amount: i128,
+    /// Streaming speed in tokens per second for this stream entry.
+    pub rate_per_second: i128,
+    /// Delay (in seconds) before stream accrual starts, relative to current timestamp.
+    pub start_delay: u64,
+    /// Delay (in seconds) before withdrawals are allowed, relative to current timestamp.
+    pub cliff_delay: u64,
+    /// Total duration the stream runs (in seconds) from start_time to end_time.
+    pub duration: u64,
+    /// Optional withdrawal threshold (raw units) to reduce fee spam.
+    pub withdraw_dust_threshold: Option<i128>,
+    /// Optional bounded memo for indexer correlation (e.g. payroll batch ID).
+    pub memo: Option<soroban_sdk::Bytes>,
+    /// The architectural style of the stream (Linear or CliffOnly).
+    pub kind: StreamKind,
+    /// Optional structured metadata for indexer consumption.
+    pub metadata: Option<soroban_sdk::Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
+    /// If true, the stream cannot be cancelled or shortened. Defaults to false (None).
+    pub irrevocable: Option<bool>,
 }
 
 /// Namespace for all contract storage keys.
