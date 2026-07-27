@@ -409,6 +409,7 @@ mod tests {
             .find_map(|line| {
                 let line = line.trim();
                 line.strip_prefix("channel")
+                    .map(|rest| rest.trim())
                     .and_then(|rest| rest.strip_prefix('='))
                     .map(|rest| rest.trim().trim_matches('"').to_string())
             })

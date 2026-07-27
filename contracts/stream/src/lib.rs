@@ -521,7 +521,7 @@ pub enum ContractError {
     /// Metadata payload exceeds the allowed size.
     MetadataTooLarge = 32,
     /// Keeper attempted to close a stream before the grace period elapsed.
-    KeeperGracePeriodNotElapsed = 42,
+    KeeperGracePeriodNotElapsed = 33,
     ReservationAlreadyActive = 34,
     /// Withdraw dust threshold is negative or exceeds deposit amount.
     InvalidDustThreshold = 35,
