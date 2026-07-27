@@ -35,6 +35,7 @@ import json
 import subprocess
 import sys
 import os
+import tempfile
 import runpy
 from unittest.mock import patch, mock_open, MagicMock, call
 
@@ -673,88 +674,168 @@ class TestRealEventFixtures:
 #
 # Unlike the rest of this suite, these tests do not mock
 # ``subprocess.check_output`` or file I/O. They create a throwaway git
-# repository on disk, commit two real revisions of a snapshot JSON file, and
-# invoke ``check_snapshot_diff.main()`` with the resulting commit SHAs so the
-# script's real ``git diff --name-only`` / ``git show`` invocations run
-# end-to-end.
+# repository on disk via :func:`tempfile.TemporaryDirectory`, commit two
+# real revisions of a snapshot JSON file, and invoke
+# ``check_snapshot_diff.main()`` with the resulting commit SHAs so the
+# script's real ``git diff --name-only`` / ``git show`` subprocess calls
+# run end-to-end.
+#
+# Security assumptions validated by these tests:
+# - ``subprocess.check_output(['git', 'diff', '--name-only', ...])``
+#   returns the correct changed files when run against a real repo.
+# - ``subprocess.check_output(['git', 'show', 'sha:path'])`` correctly
+#   retrieves file content from git history.
+# - Security-relevant fields (events, auth, storage, etc.) trigger exit 1.
+# - Non-security-relevant field changes trigger exit 0.
+# - Missing snapshot files are treated as empty objects and do not crash.
 
 class TestMainEndToEndRealGitRepo:
-    """Exercises main() against a real two-commit git history."""
+    """Exercises main() against a real two-commit git history.
+
+    Each test creates a temporary directory via
+    ``tempfile.TemporaryDirectory``, initialises a git repository with
+    ``git init``, writes and commits a baseline snapshot JSON, writes and
+    commits a mutated version, then calls ``check_snapshot_diff.main()``
+    with the real base and head SHAs.  The ``subprocess`` calls inside the
+    script are exercised for real, not mocked.
+    """
 
     SNAPSHOT_REL_PATH = 'contracts/stream/test_snapshots/keeper_cancelled.json'
 
     def _init_repo(self, path):
+        """Initialise a bare git repository in *path* for testing."""
         _run_git(['init', '-q'], cwd=path)
 
     def test_security_relevant_change_across_real_commits_exits_1(
-        self, tmp_path, monkeypatch, capsys
+        self, monkeypatch, capsys
     ):
-        repo = str(tmp_path)
-        self._init_repo(repo)
+        """A mutated ``events`` field (security-relevant) triggers SystemExit(1).
 
-        baseline = _load_fixture('keeper_cancelled.json')
-        base_sha = _commit_snapshot(repo, self.SNAPSHOT_REL_PATH, baseline)
+        Creates a throwaway git repository, commits a baseline KeeperCancelled
+        snapshot, commits a version with ``keeper_fee`` changed, then invokes
+        ``main()`` with the real --base/--head SHAs.
+        """
+        with tempfile.TemporaryDirectory() as repo:
+            self._init_repo(repo)
 
-        mutated = copy.deepcopy(baseline)
-        mutated['events'][0]['data']['keeper_fee'] = 750000
-        mutated['events'][0]['data']['recipient_amount'] = 8750000
-        head_sha = _commit_snapshot(repo, self.SNAPSHOT_REL_PATH, mutated)
+            baseline = _load_fixture('keeper_cancelled.json')
+            base_sha = _commit_snapshot(repo, self.SNAPSHOT_REL_PATH, baseline)
 
-        monkeypatch.chdir(repo)
-        with patch('sys.argv', ['check_snapshot_diff.py', '--base', base_sha, '--head', head_sha]):
-            with pytest.raises(SystemExit) as exc:
-                check_snapshot_diff.main()
+            mutated = copy.deepcopy(baseline)
+            mutated['events'][0]['data']['keeper_fee'] = 750000
+            mutated['events'][0]['data']['recipient_amount'] = 8750000
+            head_sha = _commit_snapshot(repo, self.SNAPSHOT_REL_PATH, mutated)
 
-        assert exc.value.code == 1
-        out = capsys.readouterr().out
-        assert 'Security-relevant fields changed' in out
-        assert self.SNAPSHOT_REL_PATH in out
+            monkeypatch.chdir(repo)
+            with patch('sys.argv', ['check_snapshot_diff.py', '--base', base_sha, '--head', head_sha]):
+                with pytest.raises(SystemExit) as exc:
+                    check_snapshot_diff.main()
+
+            assert exc.value.code == 1
+            out = capsys.readouterr().out
+            assert 'Security-relevant fields changed' in out
+            assert self.SNAPSHOT_REL_PATH in out
+
+    def test_security_relevant_auth_field_across_real_commits_exits_1(
+        self, monkeypatch, capsys
+    ):
+        """A mutated ``auth`` field (security-relevant) triggers SystemExit(1).
+
+        Exercises the ``auth`` member of ``SECURITY_FIELDS`` end-to-end
+        against a real git repository with two commits.
+        """
+        with tempfile.TemporaryDirectory() as repo:
+            self._init_repo(repo)
+
+            baseline = {
+                "snapshot_name": "auth_snapshot_test",
+                "ledger_sequence": 1000042,
+                "stream_id": 7,
+                "events": [
+                    {
+                        "topics": ["auth_check", 7],
+                        "data": {
+                            "require_auth": False,
+                            "signatures": [],
+                        }
+                    }
+                ]
+            }
+            rel_path = 'contracts/stream/test_snapshots/auth_test.json'
+            base_sha = _commit_snapshot(repo, rel_path, baseline)
+
+            mutated = copy.deepcopy(baseline)
+            mutated['events'][0]['data']['require_auth'] = True
+            mutated['events'][0]['data']['signatures'] = [
+                'GBAUTHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+            ]
+            head_sha = _commit_snapshot(repo, rel_path, mutated)
+
+            monkeypatch.chdir(repo)
+            with patch('sys.argv', ['check_snapshot_diff.py', '--base', base_sha, '--head', head_sha]):
+                with pytest.raises(SystemExit) as exc:
+                    check_snapshot_diff.main()
+
+            assert exc.value.code == 1
+            out = capsys.readouterr().out
+            assert 'Security-relevant fields changed' in out
+            assert rel_path in out
 
     def test_non_security_change_across_real_commits_exits_0(
-        self, tmp_path, monkeypatch, capsys
+        self, monkeypatch, capsys
     ):
-        repo = str(tmp_path)
-        self._init_repo(repo)
+        """A non-security-relevant field change (``ledger_sequence``) triggers SystemExit(0).
 
-        rel_path = 'contracts/stream/test_snapshots/stream_cloned.json'
-        baseline = _load_fixture('stream_cloned.json')
-        base_sha = _commit_snapshot(repo, rel_path, baseline)
+        Creates a throwaway git repository, commits a baseline StreamCloned
+        snapshot, commits a version with only ``ledger_sequence`` changed,
+        then invokes ``main()`` with the real --base/--head SHAs.
+        """
+        with tempfile.TemporaryDirectory() as repo:
+            self._init_repo(repo)
 
-        mutated = copy.deepcopy(baseline)
-        mutated['ledger_sequence'] = baseline['ledger_sequence'] + 1
-        mutated['stream_id'] = baseline['stream_id']
-        head_sha = _commit_snapshot(repo, rel_path, mutated)
+            rel_path = 'contracts/stream/test_snapshots/stream_cloned.json'
+            baseline = _load_fixture('stream_cloned.json')
+            base_sha = _commit_snapshot(repo, rel_path, baseline)
 
-        monkeypatch.chdir(repo)
-        with patch('sys.argv', ['check_snapshot_diff.py', '--base', base_sha, '--head', head_sha]):
-            with pytest.raises(SystemExit) as exc:
-                check_snapshot_diff.main()
+            mutated = copy.deepcopy(baseline)
+            mutated['ledger_sequence'] = baseline['ledger_sequence'] + 1
+            mutated['stream_id'] = baseline['stream_id']
+            head_sha = _commit_snapshot(repo, rel_path, mutated)
 
-        assert exc.value.code == 0
-        out = capsys.readouterr().out
-        assert 'No security-relevant snapshot changes detected.' in out
+            monkeypatch.chdir(repo)
+            with patch('sys.argv', ['check_snapshot_diff.py', '--base', base_sha, '--head', head_sha]):
+                with pytest.raises(SystemExit) as exc:
+                    check_snapshot_diff.main()
 
-    def test_identical_real_commits_exit_0(self, tmp_path, monkeypatch):
-        """Two commits touching an unrelated file leave the snapshot untouched."""
-        repo = str(tmp_path)
-        self._init_repo(repo)
+            assert exc.value.code == 0
+            out = capsys.readouterr().out
+            assert 'No security-relevant snapshot changes detected.' in out
 
-        baseline = _load_fixture('keeper_cancelled.json')
-        base_sha = _commit_snapshot(repo, self.SNAPSHOT_REL_PATH, baseline)
+    def test_identical_real_commits_exit_0(self, monkeypatch):
+        """Two commits touching an unrelated file leave the snapshot untouched, yielding exit 0.
 
-        # Second commit touches an unrelated file only — no snapshot diff at all.
-        other_path = os.path.join(repo, 'README.md')
-        with open(other_path, 'w', encoding='utf-8') as f:
-            f.write('unrelated change\n')
-        _run_git(['add', '-A'], cwd=repo)
-        _run_git(['commit', '-m', 'docs: unrelated change'], cwd=repo)
-        head_sha = subprocess.check_output(
-            ['git', 'rev-parse', 'HEAD'], cwd=repo
-        ).decode('utf-8').strip()
+        Validates that when no snapshot files differ between base and head,
+        ``main()`` exits 0 even though a real git diff is executed.
+        """
+        with tempfile.TemporaryDirectory() as repo:
+            self._init_repo(repo)
 
-        monkeypatch.chdir(repo)
-        with patch('sys.argv', ['check_snapshot_diff.py', '--base', base_sha, '--head', head_sha]):
-            with pytest.raises(SystemExit) as exc:
-                check_snapshot_diff.main()
+            baseline = _load_fixture('keeper_cancelled.json')
+            base_sha = _commit_snapshot(repo, self.SNAPSHOT_REL_PATH, baseline)
 
-        assert exc.value.code == 0
+            # Second commit touches an unrelated file only — no snapshot diff at all.
+            other_path = os.path.join(repo, 'README.md')
+            with open(other_path, 'w', encoding='utf-8') as f:
+                f.write('unrelated change\n')
+            _run_git(['add', '-A'], cwd=repo)
+            _run_git(['commit', '-m', 'docs: unrelated change'], cwd=repo)
+            head_sha = subprocess.check_output(
+                ['git', 'rev-parse', 'HEAD'], cwd=repo
+            ).decode('utf-8').strip()
+
+            monkeypatch.chdir(repo)
+            with patch('sys.argv', ['check_snapshot_diff.py', '--base', base_sha, '--head', head_sha]):
+                with pytest.raises(SystemExit) as exc:
+                    check_snapshot_diff.main()
+
+            assert exc.value.code == 0
