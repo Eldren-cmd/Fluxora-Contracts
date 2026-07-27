@@ -208,6 +208,7 @@ impl<'a> Ctx<'a> {
             witness: None,
             delegation_depth: 0,
             parent_stream_id: None,
+            decommissioned: None,
         };
         let cid = self.contract_id.clone();
         self.env.as_contract(&cid, || {
@@ -379,6 +380,7 @@ fn v5_cancelled_stream_readable_accrual_frozen() {
                 witness: None,
                 delegation_depth: 0,
                 parent_stream_id: None,
+                decommissioned: None,
             },
         );
     });
@@ -439,6 +441,7 @@ fn v5_stream_with_checkpoint_readable() {
                 witness: None,
                 delegation_depth: 0,
                 parent_stream_id: None,
+                decommissioned: None,
             },
         );
     });
