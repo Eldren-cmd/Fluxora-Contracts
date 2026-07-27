@@ -46,7 +46,7 @@ extern crate std;
 
 use fluxora_stream::{
     ContractError, CreateStreamParams, FluxoraStream, FluxoraStreamClient, PauseReason, StreamKind,
-    StreamStatus,
+    StreamStatus, MAX_PAGE_SIZE,
 };
 use proptest::prelude::*;
 use soroban_sdk::{
@@ -57,6 +57,7 @@ use soroban_sdk::{
 
 /// Total tokens minted into the test ecosystem.
 const INITIAL_MINT: i128 = 2_000_000_000_000;
+const ACCOUNT_MINT: i128 = INITIAL_MINT / 2;
 
 // ---------------------------------------------------------------------------
 // Test harness
@@ -125,6 +126,10 @@ impl TestContext {
         self.token().balance(&self.sender)
     }
 
+    fn recipient_balance(&self) -> i128 {
+        self.token().balance(&self.recipient)
+    }
+
     fn create_stream(
         &self,
         deposit: i128,
@@ -152,6 +157,15 @@ impl TestContext {
             },
         )
     }
+}
+
+fn create_max_page_streams(ctx: &TestContext, deposit: i128, rate: i128) -> soroban_sdk::Vec<u64> {
+    let mut stream_ids = soroban_sdk::Vec::new(&ctx.env);
+    ctx.env.budget().reset_unlimited();
+    for _ in 0..MAX_PAGE_SIZE {
+        stream_ids.push_back(ctx.create_stream(deposit, rate, 0, 1_000, StreamKind::Linear));
+    }
+    stream_ids
 }
 
 // ---------------------------------------------------------------------------

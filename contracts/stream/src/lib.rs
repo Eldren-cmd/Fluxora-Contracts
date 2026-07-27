@@ -4222,6 +4222,8 @@ impl FluxoraStream {
     /// - All streams are processed in order. Any error (stream not found, wrong recipient,
     ///   paused, or duplicate IDs) reverts the whole transaction.
     /// - Completed streams are not an error: they produce amount `0` and no events.
+    /// - `TotalLiabilities` is read once into a local accumulator and flushed once
+    ///   after the loop when the batch pays funds, preserving zero-withdrawable no-op behavior.
     pub fn batch_withdraw(
         env: Env,
         recipient: Address,
@@ -4267,6 +4269,8 @@ impl FluxoraStream {
 
         // Cache ledger timestamp once — it is constant within a single transaction.
         let now = current_accrual_timestamp(&env)?;
+        let mut total_liabilities = read_total_liabilities(&env);
+        let mut liabilities_changed = false;
 
         for param in withdrawals.iter() {
             let mut stream = load_stream(&env, param.stream_id)?;
@@ -4349,11 +4353,10 @@ impl FluxoraStream {
                 save_stream(&env, &stream);
                 reconcile_paused_stream_count(&env, previous_status, stream.status);
 
-                // Reduce liabilities as tokens leave the contract.
-                let liabilities = read_total_liabilities(&env)
-                    .checked_sub(withdrawable)
-                    .unwrap_or(0);
-                write_total_liabilities(&env, liabilities);
+                // Reduce liabilities locally as tokens leave the contract, then
+                // flush the shared TotalLiabilities slot once after the batch.
+                total_liabilities = total_liabilities.checked_sub(withdrawable).unwrap_or(0);
+                liabilities_changed = true;
 
                 push_token(&env, &stream.recipient, withdrawable)?;
 
@@ -4376,6 +4379,10 @@ impl FluxoraStream {
                 stream_id: param.stream_id,
                 amount: withdrawable,
             });
+        }
+
+        if liabilities_changed {
+            write_total_liabilities(&env, total_liabilities);
         }
 
         Ok(results)
@@ -8503,7 +8510,8 @@ impl FluxoraStream {
     /// # Security
     /// - Atomic: any failure in validation or execution reverts the entire batch.
     /// - CEI pattern: state is persisted before every external token transfer.
-    /// - Liabilities are reduced per-stream before the aggregate refund.
+    /// - Liabilities are accumulated locally and flushed once after all stream
+    ///   cancellations succeed.
     pub fn bulk_cancel_streams(
         env: Env,
         sender: Address,
@@ -8546,6 +8554,7 @@ impl FluxoraStream {
         // ── Phase 2: Execute cancellations ────────────────────────────────────
         let now = env.ledger().timestamp();
         let mut aggregate_refund: i128 = 0;
+        let mut total_liabilities = read_total_liabilities(&env);
 
         for i in 0..n {
             let mut stream = streams.get(i).unwrap();
@@ -8581,10 +8590,9 @@ impl FluxoraStream {
                     .checked_add(recipient_accrual)
                     .unwrap_or(i128::MAX);
 
-                let liabilities = read_total_liabilities(&env)
+                total_liabilities = total_liabilities
                     .checked_sub(recipient_accrual)
                     .unwrap_or(0);
-                write_total_liabilities(&env, liabilities);
 
                 push_token(&env, &stream.recipient, recipient_accrual)?;
 
@@ -8612,10 +8620,7 @@ impl FluxoraStream {
                     .checked_add(refund_amount)
                     .ok_or(ContractError::ArithmeticOverflow)?;
 
-                let liabilities = read_total_liabilities(&env)
-                    .checked_sub(refund_amount)
-                    .unwrap_or(0);
-                write_total_liabilities(&env, liabilities);
+                total_liabilities = total_liabilities.checked_sub(refund_amount).unwrap_or(0);
             }
 
             events::emit_stream_cancelled(&env, stream_id);
@@ -8624,6 +8629,8 @@ impl FluxoraStream {
         }
 
         // ── Single aggregate refund to sender ─────────────────────────────────
+        write_total_liabilities(&env, total_liabilities);
+
         if aggregate_refund > 0 {
             push_token(&env, &sender, aggregate_refund)?;
         }

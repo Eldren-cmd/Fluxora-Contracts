@@ -115,6 +115,20 @@ To reduce gas, `batch_withdraw` optimizes by:
 1. Caching the ledger timestamp.
 2. Performing a single authorization check.
 3. Processing multiple streams in a loop.
+4. Reading `TotalLiabilities` once, decrementing a local accumulator for every
+   paid stream, and writing the final value once after the batch succeeds.
+
+At `MAX_PAGE_SIZE = 100`, the liability flush changes the hot-path
+`TotalLiabilities` instance-storage I/O from 100 reads plus 100 writes to 1 read
+plus 1 write, while preserving the same final liability value. The batch remains
+atomic: any validation or transfer failure reverts the whole call.
+
+### `bulk_cancel_streams`
+`bulk_cancel_streams` uses the same single-flush liability pattern. Recipient
+accrual payouts and sender refunds both decrement a local `TotalLiabilities`
+accumulator, which is written back once after all streams have been processed.
+For a 100-stream cancellation where every stream has both accrued recipient
+funds and a sender refund, this reduces liability-slot writes from 200 to 1.
 
 ## Performance Metrics
 
