@@ -1661,6 +1661,25 @@ use storage::{
     load_id_reservation, next_stream_id_for, remove_id_reservation, save_id_reservation,
 };
 
+/// Enforce the rate-change cooldown and record the current ledger as the last change.
+///
+/// Shared by `update_rate_per_second` and `decrease_rate_per_second` so the
+/// cooldown policy cannot drift between the two entrypoints. The first rate
+/// change on a stream (`last_rate_change_ledger == 0`) is exempt. The bump is
+/// applied to the in-memory `stream`; callers must only persist on success.
+fn check_and_bump_rate_cooldown(env: &Env, stream: &mut Stream) -> Result<(), ContractError> {
+    if stream.last_rate_change_ledger > 0 {
+        let min_ledger = stream
+            .last_rate_change_ledger
+            .saturating_add(MIN_RATE_INTERVAL_LEDGERS);
+        if env.ledger().sequence() < min_ledger {
+            return Err(ContractError::RateCooldownActive);
+        }
+    }
+    stream.last_rate_change_ledger = env.ledger().sequence();
+    Ok(())
+}
+
 fn load_stream(env: &Env, stream_id: u64) -> Result<Stream, ContractError> {
     let key = DataKey::Stream(stream_id);
     let stream: Stream = env
@@ -5078,14 +5097,7 @@ impl FluxoraStream {
             return Err(ContractError::UnsupportedStreamKind);
         }
 
-        if stream.last_rate_change_ledger > 0 {
-            let min_ledger = stream
-                .last_rate_change_ledger
-                .saturating_add(MIN_RATE_INTERVAL_LEDGERS);
-            if env.ledger().sequence() < min_ledger {
-                return Err(ContractError::RateCooldownActive);
-            }
-        }
+        check_and_bump_rate_cooldown(&env, &mut stream)?;
 
         // Only the original sender can update the rate.
         Self::require_stream_sender(&stream.sender);
@@ -5147,7 +5159,7 @@ impl FluxoraStream {
         stream.checkpointed_amount = accrued_now;
         stream.checkpointed_at = now;
         stream.rate_per_second = new_rate_per_second;
-        stream.last_rate_change_ledger = env.ledger().sequence();
+        // `last_rate_change_ledger` already bumped by `check_and_bump_rate_cooldown`.
         save_stream(&env, &stream);
 
         env.events().publish(
@@ -5222,14 +5234,7 @@ impl FluxoraStream {
             return Err(ContractError::UnsupportedStreamKind);
         }
 
-        if stream.last_rate_change_ledger > 0 {
-            let min_ledger = stream
-                .last_rate_change_ledger
-                .saturating_add(MIN_RATE_INTERVAL_LEDGERS);
-            if env.ledger().sequence() < min_ledger {
-                return Err(ContractError::RateCooldownActive);
-            }
-        }
+        check_and_bump_rate_cooldown(&env, &mut stream)?;
 
         // Sender-only: only the original creator may reduce the rate.
         Self::require_stream_sender(&stream.sender);
@@ -5298,7 +5303,7 @@ impl FluxoraStream {
         stream.checkpointed_at = now;
         stream.rate_per_second = new_rate_per_second;
         stream.deposit_amount = new_deposit;
-        stream.last_rate_change_ledger = env.ledger().sequence();
+        // `last_rate_change_ledger` already bumped by `check_and_bump_rate_cooldown`.
         save_stream(&env, &stream);
 
         // Refund the now-unreachable portion of the deposit to the sender.
