@@ -147,15 +147,20 @@ impl Ctx {
 fn make_stream(ctx: &Ctx, deposit: i128, rate: i128, end: u64) -> u64 {
     ctx.client().create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &deposit,
-        &rate,
-        &0u64, // start
-        &0u64, // cliff == start
-        &end,
-        &0_i128,
-        &None,
-        &StreamKind::Linear,
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: deposit,
+            rate_per_second: rate,
+            start_time: 0,
+            cliff_time: 0,
+            end_time: end,
+            withdraw_dust_threshold: Some(0),
+            memo: None,
+            metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     )
 }
 

@@ -2488,7 +2488,10 @@ impl FluxoraStream {
 pub struct FluxoraStream;
 
 #[allow(clippy::too_many_arguments)]
-#[contractimpl]
+#[cfg_attr(
+    not(all(target_arch = "wasm32", feature = "import_only")),
+    contractimpl
+)]
 impl FluxoraStream {
     /// Initialise the contract with the streaming token and admin address.
     ///
@@ -6076,6 +6079,11 @@ impl FluxoraStream {
         set_auto_renew_enabled(&env, stream_id, false);
         pull_token(&env, &stream.sender, stream.deposit_amount)?;
 
+        // Inherit irrevocable and witness settings from the source stream.
+        // If a stream was designated irrevocable or assigned a compliance witness
+        // originally, auto-renewal carries forward these safety and governance
+        // protections so that sender-side cancellation rules and witness attestations
+        // remain in force for the renewed stream period rather than silently lapsing.
         let new_stream_id = Self::persist_new_stream(
             &env,
             stream.sender.clone(),

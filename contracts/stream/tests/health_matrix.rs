@@ -31,8 +31,8 @@ impl<'a> TestContext<'a> {
 
         client.init(&token_id, &admin);
 
-        let token_client = soroban_sdk::token::Client::new(&env, &token_id);
-        token_client.mint(&sender, &1_000_000_000);
+        let token_admin_client = soroban_sdk::token::StellarAssetClient::new(&env, &token_id);
+        token_admin_client.mint(&sender, &1_000_000_000);
 
         Self {
             env,

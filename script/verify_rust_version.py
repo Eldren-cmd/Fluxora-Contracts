@@ -112,19 +112,19 @@ def pinned_channel_via_toml(toolchain_file: Path) -> str | None:
     return channel
 
 
-def pinned_channel(toolchain_file: Path = TOOLCHAIN_FILE) -> str:
-    # Prefer a real TOML parser when a library is available so we get
-    # accurate error messages on malformed input. Fall back to the regex
-    # parser so the script still works on minimal Python installs (CI uses
-    # Python 3.10 without the third-party `tomli` package).
+def pinned_channel(toolchain_file: Path | None = None) -> str:
+    if toolchain_file is None:
+        toolchain_file = TOOLCHAIN_FILE
     via_toml = pinned_channel_via_toml(toolchain_file)
     if via_toml is not None:
         return via_toml
     return _channel_from_toolchain_text(toolchain_file.read_text(encoding="utf-8"))
 
 
-def pinned_targets(toolchain_file: Path = TOOLCHAIN_FILE) -> list[str]:
+def pinned_targets(toolchain_file: Path | None = None) -> list[str]:
     """Return the list of targets declared in rust-toolchain.toml."""
+    if toolchain_file is None:
+        toolchain_file = TOOLCHAIN_FILE
     data = _load_toolchain(toolchain_file)
     targets = data.get("toolchain", {}).get("targets")
     if targets is None:
@@ -136,8 +136,10 @@ def pinned_targets(toolchain_file: Path = TOOLCHAIN_FILE) -> list[str]:
     return targets
 
 
-def pinned_components(toolchain_file: Path = TOOLCHAIN_FILE) -> list[str]:
+def pinned_components(toolchain_file: Path | None = None) -> list[str]:
     """Return the list of components declared in rust-toolchain.toml."""
+    if toolchain_file is None:
+        toolchain_file = TOOLCHAIN_FILE
     data = _load_toolchain(toolchain_file)
     components = data.get("toolchain", {}).get("components")
     if components is None:
@@ -221,6 +223,8 @@ def main() -> int:
     try:
         expected = pinned_channel(TOOLCHAIN_FILE)
         actual = rustc_version()
+        required_targets = pinned_targets()
+        required_components = pinned_components()
     except Exception as exc:
         print(f"::error::{exc}", file=sys.stderr)
         return 1

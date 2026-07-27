@@ -1406,15 +1406,15 @@ impl FluxoraGovernance {
 #[cfg(test)]
 impl FluxoraGovernance {
     pub fn test_only_set_threshold(env: Env, new_threshold: u32) -> Result<(), GovernanceError> {
-        Self::set_threshold_internal(&env, new_threshold)
+        set_threshold_internal(&env, new_threshold)
     }
 
     pub fn test_only_add_signer(env: Env, signer: Address) -> Result<(), GovernanceError> {
-        Self::add_signer_internal(&env, signer)
+        add_signer_internal(&env, signer)
     }
 
     pub fn test_only_remove_signer(env: Env, signer: Address) -> Result<(), GovernanceError> {
-        Self::remove_signer_internal(&env, signer)
+        remove_signer_internal(&env, signer)
     }
 }
 
