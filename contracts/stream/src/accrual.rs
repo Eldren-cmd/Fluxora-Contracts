@@ -50,7 +50,7 @@ pub fn assert_ledger_time_monotonic(prev_ts: u64, current_ts: u64) -> Result<(),
 ///
 /// For multi-epoch accrual (after rate changes), the contract uses the
 /// `calculate_accrued_amount_checkpointed` variant directly.
-#[cfg(test)]
+#[cfg(any(test, feature = "testutils"))]
 pub fn calculate_accrued_amount(
     start_time: u64,
     cliff_time: u64,

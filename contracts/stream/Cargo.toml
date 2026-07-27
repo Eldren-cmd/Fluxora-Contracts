@@ -78,7 +78,7 @@ test = true
 [[test]]
 name = "formal_verification_smoke"
 path = "tests/formal_verification_smoke.rs"
-test = false
+test = true
 
 [[test]]
 name = "governance_proptest"
