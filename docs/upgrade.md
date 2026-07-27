@@ -366,6 +366,10 @@ The upgraded WASM must maintain backward-compatible storage layout.
 - Reorder `DataKey` enum variants
 - Remove `DataKey` variants
 
+### Upgrade Edge Cases
+- Verify `CONTRACT_VERSION` matches expected value after every upgrade
+- Test all entry-points against the new instance before announcing migration
+
 ## Upgrade Workflow
 
 ### 1. Build New WASM
