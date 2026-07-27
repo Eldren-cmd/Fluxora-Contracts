@@ -189,6 +189,9 @@
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+    use std::string::ToString;
+
     /// Verify the module compiles and the doc-comment invariants are present.
     #[test]
     fn checksum_module_compiles() {}

@@ -13,6 +13,7 @@ mod types;
 pub use types::{ClaimOwnershipTransferred, CreateStreamRelativeParams, MAX_POOL_RECIPIENTS};
 
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env, Map};
+use soroban_sdk::xdr::ToXdr;
 pub use storage::*;
 use token_check::verify_token_behavior;
 pub use reject_duplicate_ids;
@@ -2395,6 +2396,23 @@ impl FluxoraStream {
 
         Ok(stream_id)
     }
+
+    /// Extract the ed25519 public key bytes from an `Address` that is known
+    /// to be an account-type address (G... strkey).
+    ///
+    /// Uses `Address::to_xdr` which serializes via the host function
+    /// `serialize_to_bytes`. The XDR encoding of an account `Address` is:
+    ///   - bytes  0..3: ScVal tag (Address = 18, big-endian u32)
+    ///   - bytes  4..7: ScAddress tag (Account = 0, big-endian u32)
+    ///   - bytes  8..11: PublicKey tag (PublicKeyTypeEd25519 = 0, big-endian u32)
+    ///   - bytes 12..43: ed25519 public key (32 bytes)
+    fn ed25519_pubkey_from_address(env: &Env, addr: &Address) -> [u8; 32] {
+        let xdr = addr.to_xdr(env);
+        let pk_bytes = xdr.slice(12..44);
+        let mut pk = [0u8; 32];
+        pk_bytes.copy_into_slice(&mut pk);
+        pk
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -4389,20 +4407,11 @@ impl FluxoraStream {
             return Err(ContractError::WithdrawalTooFrequent);
         }
 
-        // 4. Bind the supplied public key to the stream recipient.
+        // 4. Verify the supplied public key matches the stream recipient.
+        if Self::ed25519_pubkey_from_address(&env, &stream.recipient)
+            != recipient_public_key.to_array()
         {
-            use soroban_sdk::{
-                xdr::{AccountId, PublicKey, ScAddress, Uint256},
-                TryIntoVal,
-            };
-            let pk_arr = recipient_public_key.to_array();
-            let derived: Result<Address, _> =
-                ScAddress::Account(AccountId(PublicKey::PublicKeyTypeEd25519(Uint256(pk_arr))))
-                    .try_into_val(&env);
-            match derived {
-                Ok(addr) if addr == stream.recipient => {}
-                _ => return Err(ContractError::InvalidSignature),
-            }
+            return Err(ContractError::InvalidSignature);
         }
 
         // 5. Build the signed message payload (56 bytes total):
@@ -6771,19 +6780,10 @@ impl FluxoraStream {
             .as_ref()
             .ok_or(ContractError::InvalidParams)?;
 
+        if Self::ed25519_pubkey_from_address(&env, witness_addr)
+            != witness_public_key.to_array()
         {
-            use soroban_sdk::{
-                xdr::{AccountId, PublicKey, ScAddress, Uint256},
-                TryIntoVal,
-            };
-            let pk_arr = witness_public_key.to_array();
-            let derived: Result<Address, _> =
-                ScAddress::Account(AccountId(PublicKey::PublicKeyTypeEd25519(Uint256(pk_arr))))
-                    .try_into_val(&env);
-            match derived {
-                Ok(addr) if addr == *witness_addr => {}
-                _ => return Err(ContractError::InvalidSignature),
-            }
+            return Err(ContractError::InvalidSignature);
         }
 
         let msg = delegation::build_witnessed_cancel_message(&env, stream_id, deadline);
