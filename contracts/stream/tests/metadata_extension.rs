@@ -1,6 +1,6 @@
 extern crate std;
 
-// Comprehensive tests for per-stream metadata TLV extension (issue #580).
+// Comprehensive tests for per-stream metadata TLV extension.
 //
 // # What this file covers
 //
@@ -217,7 +217,7 @@ impl<'a> Ctx<'a> {
         Bytes::from_slice(&self.env, s.as_bytes())
     }
 
-    /// Build a metadata map with `count` entries "k0"→"v0", "k1"→"v1", …
+    /// Build a metadata map with `count` entries "k0"->"v0", "k1"->"v1", ...
     fn metadata_n(&self, count: u32) -> Map<Bytes, Bytes> {
         let mut m: Map<Bytes, Bytes> = Map::new(&self.env);
         for i in 0..count {

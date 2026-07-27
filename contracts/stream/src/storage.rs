@@ -830,7 +830,7 @@ pub fn push_token(env: &Env, to: &Address, amount: i128) -> Result<(), ContractE
 }
 
 // ---------------------------------------------------------------------------
-// Metadata validation (issue #580)
+// Metadata validation (issue #580, #1294)
 // ---------------------------------------------------------------------------
 
 /// Validate a per-stream metadata map against all size bounds.
@@ -871,7 +871,7 @@ pub(crate) fn validate_metadata(
             return Err(ContractError::MetadataTooLarge);
         }
 
-        // Use saturating addition to avoid overflow on adversarial input; the
+        // Use checked addition to avoid overflow on adversarial input; the
         // subsequent aggregate check catches any wrapped values safely.
         total_bytes = total_bytes
             .checked_add(key_len)
