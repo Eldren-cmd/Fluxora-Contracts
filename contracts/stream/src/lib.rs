@@ -2436,7 +2436,10 @@ impl FluxoraStream {
 pub struct FluxoraStream;
 
 #[allow(clippy::too_many_arguments)]
-#[contractimpl]
+#[cfg_attr(
+    not(all(target_arch = "wasm32", feature = "import_only")),
+    contractimpl
+)]
 impl FluxoraStream {
     /// Initialise the contract with the streaming token and admin address.
     ///
