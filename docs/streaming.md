@@ -969,6 +969,9 @@ contract.create_streams_relative(&sender, &params)?;
 | `cancel_stream_as_admin`          | Admin                                | `admin.require_auth()`                                         |
 | `close_completed_stream`          | Anyone                               | None (permissionless terminal cleanup)                         |
 | `top_up_stream`                   | Funder address                       | `funder.require_auth()`                                        |
+| `create_stream_with_lookback`     | Sender                               | `sender.require_auth()`                                        |
+| `set_lookback_window`             | Original stream sender               | `sender.require_auth()`                                        |
+| `get_lookback_window`             | Anyone                               | None (view)                                                    |
 | `set_auto_renew`                  | Original stream sender               | `sender.require_auth()`                                        |
 | `renew_stream`                    | Anyone                               | None (permissionless; funds fixed to original sender)          |
 | `get_auto_renew`                  | Anyone                               | None (view)                                                    |
@@ -986,7 +989,7 @@ contract.create_streams_relative(&sender, &params)?;
 | `get_delegated_nonce`             | Anyone                               | None (view)                                                    |
 | `release_id_reservation`          | Reservation holder                   | `holder.require_auth()`                                        |
 | `reclaim_expired_id_reservation`  | Anyone                               | None (permissionless cleanup)                                  |
-| `get_total_liabilities`           | Anyone                               | None (view)                                                    |
+| `get_total_liabilities`           | Anyone                               | None (view)                                                    |                                                  |
 
 **Note:** Sender-managed functions (`pause_stream`, `resume_stream`, `cancel_stream`) require sender auth. Admin uses separate `_as_admin` entry points.
 
@@ -1482,11 +1485,6 @@ Emitted when a sender successfully updates the streaming rate via `update_rate_p
 
 ## 6. Error Behavior (ContractError + Panics)
 
-Errors are surfaced either as `ContractError` variants or as panic/assert messages.
-Integrators should treat `ContractError` as stable error codes, and panic strings
-as best-effort diagnostics. The table below focuses on creation and lifecycle
-errors relevant to stream creation and timing.
-
 | Message                                                                            | Function                           | Trigger                                                        |
 |------------------------------------------------------------------------------------|------------------------------------|----------------------------------------------------------------|
 | `"already initialised"`                                                            | `init`                             | Re-init attempt                                                |
@@ -1513,6 +1511,7 @@ errors relevant to stream creation and timing.
 | `ContractError::InvalidState` (2)                                                  | `close_completed_stream`           | Close Cancelled stream with remaining claimable balance        |
 | `ContractError::AutoRenewFundingUnavailable` (36)                                  | `renew_stream`                     | Original sender balance or allowance is below deposit amount   |
 | `ContractError::InvalidState` (2)                                                  | `renew_stream`                     | Source is not Completed or auto-renew is disabled              |
+| `ContractError::InvalidParams` (3)                                                 | `create_stream_with_lookback` / `set_lookback_window` | `max_lookback_ledgers == Some(0)` |
 | `"contract not initialised: missing config"`                                       | Functions requiring config         | Config missing                                                 |
 
 ## Protocol-Level Pausing
