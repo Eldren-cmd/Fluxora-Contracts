@@ -47,6 +47,39 @@ If a deliberate, reviewed feature addition requires more space:
 4. Update the table above with the new value and a note explaining the change.
 5. Include the change in the PR description.
 
+### Per-PR Delta Reporting
+
+Every build also compares the current WASM sizes against the **previous release tag**
+(most recent `v*` tag) and prints a byte-delta for each contract. This makes incremental
+bloat from individual PRs visible immediately, without waiting for the absolute ceiling
+to be approached.
+
+**How it works:**
+
+1. The script finds the most recent `v*` tag in the repository.
+2. For each contract, it reads the WASM file size at that tag from git history.
+3. It computes `current_size - previous_size` and prints the result.
+4. In GitHub Actions CI, `::warning::` annotations are emitted when a contract grows
+   and `::notice::` annotations when it shrinks. These annotations appear on the PR
+   timeline **without failing the build** (budget enforcement still runs independently).
+
+**Example output:**
+
+```
+Previous release tag: v0.9.0
+  vs v0.9.0: +1234 bytes (+1.2 KiB) (was 200000 / 195.3 KiB)
+fluxora_stream: 201234 bytes (196.5 KiB) — OK (headroom: 60.9 KiB)
+```
+
+**Edge cases:**
+
+- **No release tag exists**: Delta reporting is skipped with an informational message.
+- **Previous tag has no WASM file**: The delta is reported as "baseline unavailable".
+- **Budget exceeded**: Delta is still reported even when the contract fails the budget check.
+
+**Step summary:** When running in CI (`GITHUB_STEP_SUMMARY` is set), the script writes
+a delta table to the GitHub Actions step summary alongside the budget report.
+
 ### Optimize step
 
 `stellar contract optimize` runs `wasm-opt -Oz` on the artifact, typically reducing binary
@@ -89,18 +122,22 @@ The following table provides the CPU instruction counts for core operations.
 
 <!-- GAS_BASELINE_START -->
 {
-  "create_stream": 0,
-  "withdraw": 0,
+  "create_stream": 568292,
+  "withdraw": 562057,
   "batch_withdraw": {
-    "1": 0,
-    "10": 0,
-    "50": 0,
-    "100": 0
+    "1": 531125,
+    "10": 3675044,
+    "50": 19844037,
+    "100": 45453389
+  },
+  "keeper_cancel": {
+    "partial_accrual": 786739,
+    "fully_accrued": 386889
   }
 }
 <!-- GAS_BASELINE_END -->
 
-*Note: Baselines are currently initialized to 0 and should be updated after the first successful run of `script/validate_gas.py` once the contract compiles.*
+*Baselines were captured from a clean run of `script/validate_gas.py` against `contracts/stream/tests/gas_regression.rs` on Rust 1.94.1 / soroban-env-host 21.2.1 (see #1014). Costs are deterministic CPU-instruction counts from the metered host and are stable across runs on the same toolchain/SDK pin. Update via the [review bar](#review-bar-for-baseline-increases) below.*
 
 ## Governance Operations
 
@@ -205,3 +242,202 @@ Baseline increases are not granted automatically. To get a baseline increase app
 - **Explicit Justification**: The PR description must explicitly justify the gas increase.
 - **Root Cause**: The increase must be tied to a specific, legitimate change (e.g., adding a new necessary security check, expanding a feature).
 - **No Hidden Costs**: Unintended or unexplainable jumps in gas usage must be optimized or reverted. You cannot blindly bump the baseline to get CI to pass.
+
+---
+
+## Keeper Economics
+
+`keeper_cancel` pays keeper bots a small incentive (fee) to cancel streams that have passed
+their `end_time` but whose sender never called `cancel_stream`, preventing unclaimed deposits
+from being locked in contract storage indefinitely.  Understanding the relationship between
+that fee and the transaction's own resource cost is essential for keeper-bot operators who
+need to know which streams are worth cancelling.
+
+### How the fee is calculated
+
+The fee is taken from the unstreamed portion of the deposit (the *sender's gross refund*).
+See [docs/cancel-stream-semantics.md](cancel-stream-semantics.md#keeper-initiated-cancellation-keeper_cancel)
+for the full distribution formula and [docs/formal-verification.md](formal-verification.md#constants-production-values)
+for the constant definitions.
+
+```
+accrued          = calculate_accrued_at(end_time)        -- capped at deposit_amount
+recipient_amount = accrued - withdrawn_amount
+sender_refund_gross = deposit_amount - accrued           -- unstreamed portion
+keeper_fee       = sender_refund_gross × KEEPER_FEE_BPS / 10 000
+sender_refund    = sender_refund_gross - keeper_fee
+```
+
+Production constants:
+
+| Constant                        | Value            | Source                            |
+|---------------------------------|------------------|-----------------------------------|
+| `KEEPER_FEE_BPS`                | 50 (0.5 %)       | `lib.rs`, `formal-verification.md` |
+| `KEEPER_GRACE_PERIOD_SECONDS`   | 604 800 (7 days) | `lib.rs`, `formal-verification.md` |
+
+### CPU-instruction cost
+
+`keeper_cancel` in the common case (partial accrual, 3 token transfers) is more expensive
+than a plain `withdraw` because it:
+
+1. Validates grace-period eligibility.
+2. Performs the keeper-fee arithmetic.
+3. Issues **three** separate token transfers: recipient, sender, and keeper.
+
+The gas regression tests in `contracts/stream/tests/gas_regression.rs` measure two variants:
+
+| Variant           | Description                                              |
+|-------------------|----------------------------------------------------------|
+| `partial_accrual` | `deposit_amount > rate × duration` → 3 token transfers (common keeper incentive path) |
+| `fully_accrued`   | `deposit_amount == rate × duration` → 1 token transfer, `keeper_fee = 0` |
+
+Run the measurements with:
+
+```bash
+cargo test -p fluxora_stream gas_regression -- --nocapture
+```
+
+The measured CPU instruction counts are recorded in the JSON baseline above
+(`keeper_cancel.partial_accrual` and `keeper_cancel.fully_accrued`) and validated
+on every CI run by `script/validate_gas.py`.
+
+### Break-even stream size
+
+A keeper-bot only profits when the fee it earns exceeds the Stellar resource fee it pays
+to submit the transaction.  The minimum *unstreamed refund* that makes a keeper_cancel
+call economically rational is:
+
+```
+break_even_unstreamed = (resource_fee_in_tokens × 10 000) / KEEPER_FEE_BPS
+                      = resource_fee_in_tokens × 200
+```
+
+At `KEEPER_FEE_BPS = 50` (0.5 %), the keeper earns 1 token for every 200 tokens of
+unstreamed refund.  Below this threshold the fee is smaller than the cost of the
+transaction itself and a rational keeper should not bother.
+
+Representative break-even values for USDC streams (7 decimal places, 1 USDC = 10 000 000
+stroops):
+
+| Stellar resource fee (USDC) | Break-even unstreamed refund (USDC) |
+|-----------------------------|------------------------------------|
+| 0.001                       | 0.20                               |
+| 0.01                        | 2.00                               |
+| 0.10                        | 20.00                              |
+| 1.00                        | 200.00                             |
+
+> **How to read this table**: at a resource fee of 0.01 USDC per transaction, a keeper
+> earns nothing (or loses money) on a stream whose unstreamed balance is less than
+> **2.00 USDC**.  At a 1.00 USDC resource fee the break-even unstreamed balance rises to
+> **200.00 USDC**.
+
+Actual Stellar resource fees vary with network congestion and the fee-market.  Keeper
+operators should periodically re-evaluate their configured minimum stream sizes against
+current fee levels.
+
+### Implications for stream design
+
+Stream creators can use the break-even formula to reason about keeper incentives:
+
+- **Large, long-running streams** with significant unstreamed balances at expiry will
+  always attract keeper cleanup because the incentive exceeds typical transaction costs.
+- **Small or tightly-scoped streams** (deposit ≈ rate × duration, little unstreamed
+  balance) may not attract keeper cleanup; senders of such streams should call
+  `cancel_stream` themselves rather than relying on keeper bots.
+- The 7-day grace period (`KEEPER_GRACE_PERIOD_SECONDS`) gives senders a window to
+  self-clean before keepers become eligible.
+
+### Security notes
+
+- The keeper fee is taken **only** from the sender's gross refund; the recipient's
+  accrued balance is never reduced.  See the security invariants in
+  [docs/cancel-stream-semantics.md](cancel-stream-semantics.md#security-invariants).
+- Keepers must sign (`keeper.require_auth()`), preventing a third party from
+  redirecting the fee to an arbitrary address.
+- CEI ordering ensures the stream is marked `Cancelled` before any token transfer,
+  preventing re-entrant double-cancellations.
+- Formal proofs that `keeper_fee + protocol_remainder == gross` (conservation) and
+  that `checked_mul(KEEPER_FEE_BPS)` cannot overflow are described in
+  [docs/formal-verification.md](formal-verification.md#keeper-fee-conservation-proofs-new).
+
+---
+
+## Stream Persistent-Entry Size
+
+Every `Stream` struct is written to a Soroban **persistent** ledger entry.  Soroban charges
+rent proportional to the serialized byte size of each entry, so unchecked growth of any
+caller-controlled field inflates the per-stream rent cost for the entire protocol.
+
+### Field breakdown (worst case)
+
+| Category | Fields | Approx. XDR bytes |
+|---|---|---|
+| Fixed scalars | `stream_id` (u64), 3 × i128 amounts, 3 × i128 checkpoints, 3 × u32 ledger stamps, `delegation_depth` (u32) | ~120 |
+| Fixed addresses | `sender`, `recipient` (each 36 bytes) | ~72 |
+| Enum fields | `status` (StreamStatus), `kind` (StreamKind) | ~8 |
+| Optional scalars | `cancelled_at` (Option\<u64\>), `is_pooled` (Option\<bool\>), `irrevocable` (Option\<bool\>), `parent_stream_id` (Option\<u64\>) | ~30 |
+| Optional addresses | `claim_owner` (Option\<Address\>), `witness` (Option\<Address\>) | ~74 |
+| **`memo`** (caller-controlled) | `Option<Bytes>` capped at `MAX_MEMO_BYTES` = 256 | **~268** |
+| **`metadata`** (caller-controlled) | `Option<Map<Bytes,Bytes>>` capped at `MAX_METADATA_BYTES` = 512 aggregate + ScMap framing for up to 8 entries | **~680** |
+| ScVal type tags + XDR padding | per-field overhead from Soroban encoding | ~100 |
+| **Structural total** | | **~1 352** |
+
+### Measured baselines
+
+These values are printed by the regression tests in
+`contracts/stream/tests/gas_regression.rs` (run with `--nocapture`).  Update this
+table whenever the constant or test output changes.
+
+| Variant | Serialized bytes | Test name |
+|---|---|---|
+| Baseline (no optional fields) | ~480 | `test_stream_entry_xdr_size_baseline` |
+| Memo only (`MAX_MEMO_BYTES` = 256 B) | ~760 | `test_stream_entry_xdr_size_memo_only` |
+| Metadata only (`MAX_METADATA_BYTES` = 512 B) | ~1 160 | `test_stream_entry_xdr_size_metadata_only` |
+| **Worst case (memo + metadata + all optionals)** | **~1 352** | `test_stream_entry_xdr_size_worst_case` |
+
+> The values above are estimates derived from the field breakdown.  Run
+> `cargo test -p fluxora_stream --test gas_regression -- --nocapture` to capture
+> the exact figures printed by the tests and update this table.
+
+### Ceiling constant
+
+```rust
+pub const MAX_STREAM_ENTRY_BYTES: usize = 4_096;  // lib.rs
+```
+
+The ceiling is **4 096 bytes** — a ~2.9× safety margin above the ~1 352-byte worst-case
+structural total.  The generous margin accounts for:
+
+- Future additive fields that do not require a `CONTRACT_VERSION` bump
+- Soroban ScVal type tags, XDR padding, and length prefixes that vary by SDK version
+- Host-side encoding overhead not directly observable from Rust test code
+
+### Enforcement
+
+The constant is enforced by:
+
+```bash
+cargo test -p fluxora_stream --test gas_regression -- --nocapture
+```
+
+Four tests run and each asserts `serialized_len <= MAX_STREAM_ENTRY_BYTES`:
+
+| Test | What it covers |
+|---|---|
+| `test_stream_entry_xdr_size_worst_case` | All optional fields at maximum size |
+| `test_stream_entry_xdr_size_baseline` | No optional fields (lower bound) |
+| `test_stream_entry_xdr_size_memo_only` | Only `memo` at `MAX_MEMO_BYTES` |
+| `test_stream_entry_xdr_size_metadata_only` | Only `metadata` at `MAX_METADATA_BYTES` |
+
+### How to update the ceiling
+
+If the `Stream` struct gains new fields and the regression test fails:
+
+1. Run `cargo test -p fluxora_stream --test gas_regression -- --nocapture` and note
+   the printed `STREAM_XDR_SIZE: worst_case: N bytes` value.
+2. Add **~25% headroom**, round up to the next 512-byte boundary.
+3. Update `MAX_STREAM_ENTRY_BYTES` in `contracts/stream/src/lib.rs`.
+4. Update the measured-baselines table above with the new figures.
+5. Confirm the `CONTRACT_VERSION` policy in `lib.rs` has been followed for the
+   struct change (additive fields require a version bump).
+6. Include the change in the PR description with an explicit justification.

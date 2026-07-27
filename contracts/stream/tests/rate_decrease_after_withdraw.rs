@@ -42,7 +42,9 @@
 
 extern crate std;
 
-use fluxora_stream::{FluxoraStream, FluxoraStreamClient, StreamKind, StreamStatus};
+use fluxora_stream::{
+    CreateStreamParams, FluxoraStream, FluxoraStreamClient, StreamKind, StreamStatus,
+};
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
     token::{Client as TokenClient, StellarAssetClient},
@@ -144,15 +146,20 @@ impl TestContext {
         self.env.ledger().set_timestamp(0);
         self.client().create_stream(
             &self.sender,
-            &self.recipient,
-            &deposit,
-            &rate,
-            &0u64,
-            &cliff,
-            &end,
-            &0i128,
-            &None,
-            &StreamKind::Linear,
+            &CreateStreamParams {
+                recipient: self.recipient.clone(),
+                deposit_amount: deposit,
+                rate_per_second: rate,
+                start_time: 0u64,
+                cliff_time: cliff,
+                end_time: end,
+                withdraw_dust_threshold: Some(0i128),
+                memo: None,
+                metadata: None,
+                kind: StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
         )
     }
 
@@ -608,4 +615,3 @@ fn test_rate_decrease_same_ledger_as_withdraw_boundary_exact_accrual() {
     assert_eq!(ctx.client().get_withdrawable(&id), 50);
     assert_eq!(ctx.client().withdraw(&id), 50);
 }
-
