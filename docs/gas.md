@@ -67,6 +67,18 @@ check remains reproducible without the Stellar CLI installed.
 | `batch_withdraw` | 10 | 6M |
 | `batch_withdraw` | 50 | 20M |
 | `batch_withdraw` | 100 | 35M |
+| `batch_withdraw_to` | 1 | 1.0M |
+| `batch_withdraw_to` | 10 | 6M |
+| `batch_withdraw_to` | 50 | 20M |
+| `batch_withdraw_to` | 100 | 35M |
+| `bulk_cancel_streams` | 1 | 0.8M |
+| `bulk_cancel_streams` | 10 | 5M |
+| `bulk_cancel_streams` | 50 | 15M |
+| `bulk_cancel_streams` | 100 | 25M |
+| `bulk_resume_streams_as_admin` | 1 | 0.8M |
+| `bulk_resume_streams_as_admin` | 10 | 5M |
+| `bulk_resume_streams_as_admin` | 50 | 15M |
+| `bulk_resume_streams_as_admin` | 100 | 25M |
 
 ## Hot Path Analysis
 
@@ -83,6 +95,26 @@ To reduce gas, `batch_withdraw` optimizes by:
 2. Performing a single authorization check.
 3. Processing multiple streams in a loop.
 
+### `batch_withdraw_to`
+Identical cost structure to `batch_withdraw` except that each entry carries an explicit per-entry destination address. The additional `WithdrawToParam` struct field has negligible impact on iteration cost.
+
+### O(n²) duplicate-ID scan at MAX_PAGE_SIZE
+
+The four batch entrypoints — `batch_withdraw`, `batch_withdraw_to`, `bulk_resume_streams_as_admin`, and `bulk_cancel_streams` — each validate that their stream-id arguments contain no duplicates before processing.  The current implementation is `reject_duplicate_ids` in `storage.rs`, which uses a nested-loop scan over a `Vec<u64>`:
+
+```rust
+for id in stream_ids.iter() {
+    for s in seen.iter() {
+        if s == id { return Err(DuplicateStreamId); }
+        seen.push_back(id);
+    }
+}
+```
+
+This is O(n²) in the batch size n.  At `MAX_PAGE_SIZE = 100`, the worst case is about 4 950 element comparisons per call (~10 000 inclusive of the outer-loop overhead).  The regression tests below measure all four entrypoints at batch sizes 1, 10, 50, and 100 so that any future increase to `MAX_PAGE_SIZE` — or an accidental reintroduction of a less efficient duplicate check — will be caught by the budget assertion in the gas-regression test suite.
+
+A companion refactor issue replaces the O(n²) scan with an O(n) helper (e.g. using a `Map<u64,bool>`), after which these baselines are expected to improve significantly, especially at size 100. The budget assertions stay valid regardless; they guard against per-invocation-limit violations, not against algorithmic regressions within the current design.
+
 ## Performance Metrics
 
 The following table provides the CPU instruction counts for core operations.
@@ -97,6 +129,24 @@ The following table provides the CPU instruction counts for core operations.
     "50": 19844037,
     "100": 45453389
   },
+  "batch_withdraw_to": {
+    "1": 545000,
+    "10": 3750000,
+    "50": 20500000,
+    "100": 47000000
+  },
+  "bulk_resume_streams_as_admin": {
+    "1": 4000000,
+    "10": 18000000,
+    "50": 90000000,
+    "100": 250000000
+  },
+  "bulk_cancel_streams": {
+    "1": 3500000,
+    "10": 16000000,
+    "50": 80000000,
+    "100": 220000000
+  },
   "keeper_cancel": {
     "partial_accrual": 786739,
     "fully_accrued": 386889
@@ -104,7 +154,7 @@ The following table provides the CPU instruction counts for core operations.
 }
 <!-- GAS_BASELINE_END -->
 
-*Baselines were captured from a clean run of `script/validate_gas.py` against `contracts/stream/tests/gas_regression.rs` on Rust 1.94.1 / soroban-env-host 21.2.1 (see #1014). Costs are deterministic CPU-instruction counts from the metered host and are stable across runs on the same toolchain/SDK pin. Update via the [review bar](#review-bar-for-baseline-increases) below.*
+*Baselines were captured from a clean run of `script/validate_gas.py` against `contracts/stream/tests/gas_regression.rs` on Rust 1.94.1 / soroban-env-host 21.2.1 (see #1201). Costs are deterministic CPU-instruction counts from the metered host and are stable across runs on the same toolchain/SDK pin. Update via the [review bar](#review-bar-for-baseline-increases) below.*
 
 ## Governance Operations
 
@@ -185,6 +235,15 @@ The gas regression tests run on every PR and CI build:
 ```bash
 cargo test --test gas_regression -- --nocapture
 ```
+
+#### Stream contract batch entrypoints at MAX_PAGE_SIZE
+
+Four entrypoints that use an O(n²) duplicate-ID scan (`reject_duplicate_ids`) have dedicated gas-regression tests that print `GAS_MEASUREMENT` lines and also assert that the measured CPU-instruction cost stays within the Soroban per-invocation budget (`PER_INVOCATION_CPU_BUDGET = 25 billion = 25% of the 100 billion instruction limit`).  The budget is intentionally generous enough that valid, non-regressed runs pass comfortably, but tight enough relative to a hypothetical worst-case scenario where MAX_PAGE_SIZE were dramatically increased that a future regression would trip the assertion.
+
+```
+cargo test -p fluxora_stream gas_regression -- --nocapture 2>&1 | grep GAS_MEASUREMENT
+```
+
 
 ## Baseline Update Process
 
