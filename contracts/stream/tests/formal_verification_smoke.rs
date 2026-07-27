@@ -27,7 +27,7 @@ mod kani_accrual_security {
     use crate::ContractError;
 
     /// Kani proof: the ledger-time guard reports ClockRegression exactly when
-    /// the current timestamp is earlier than the previous timestamp.
+    /// the current timestamp is earlier than the previous timestamp across full symbolic domain.
     #[kani::proof]
     fn ledger_time_monotonic_guard() {
         let prev_ts: u64 = kani::any();
