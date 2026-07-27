@@ -47,6 +47,39 @@ If a deliberate, reviewed feature addition requires more space:
 4. Update the table above with the new value and a note explaining the change.
 5. Include the change in the PR description.
 
+### Per-PR Delta Reporting
+
+Every build also compares the current WASM sizes against the **previous release tag**
+(most recent `v*` tag) and prints a byte-delta for each contract. This makes incremental
+bloat from individual PRs visible immediately, without waiting for the absolute ceiling
+to be approached.
+
+**How it works:**
+
+1. The script finds the most recent `v*` tag in the repository.
+2. For each contract, it reads the WASM file size at that tag from git history.
+3. It computes `current_size - previous_size` and prints the result.
+4. In GitHub Actions CI, `::warning::` annotations are emitted when a contract grows
+   and `::notice::` annotations when it shrinks. These annotations appear on the PR
+   timeline **without failing the build** (budget enforcement still runs independently).
+
+**Example output:**
+
+```
+Previous release tag: v0.9.0
+  vs v0.9.0: +1234 bytes (+1.2 KiB) (was 200000 / 195.3 KiB)
+fluxora_stream: 201234 bytes (196.5 KiB) — OK (headroom: 60.9 KiB)
+```
+
+**Edge cases:**
+
+- **No release tag exists**: Delta reporting is skipped with an informational message.
+- **Previous tag has no WASM file**: The delta is reported as "baseline unavailable".
+- **Budget exceeded**: Delta is still reported even when the contract fails the budget check.
+
+**Step summary:** When running in CI (`GITHUB_STEP_SUMMARY` is set), the script writes
+a delta table to the GitHub Actions step summary alongside the budget report.
+
 ### Optimize step
 
 `stellar contract optimize` runs `wasm-opt -Oz` on the artifact, typically reducing binary
