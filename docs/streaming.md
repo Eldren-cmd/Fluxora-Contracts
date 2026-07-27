@@ -574,6 +574,51 @@ if current_time < cliff_time  → return 0
 else                         → return deposit_amount
 ```
 
+#### CliffOnly accrual
+
+`CliffOnly` streams are lump-sum unlocks, not continuous streams. Unlike
+`Linear` streams, they do not multiply elapsed seconds by `rate_per_second`
+after the cliff. Once `current_time >= cliff_time`, the accrued amount is the
+full `deposit_amount`, clamped to the deposited ceiling. The configured
+`rate_per_second` is therefore not part of CliffOnly accrual; valid CliffOnly
+state stores `rate_per_second = 0` to preserve the one-shot model.
+
+Worked example: before the cliff
+
+```text
+deposit_amount  = 1_000
+rate_per_second = 0
+start_time      = 1_000
+cliff_time      = 1_600
+end_time        = 2_000
+current_time    = 1_599
+
+current_time < cliff_time
+accrued = 0
+```
+
+At `1_599`, the stream has not reached its unlock timestamp. A `Linear` stream
+may have time-based accrual hidden behind the cliff, but a `CliffOnly` stream
+has no partial accrual to expose.
+
+Worked example: at or after the cliff
+
+```text
+deposit_amount  = 1_000
+rate_per_second = 0
+start_time      = 1_000
+cliff_time      = 1_600
+end_time        = 2_000
+current_time    = 1_750
+
+current_time >= cliff_time
+accrued = min(deposit_amount, deposit_amount) = 1_000
+```
+
+At `1_750`, the recipient's lifetime accrual is the full deposit. The result
+remains `1_000` at `end_time` or later. The clamp guarantees CliffOnly accrual
+never exceeds `deposit_amount`.
+
 ### Rules
 
 - **Before cliff:** Returns 0 (no withdrawals allowed)

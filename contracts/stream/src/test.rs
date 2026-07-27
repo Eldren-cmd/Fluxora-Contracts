@@ -3,7 +3,8 @@ extern crate std;
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger},
     token::{Client as TokenClient, StellarAssetClient},
-    xdr::ToXdr, Address, Env, FromVal, IntoVal, Symbol, TryFromVal, Val, Vec,
+    xdr::ToXdr,
+    Address, Env, FromVal, IntoVal, Symbol, TryFromVal, Val, Vec,
 };
 
 use crate::{
@@ -22511,8 +22512,16 @@ fn xdr_pubkey_extraction_offset_is_correct() {
     assert_eq!(xdr.len(), 44);
 
     // ScVal discriminant for the Address variant = 18 (u32 big-endian)
-    assert_eq!(xdr.get_unchecked(0), 0, "byte 0 = ScVal.Address tag high byte");
-    assert_eq!(xdr.get_unchecked(3), 18, "byte 3 = ScVal.Address tag low byte");
+    assert_eq!(
+        xdr.get_unchecked(0),
+        0,
+        "byte 0 = ScVal.Address tag high byte"
+    );
+    assert_eq!(
+        xdr.get_unchecked(3),
+        18,
+        "byte 3 = ScVal.Address tag low byte"
+    );
 
     // ScAddress discriminant for Account = 0
     assert_eq!(xdr.get_unchecked(4), 0);

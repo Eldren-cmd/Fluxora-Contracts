@@ -228,6 +228,9 @@ pub struct CheckpointState {
 /// is floored to integer tokens per second. Within this core math, the operation is exact integer
 /// multiplication, effectively rounding down (floor) any continuous time beyond the whole second boundaries,
 /// though time is already quantized in integer seconds.
+///
+/// See `docs/streaming.md#cliffonly-accrual` for worked `CliffOnly` examples
+/// showing the pre-cliff zero result and the full-deposit lump-sum unlock.
 pub fn calculate_accrued_amount_checkpointed(
     state: CheckpointState,
     rate_per_second: i128,

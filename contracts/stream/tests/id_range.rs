@@ -8,7 +8,9 @@
 //!
 //! These tests are critical for ensuring stable and bounded results for operator migration.
 
-use fluxora_stream::{CreateStreamParams, FluxoraStream, FluxoraStreamClient, StreamKind, MAX_PAGE_SIZE};
+use fluxora_stream::{
+    CreateStreamParams, FluxoraStream, FluxoraStreamClient, StreamKind, MAX_PAGE_SIZE,
+};
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
     token::{Client as TokenClient, StellarAssetClient},
@@ -69,24 +71,23 @@ impl Ctx {
     /// Create one minimal stream for `self.recipient` and return its ID.
     fn create_one(&self) -> u64 {
         let now = self.env.ledger().timestamp();
-        self.client
-            .create_stream(
-                &self.sender,
-                &CreateStreamParams {
-                    recipient: self.recipient.clone(),
-                    deposit_amount: 100,
-                    rate_per_second: 1,
-                    start_time: now,
-                    cliff_time: now,
-                    end_time: now + 100,
-                    withdraw_dust_threshold: Some(0),
-                    memo: None,
-                    metadata: None,
-                    kind: StreamKind::Linear,
-                    irrevocable: None,
-                    witness: None,
-                },
-            )
+        self.client.create_stream(
+            &self.sender,
+            &CreateStreamParams {
+                recipient: self.recipient.clone(),
+                deposit_amount: 100,
+                rate_per_second: 1,
+                start_time: now,
+                cliff_time: now,
+                end_time: now + 100,
+                withdraw_dust_threshold: Some(0),
+                memo: None,
+                metadata: None,
+                kind: StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
+        )
     }
 
     /// Create `n` streams for `self.recipient`.
