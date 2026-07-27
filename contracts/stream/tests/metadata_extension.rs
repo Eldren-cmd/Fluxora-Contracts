@@ -14,7 +14,7 @@ extern crate std;
 
 use fluxora_stream::{
     ContractError, CreateStreamParams, CreateStreamRelativeParams, FluxoraStream,
-    FluxoraStreamClient, StreamStatus, MAX_METADATA_BYTES, MAX_METADATA_KEYS,
+    FluxoraStreamClient, StreamKind, StreamStatus, MAX_METADATA_BYTES, MAX_METADATA_KEYS,
     MAX_METADATA_KEY_BYTES, MAX_METADATA_VALUE_BYTES,
 };
 use soroban_sdk::{
@@ -96,15 +96,20 @@ impl<'a> Ctx<'a> {
     fn create_stream_with_metadata(&self, metadata: Option<Map<Bytes, Bytes>>) -> u64 {
         self.client().create_stream(
             &self.sender,
-            &self.recipient,
-            &1000_i128,
-            &1_i128,
-            &0u64,
-            &0u64,
-            &1000u64,
-            &0_i128,
-            &None,
-            &metadata,
+            &CreateStreamParams {
+                recipient: self.recipient.clone(),
+                deposit_amount: 1000_i128,
+                rate_per_second: 1_i128,
+                start_time: 0u64,
+                cliff_time: 0u64,
+                end_time: 1000u64,
+                withdraw_dust_threshold: Some(0_i128),
+                memo: None,
+                metadata,
+                kind: StreamKind::Linear,
+                irrevocable: None,
+                witness: None,
+            },
         )
     }
 }
@@ -187,15 +192,20 @@ fn test_metadata_too_many_keys_rejected() {
     let meta = ctx.metadata_n(MAX_METADATA_KEYS + 1);
     let result = ctx.client().try_create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0_i128,
-        &None,
-        &Some(meta),
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0_i128),
+            memo: None,
+            metadata: Some(meta),
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
     match result {
         Err(Ok(ContractError::MetadataTooLarge)) => {}
@@ -233,15 +243,20 @@ fn test_metadata_key_exceeds_limit_rejected() {
     meta.set(key, ctx.make_val("v"));
     let result = ctx.client().try_create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0_i128,
-        &None,
-        &Some(meta),
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0_i128),
+            memo: None,
+            metadata: Some(meta),
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
     match result {
         Err(Ok(ContractError::MetadataTooLarge)) => {}
@@ -277,15 +292,20 @@ fn test_metadata_value_exceeds_limit_rejected() {
     meta.set(ctx.make_key("k"), value);
     let result = ctx.client().try_create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0_i128,
-        &None,
-        &Some(meta),
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0_i128),
+            memo: None,
+            metadata: Some(meta),
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
     match result {
         Err(Ok(ContractError::MetadataTooLarge)) => {}
@@ -324,15 +344,20 @@ fn test_metadata_aggregate_exceeds_limit_rejected() {
     }
     let result = ctx.client().try_create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0_i128,
-        &None,
-        &Some(meta),
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0_i128),
+            memo: None,
+            metadata: Some(meta),
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
     match result {
         Err(Ok(ContractError::MetadataTooLarge)) => {}
@@ -460,6 +485,9 @@ fn test_create_streams_batch_each_entry_stores_own_metadata() {
             withdraw_dust_threshold: None,
             memo: None,
             metadata: Some(meta_a.clone()),
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
         },
         CreateStreamParams {
             recipient: recipient_b.clone(),
@@ -471,6 +499,9 @@ fn test_create_streams_batch_each_entry_stores_own_metadata() {
             withdraw_dust_threshold: None,
             memo: None,
             metadata: Some(meta_b.clone()),
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
         },
     ];
 
@@ -513,6 +544,9 @@ fn test_create_streams_batch_none_metadata_stored_as_none() {
             withdraw_dust_threshold: None,
             memo: None,
             metadata: None,
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
         },
     ];
 
@@ -548,6 +582,8 @@ fn test_create_streams_relative_with_metadata() {
             withdraw_dust_threshold: None,
             memo: None,
             metadata: Some(meta.clone()),
+            kind: StreamKind::Linear,
+            irrevocable: None,
         },
     ];
 
@@ -593,6 +629,9 @@ fn test_create_streams_partial_invalid_metadata_fails_entry() {
             withdraw_dust_threshold: None,
             memo: None,
             metadata: Some(bad_meta),
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
         },
     ];
 
@@ -625,15 +664,20 @@ fn test_metadata_validation_failure_does_not_allocate_stream_id() {
 
     let _ = ctx.client().try_create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0_i128,
-        &None,
-        &Some(bad_meta),
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0_i128),
+            memo: None,
+            metadata: Some(bad_meta),
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     let after_count = ctx.client().get_stream_count();
@@ -656,15 +700,20 @@ fn test_metadata_validation_failure_no_token_movement() {
 
     let _ = ctx.client().try_create_stream(
         &ctx.sender,
-        &ctx.recipient,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0_i128,
-        &None,
-        &Some(meta),
+        &CreateStreamParams {
+            recipient: ctx.recipient.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0_i128),
+            memo: None,
+            metadata: Some(meta),
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     let balance_after = ctx.token.balance(&ctx.sender);
@@ -706,28 +755,38 @@ fn test_two_streams_independent_metadata() {
 
     let id_a = ctx.client().create_stream(
         &ctx.sender,
-        &recipient_a,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0_i128,
-        &None,
-        &Some(meta_a),
+        &CreateStreamParams {
+            recipient: recipient_a.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0_i128),
+            memo: None,
+            metadata: Some(meta_a),
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     let id_b = ctx.client().create_stream(
         &ctx.sender,
-        &recipient_b,
-        &1000_i128,
-        &1_i128,
-        &0u64,
-        &0u64,
-        &1000u64,
-        &0_i128,
-        &None,
-        &Some(meta_b),
+        &CreateStreamParams {
+            recipient: recipient_b.clone(),
+            deposit_amount: 1000_i128,
+            rate_per_second: 1_i128,
+            start_time: 0u64,
+            cliff_time: 0u64,
+            end_time: 1000u64,
+            withdraw_dust_threshold: Some(0_i128),
+            memo: None,
+            metadata: Some(meta_b),
+            kind: StreamKind::Linear,
+            irrevocable: None,
+            witness: None,
+        },
     );
 
     let got_a = ctx.client().get_stream_metadata(&id_a).unwrap();
@@ -749,17 +808,161 @@ fn test_two_streams_independent_metadata() {
 }
 
 // ---------------------------------------------------------------------------
+// clone_stream: metadata is inherited by the cloned stream
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_metadata_inherited_by_clone_stream() {
+    let ctx = Ctx::setup();
+    let mut meta: Map<Bytes, Bytes> = Map::new(&ctx.env);
+    meta.set(ctx.make_key("ref"), ctx.make_val("CLONE_TEST"));
+    let source_id = ctx.create_stream_with_metadata(Some(meta.clone()));
+
+    // Advance past start so cloning is valid.
+    ctx.env.ledger().set_timestamp(1);
+    let new_recipient = Address::generate(&ctx.env);
+    let cloned_id = ctx.client().clone_stream(
+        &source_id,
+        &new_recipient,
+        &1u64,
+        &1000u64,
+        &1000i128,
+        &false,
+    );
+
+    let got = ctx.client().get_stream_metadata(&cloned_id).unwrap();
+    assert_eq!(
+        got.get(ctx.make_key("ref")).unwrap(),
+        ctx.make_val("CLONE_TEST"),
+        "cloned stream must inherit source metadata"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// top_up_stream: metadata is unchanged after top-up
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_metadata_unchanged_after_top_up() {
+    let ctx = Ctx::setup();
+    let mut meta: Map<Bytes, Bytes> = Map::new(&ctx.env);
+    meta.set(ctx.make_key("ref"), ctx.make_val("TOPUP_TEST"));
+    let stream_id = ctx.create_stream_with_metadata(Some(meta.clone()));
+
+    ctx.client()
+        .top_up_stream(&stream_id, &ctx.sender, &500_i128);
+
+    let got = ctx.client().get_stream_metadata(&stream_id).unwrap();
+    assert_eq!(
+        got.get(ctx.make_key("ref")).unwrap(),
+        ctx.make_val("TOPUP_TEST"),
+        "metadata must survive top-up"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// create_stream_from_template: metadata is passed through
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_metadata_from_template() {
+    let ctx = Ctx::setup();
+
+    // Register a template first.
+    let template_id = ctx.client().register_stream_template(
+        &ctx.sender,
+        &0u64,    // start_delay
+        &0u64,    // cliff_delay
+        &1000u64, // duration
+    );
+
+    let mut meta: Map<Bytes, Bytes> = Map::new(&ctx.env);
+    meta.set(ctx.make_key("src"), ctx.make_val("template"));
+
+    let stream_id = ctx.client().create_stream_from_template(
+        &ctx.sender,
+        &template_id,
+        &ctx.recipient,
+        &1000_i128,
+        &1_i128,
+        &0_i128,
+        &None,
+        &Some(meta.clone()),
+        &StreamKind::Linear,
+        &None,
+    );
+
+    let got = ctx.client().get_stream_metadata(&stream_id).unwrap();
+    assert_eq!(
+        got.get(ctx.make_key("src")).unwrap(),
+        ctx.make_val("template"),
+        "metadata from template must be stored"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: empty key (0 bytes) is valid
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_metadata_empty_key_valid() {
+    let ctx = Ctx::setup();
+    let mut meta: Map<Bytes, Bytes> = Map::new(&ctx.env);
+    meta.set(ctx.make_key(""), ctx.make_val("v"));
+    let stream_id = ctx.create_stream_with_metadata(Some(meta));
+    let got = ctx.client().get_stream_metadata(&stream_id).unwrap();
+    assert_eq!(
+        got.get(ctx.make_key("")).unwrap(),
+        ctx.make_val("v"),
+        "empty key must be accepted"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: empty value (0 bytes) is valid
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_metadata_empty_value_valid() {
+    let ctx = Ctx::setup();
+    let mut meta: Map<Bytes, Bytes> = Map::new(&ctx.env);
+    meta.set(ctx.make_key("k"), ctx.make_val(""));
+    let stream_id = ctx.create_stream_with_metadata(Some(meta));
+    let got = ctx.client().get_stream_metadata(&stream_id).unwrap();
+    assert_eq!(
+        got.get(ctx.make_key("k")).unwrap(),
+        ctx.make_val(""),
+        "empty value must be accepted"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: metadata with all keys at max byte length
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_metadata_all_keys_at_max_byte_length() {
+    let ctx = Ctx::setup();
+    // 2 entries × (32-byte key + 1-byte value) = 66 bytes < 512
+    let mut meta: Map<Bytes, Bytes> = Map::new(&ctx.env);
+    let key1 = Bytes::from_slice(&ctx.env, &vec![1u8; MAX_METADATA_KEY_BYTES as usize]);
+    let key2 = Bytes::from_slice(&ctx.env, &vec![2u8; MAX_METADATA_KEY_BYTES as usize]);
+    meta.set(key1.clone(), ctx.make_val("a"));
+    meta.set(key2.clone(), ctx.make_val("b"));
+    let stream_id = ctx.create_stream_with_metadata(Some(meta));
+    let got = ctx.client().get_stream_metadata(&stream_id).unwrap();
+    assert_eq!(got.get(key1).unwrap(), ctx.make_val("a"));
+    assert_eq!(got.get(key2).unwrap(), ctx.make_val("b"));
+}
+
+// ---------------------------------------------------------------------------
 // CONTRACT_VERSION bumped to 6 (V5 added metadata extension; V6 changed
 // sweep_excess to admin-only auth so cold treasury destinations need not
 // co-sign with the admin)
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_contract_version_is_6() {
+fn test_contract_version_is_9() {
     let ctx = Ctx::setup();
-    assert_eq!(
-        ctx.client().version(),
-        6,
-        "CONTRACT_VERSION must be 6 after sweep_excess auth change"
-    );
+    assert_eq!(ctx.client().version(), 9, "CONTRACT_VERSION must be 9");
 }
