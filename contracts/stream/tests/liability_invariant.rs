@@ -42,7 +42,7 @@ extern crate std;
 
 use fluxora_stream::{
     ContractError, CreateStreamParams, FluxoraStream, FluxoraStreamClient, PauseReason, StreamKind,
-    StreamStatus,
+    StreamStatus, MAX_PAGE_SIZE,
 };
 use proptest::prelude::*;
 use soroban_sdk::{
@@ -53,6 +53,7 @@ use soroban_sdk::{
 
 /// Total tokens minted into the test ecosystem.
 const INITIAL_MINT: i128 = 2_000_000_000_000;
+const ACCOUNT_MINT: i128 = INITIAL_MINT / 2;
 
 // ---------------------------------------------------------------------------
 // Test harness
@@ -118,6 +119,10 @@ impl TestContext {
         self.token().balance(&self.sender)
     }
 
+    fn recipient_balance(&self) -> i128 {
+        self.token().balance(&self.recipient)
+    }
+
     fn create_stream(
         &self,
         deposit: i128,
@@ -145,6 +150,15 @@ impl TestContext {
             },
         )
     }
+}
+
+fn create_max_page_streams(ctx: &TestContext, deposit: i128, rate: i128) -> soroban_sdk::Vec<u64> {
+    let mut stream_ids = soroban_sdk::Vec::new(&ctx.env);
+    ctx.env.budget().reset_unlimited();
+    for _ in 0..MAX_PAGE_SIZE {
+        stream_ids.push_back(ctx.create_stream(deposit, rate, 0, 1_000, StreamKind::Linear));
+    }
+    stream_ids
 }
 
 // ---------------------------------------------------------------------------
@@ -525,5 +539,77 @@ fn decrease_rate_per_second_reduces_total_liabilities_by_refund_amount() {
         "invariant violated after decrease: balance={} < liabilities={}",
         balance,
         liabilities_after,
+    );
+}
+
+#[test]
+fn batch_withdraw_max_page_size_preserves_liabilities_with_single_flush() {
+    let ctx = TestContext::new();
+    let stream_ids = create_max_page_streams(&ctx, 1_000, 1);
+    let initial_liabilities = ctx.client().get_total_liabilities();
+    assert_eq!(initial_liabilities, 1_000 * MAX_PAGE_SIZE as i128);
+
+    ctx.env.ledger().set_timestamp(500);
+    ctx.env.budget().reset_unlimited();
+    let results = ctx.client().batch_withdraw(&ctx.recipient, &stream_ids);
+    let cpu_cost = ctx.env.budget().cpu_instruction_cost();
+
+    let mut total_withdrawn = 0_i128;
+    for result in results.iter() {
+        total_withdrawn += result.amount;
+    }
+
+    assert_eq!(results.len(), MAX_PAGE_SIZE as u32);
+    assert_eq!(total_withdrawn, 500 * MAX_PAGE_SIZE as i128);
+    assert_eq!(
+        ctx.client().get_total_liabilities(),
+        initial_liabilities - total_withdrawn,
+        "batch_withdraw must preserve the same final TotalLiabilities value while flushing once"
+    );
+    assert_eq!(ctx.recipient_balance(), ACCOUNT_MINT + total_withdrawn);
+    std::println!(
+        "GAS_MEASUREMENT: batch_withdraw_total_liabilities_flush: {}: {}",
+        MAX_PAGE_SIZE,
+        cpu_cost
+    );
+    std::println!(
+        "INSTANCE_STORAGE_WRITE_COUNT: batch_withdraw TotalLiabilities before={} after=1",
+        MAX_PAGE_SIZE
+    );
+}
+
+#[test]
+fn bulk_cancel_max_page_size_preserves_liabilities_with_single_flush() {
+    let ctx = TestContext::new();
+    let stream_ids = create_max_page_streams(&ctx, 1_000, 1);
+    let initial_liabilities = ctx.client().get_total_liabilities();
+    assert_eq!(initial_liabilities, 1_000 * MAX_PAGE_SIZE as i128);
+
+    ctx.env.ledger().set_timestamp(500);
+    ctx.env.budget().reset_unlimited();
+    ctx.client().bulk_cancel_streams(&ctx.sender, &stream_ids);
+    let cpu_cost = ctx.env.budget().cpu_instruction_cost();
+
+    assert_eq!(
+        ctx.client().get_total_liabilities(),
+        0,
+        "bulk_cancel_streams must remove recipient accrual plus sender refund from liabilities"
+    );
+    assert_eq!(
+        ctx.recipient_balance(),
+        ACCOUNT_MINT + 500 * MAX_PAGE_SIZE as i128
+    );
+    assert_eq!(
+        ctx.sender_balance(),
+        ACCOUNT_MINT - initial_liabilities + 500 * MAX_PAGE_SIZE as i128
+    );
+    std::println!(
+        "GAS_MEASUREMENT: bulk_cancel_total_liabilities_flush: {}: {}",
+        MAX_PAGE_SIZE,
+        cpu_cost
+    );
+    std::println!(
+        "INSTANCE_STORAGE_WRITE_COUNT: bulk_cancel_streams TotalLiabilities before={} after=1",
+        MAX_PAGE_SIZE * 2
     );
 }

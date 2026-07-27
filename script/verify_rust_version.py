@@ -219,7 +219,7 @@ def rustc_version() -> str:
 
 def main() -> int:
     try:
-        expected = pinned_channel()
+        expected = pinned_channel(TOOLCHAIN_FILE)
         actual = rustc_version()
     except Exception as exc:
         print(f"::error::{exc}", file=sys.stderr)
@@ -235,7 +235,11 @@ def main() -> int:
     print(f"Rust version matches pinned {expected}")
 
     # Check required targets
-    required_targets = pinned_targets()
+    try:
+        required_targets = pinned_targets(TOOLCHAIN_FILE)
+    except Exception as exc:
+        print(f"::error::{exc}", file=sys.stderr)
+        return 1
     if required_targets:
         have_targets = installed_targets()
         missing_targets = [t for t in required_targets if t not in have_targets]
@@ -248,7 +252,11 @@ def main() -> int:
         print("Installed targets match requirements")
 
     # Check required components
-    required_components = pinned_components()
+    try:
+        required_components = pinned_components(TOOLCHAIN_FILE)
+    except Exception as exc:
+        print(f"::error::{exc}", file=sys.stderr)
+        return 1
     if required_components:
         have_components = installed_components()
         missing_components = [

@@ -36,21 +36,26 @@ treasury tooling) can use this reference to handle protocol exceptions correctly
 | `TemplateUnauthorized` | 22 | Caller is not authorized to delete a template | `delete_stream_template` |
 | `PauseReasonTooLong` | 23 | Pause reason string exceeds `MAX_PAUSE_REASON_BYTES` | `pause_protocol` |
 | `ReservationNotFound` | 24 | No ID reservation exists for the specified holder | `release_id_reservation`, `reclaim_expired_id_reservation` |
-| `ReservationStillActive` | 25 | Reservation has not yet expired and cannot be reclaimed | `reclaim_expired_id_reservation` |
-| `ReservationNotExpirable` | 26 | Reservation has no expiry and cannot be reclaimed | `reclaim_expired_id_reservation` |
-| `PauseReasonTooLong` | 27 | Pause reason string exceeds `MAX_PAUSE_REASON_BYTES` | `pause_protocol` |
-| `ClockRegression` | 28 | Ledger-backed accrual observed a timestamp lower than the previous accrual timestamp | `calculate_accrued`, `get_withdrawable`, `withdraw`, `withdraw_to`, `batch_withdraw`, `batch_withdraw_to`, rate changes, `cancel_stream`, auto-claim paths |
-| `MetadataTooLarge` | 29 | Stream metadata exceeds size limits | `create_stream`, `create_streams`, `create_streams_partial` |
-| `RateCapExceeded` | 30 | Rate per second exceeds the configured maximum | `create_stream`, `update_rate_per_second` |
-| `PauseCooldownActive` | 32 | Stream pause cooldown period is still active | `pause_stream` |
-| `WithdrawalTooFrequent` | 33 | Withdrawal attempted before minimum interval elapsed | `withdraw`, `delegated_withdraw`, `batch_withdraw` |
+| `ReservationNotExpirable` | 25 | Reservation has no expiry and cannot be reclaimed | `reclaim_expired_id_reservation` |
+| `ReservationStillActive` | 26 | Reservation has not yet expired and cannot be reclaimed | `reclaim_expired_id_reservation` |
+| `ClockRegression` | 27 | Ledger-backed accrual observed a timestamp lower than the previous accrual timestamp | `calculate_accrued`, `get_withdrawable`, `withdraw`, `withdraw_to`, `batch_withdraw`, `batch_withdraw_to`, rate changes, `cancel_stream`, auto-claim paths |
+| `UnsupportedStreamKind` | 28 | Stream kind is not supported by the called path | `create_stream`, accrual helpers |
+| `RateCapExceeded` | 29 | Rate per second exceeds the configured maximum | `create_stream`, `update_rate_per_second` |
+| `PauseCooldownActive` | 30 | Stream pause cooldown period is still active | `pause_stream` |
+| `WithdrawalTooFrequent` | 31 | Withdrawal attempted before minimum interval elapsed | `withdraw`, `delegated_withdraw`, `batch_withdraw` |
+| `MetadataTooLarge` | 32 | Stream metadata exceeds size limits | `create_stream`, `create_streams`, `create_streams_partial` |
 | `ReservationAlreadyActive` | 34 | A reservation is already active for this caller | `reserve_stream_ids` |
 | `InvalidDustThreshold` | 35 | Withdraw dust threshold is negative or exceeds deposit amount | `create_stream`, `create_streams`, `create_streams_partial`, `create_stream_relative`, `create_stream_from_template` |
-| `AutoRenewFundingUnavailable` | 36 | The sender cannot fund an auto-renewal with the available balance and allowance | `renew_stream` |
-| `OfferNotFound` | 37 | Stream offer not found (accepted, rejected, cancelled, or never existed) | `accept_stream_offer`, `reject_stream_offer`, `cancel_stream_offer`, `get_stream_offer` |
-| `OfferExpired` | 38 | Stream offer `expiry_time` has passed at acceptance | `accept_stream_offer` |
-| `OfferWrongRecipient` | 39 | Caller is not the intended recipient of this offer | `accept_stream_offer`, `reject_stream_offer` |
-| `OfferWrongSender` | 40 | Caller is not the original sender who created this offer | `cancel_stream_offer` |
+| `RateCooldownActive` | 36 | Rate update cooldown period is still active | `update_rate_per_second`, `decrease_rate_per_second` |
+| `AutoRenewFundingUnavailable` | 37 | The sender cannot fund an auto-renewal with the available balance and allowance | `renew_stream` |
+| `OfferNotFound` | 38 | Stream offer not found (accepted, rejected, cancelled, or never existed) | `accept_stream_offer`, `reject_stream_offer`, `cancel_stream_offer`, `get_stream_offer` |
+| `OfferExpired` | 39 | Stream offer `expiry_time` has passed at acceptance | `accept_stream_offer` |
+| `OfferWrongRecipient` | 40 | Caller is not the intended recipient of this offer | `accept_stream_offer`, `reject_stream_offer` |
+| `OfferWrongSender` | 41 | Caller is not the original sender who created this offer | `cancel_stream_offer` |
+| `KeeperGracePeriodNotElapsed` | 42 | Keeper cancellation attempted before the grace period elapsed | `keeper_cancel` |
+| `CyclicDelegation` | 43 | Recipient-share delegation would create a cycle | `delegate_recipient_share` |
+| `DelegationDepthExceeded` | 44 | Recipient-share delegation exceeds the maximum delegation depth | `delegate_recipient_share` |
+| `TokenVerificationFailed` | 88 | Token contract does not expose the expected SEP-41 interface during initialization | `init` |
 
 Non-error enum values used by stream creation and accrual:
 
@@ -692,6 +697,38 @@ match client.try_delegated_withdraw(&relayer, &stream_id, &signature, &nonce, &e
 
 ---
 
+### KeeperGracePeriodNotElapsed (42)
+
+**Definition**: A keeper attempted to cancel an ended stream before the configured grace period elapsed.
+
+**Client Action**: Wait until `end_time + KEEPER_GRACE_PERIOD_SECONDS` before retrying `keeper_cancel`.
+
+---
+
+### RateCooldownActive (36)
+
+**Definition**: A rate update was attempted before the minimum ledger cooldown elapsed.
+
+**Client Action**: Read the current ledger sequence and retry after `MIN_RATE_INTERVAL_LEDGERS` has elapsed from the stream's last rate change.
+
+---
+
+### CyclicDelegation (43)
+
+**Definition**: A recipient-share delegation would point back to the current recipient or an existing ancestor in the delegation chain.
+
+**Client Action**: Choose a recipient outside the existing delegation chain before retrying.
+
+---
+
+### DelegationDepthExceeded (44)
+
+**Definition**: A recipient-share delegation would exceed the protocol's maximum delegation depth.
+
+**Client Action**: Flatten or shorten the delegation chain before creating another delegation.
+
+---
+
 ### PauseReasonTooLong (23)
 
 **Definition**: `pause_protocol` received a reason string longer than `MAX_PAUSE_REASON_BYTES`.
@@ -734,7 +771,7 @@ match client.try_create_stream(..., &withdraw_dust_threshold, ...) {
 
 ---
 
-### AutoRenewFundingUnavailable (36)
+### AutoRenewFundingUnavailable (37)
 
 **Definition**: The sender on a stream opted-in to auto-renewal via `set_auto_renew` does not currently have sufficient token balance or allowance to fund a fresh deposit for the renewal.
 

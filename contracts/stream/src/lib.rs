@@ -10,20 +10,20 @@ pub(crate) mod storage;
 mod token_check;
 mod types;
 
-pub use types::{ClaimOwnershipTransferred, CreateStreamRelativeParams, MAX_POOL_RECIPIENTS};
-
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env, Map};
 use soroban_sdk::xdr::ToXdr;
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env, Map};
 pub use storage::*;
 use token_check::verify_token_behavior;
 
 pub fn reject_duplicate_ids(env: &Env, ids: &soroban_sdk::Vec<u64>) -> Result<(), ContractError> {
-    let mut seen = soroban_sdk::Map::new(env);
+    let mut seen = soroban_sdk::Vec::<u64>::new(env);
     for id in ids.iter() {
-        if seen.contains_key(&id) {
-            return Err(ContractError::DuplicateStreamId);
+        for existing in seen.iter() {
+            if existing == id {
+                return Err(ContractError::DuplicateStreamId);
+            }
         }
-        seen.set(id, ());
+        seen.push_back(id);
     }
     Ok(())
 }
@@ -1223,18 +1223,6 @@ pub struct StreamScheduleTemplate {
     pub duration: u64,
 }
 
-/// Maximum number of recipients allowed in a single pooled stream.
-pub const MAX_POOL_RECIPIENTS: u32 = 100;
-
-/// Emitted when a stream's claim ownership is transferred.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ClaimOwnershipTransferred {
-    pub stream_id: u64,
-    pub old_owner: Option<Address>,
-    pub new_owner: Address,
-}
-
 /// Relative-timing stream creation parameters (offsets from current timestamp).
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2187,9 +2175,6 @@ const KEEPER_FEE_BPS: u32 = 50;
 /// Maximum number of rotation entries stored in a per-stream history.
 const MAX_ROTATION_HISTORY: u32 = 50;
 
-/// Maximum number of recipients allowed in a single pooled stream.
-pub const MAX_POOL_RECIPIENTS: u32 = 100;
-
 // ---------------------------------------------------------------------------
 // Internal Helpers
 // ---------------------------------------------------------------------------
@@ -2332,8 +2317,8 @@ impl FluxoraStream {
             metadata: metadata.clone(),
             memo: memo.clone(),
             kind,
-            irrevocable: None,
-            witness: None,
+            irrevocable,
+            witness,
             delegation_depth: 0,
             parent_stream_id: None,
         };
@@ -2429,8 +2414,8 @@ impl FluxoraStream {
             metadata: metadata.clone(),
             memo: memo.clone(),
             kind,
-            irrevocable: None,
-            witness: None,
+            irrevocable,
+            witness,
             delegation_depth: 0,
             parent_stream_id: None,
         };
@@ -2671,6 +2656,7 @@ impl FluxoraStream {
             withdraw_dust_threshold,
             params.memo,
             params.kind,
+            params.metadata,
             params.irrevocable,
             params.witness,
             None,
@@ -2692,6 +2678,7 @@ impl FluxoraStream {
         withdraw_dust_threshold: i128,
         memo: Option<soroban_sdk::Bytes>,
         kind: StreamKind,
+        metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
         irrevocable: Option<bool>,
         witness: Option<Address>,
         max_lookback_ledgers: Option<u32>,
@@ -2720,7 +2707,7 @@ impl FluxoraStream {
 
         pull_token(&env, &sender, deposit_amount)?;
 
-        Self::persist_new_stream(
+        let stream_id = Self::persist_new_stream(
             &env,
             sender,
             recipient,
@@ -2732,8 +2719,14 @@ impl FluxoraStream {
             withdraw_dust_threshold,
             memo,
             kind,
-            None,
+            metadata,
+            irrevocable,
+            witness,
         )?;
+
+        if max_lookback_ledgers.is_some() {
+            set_max_lookback_ledgers(&env, stream_id, max_lookback_ledgers)?;
+        }
 
         Ok(stream_id)
     }
@@ -2843,6 +2836,8 @@ impl FluxoraStream {
             params.memo,
             params.kind,
             params.metadata,
+            params.irrevocable,
+            None,
         )
     }
 
@@ -4220,6 +4215,8 @@ impl FluxoraStream {
     /// - All streams are processed in order. Any error (stream not found, wrong recipient,
     ///   paused, or duplicate IDs) reverts the whole transaction.
     /// - Completed streams are not an error: they produce amount `0` and no events.
+    /// - `TotalLiabilities` is read once into a local accumulator and flushed once
+    ///   after the loop when the batch pays funds, preserving zero-withdrawable no-op behavior.
     pub fn batch_withdraw(
         env: Env,
         recipient: Address,
@@ -4265,6 +4262,8 @@ impl FluxoraStream {
 
         // Cache ledger timestamp once — it is constant within a single transaction.
         let now = current_accrual_timestamp(&env)?;
+        let mut total_liabilities = read_total_liabilities(&env);
+        let mut liabilities_changed = false;
 
         for param in withdrawals.iter() {
             let mut stream = load_stream(&env, param.stream_id)?;
@@ -4347,11 +4346,10 @@ impl FluxoraStream {
                 save_stream(&env, &stream);
                 reconcile_paused_stream_count(&env, previous_status, stream.status);
 
-                // Reduce liabilities as tokens leave the contract.
-                let liabilities = read_total_liabilities(&env)
-                    .checked_sub(withdrawable)
-                    .unwrap_or(0);
-                write_total_liabilities(&env, liabilities);
+                // Reduce liabilities locally as tokens leave the contract, then
+                // flush the shared TotalLiabilities slot once after the batch.
+                total_liabilities = total_liabilities.checked_sub(withdrawable).unwrap_or(0);
+                liabilities_changed = true;
 
                 push_token(&env, &stream.recipient, withdrawable)?;
 
@@ -4376,6 +4374,10 @@ impl FluxoraStream {
                 stream_id: param.stream_id,
                 amount: withdrawable,
             });
+        }
+
+        if liabilities_changed {
+            write_total_liabilities(&env, total_liabilities);
         }
 
         Ok(results)
@@ -5966,6 +5968,8 @@ impl FluxoraStream {
             stream.memo.clone(),
             stream.kind,
             stream.metadata.clone(),
+            stream.irrevocable,
+            stream.witness.clone(),
         )?;
         set_auto_renew_enabled(&env, new_stream_id, true);
 
@@ -6821,9 +6825,7 @@ impl FluxoraStream {
             .as_ref()
             .ok_or(ContractError::InvalidParams)?;
 
-        if Self::ed25519_pubkey_from_address(&env, witness_addr)
-            != witness_public_key.to_array()
-        {
+        if Self::ed25519_pubkey_from_address(&env, witness_addr) != witness_public_key.to_array() {
             return Err(ContractError::InvalidSignature);
         }
 
@@ -8465,7 +8467,8 @@ impl FluxoraStream {
     /// # Security
     /// - Atomic: any failure in validation or execution reverts the entire batch.
     /// - CEI pattern: state is persisted before every external token transfer.
-    /// - Liabilities are reduced per-stream before the aggregate refund.
+    /// - Liabilities are accumulated locally and flushed once after all stream
+    ///   cancellations succeed.
     pub fn bulk_cancel_streams(
         env: Env,
         sender: Address,
@@ -8508,6 +8511,7 @@ impl FluxoraStream {
         // ── Phase 2: Execute cancellations ────────────────────────────────────
         let now = env.ledger().timestamp();
         let mut aggregate_refund: i128 = 0;
+        let mut total_liabilities = read_total_liabilities(&env);
 
         for i in 0..n {
             let mut stream = streams.get(i).unwrap();
@@ -8543,10 +8547,9 @@ impl FluxoraStream {
                     .checked_add(recipient_accrual)
                     .unwrap_or(i128::MAX);
 
-                let liabilities = read_total_liabilities(&env)
+                total_liabilities = total_liabilities
                     .checked_sub(recipient_accrual)
                     .unwrap_or(0);
-                write_total_liabilities(&env, liabilities);
 
                 push_token(&env, &stream.recipient, recipient_accrual)?;
 
@@ -8573,10 +8576,7 @@ impl FluxoraStream {
                     .checked_add(refund_amount)
                     .ok_or(ContractError::ArithmeticOverflow)?;
 
-                let liabilities = read_total_liabilities(&env)
-                    .checked_sub(refund_amount)
-                    .unwrap_or(0);
-                write_total_liabilities(&env, liabilities);
+                total_liabilities = total_liabilities.checked_sub(refund_amount).unwrap_or(0);
             }
 
             env.events().publish(
@@ -8588,6 +8588,8 @@ impl FluxoraStream {
         }
 
         // ── Single aggregate refund to sender ─────────────────────────────────
+        write_total_liabilities(&env, total_liabilities);
+
         if aggregate_refund > 0 {
             push_token(&env, &sender, aggregate_refund)?;
         }

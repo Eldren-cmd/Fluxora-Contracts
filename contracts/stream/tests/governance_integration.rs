@@ -821,9 +821,7 @@ fn find_contract_event_with_topic(
             return (symbol, data);
         }
     }
-    panic!(
-        "no event with the expected topic emitted by the contract"
-    );
+    panic!("no event with the expected topic emitted by the contract");
 }
 
 #[test]
