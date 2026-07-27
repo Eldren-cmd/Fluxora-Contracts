@@ -1030,8 +1030,7 @@ fn test_set_batch_cap_enforcement_emits_event_true() {
     let (_, topics, data) = events.get(events.len() - 1).unwrap();
     let topic0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
     assert_eq!(topic0, soroban_sdk::symbol_short!("batch_cap"));
-    let payload: fluxora_factory::BatchCapEnforcementUpdated =
-        data.try_into_val(&env).unwrap();
+    let payload: fluxora_factory::BatchCapEnforcementUpdated = data.try_into_val(&env).unwrap();
     assert_eq!(payload.enabled, true);
 }
 
@@ -1054,7 +1053,6 @@ fn test_set_batch_cap_enforcement_emits_event_false() {
     let (_, topics, data) = events.get(events.len() - 1).unwrap();
     let topic0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
     assert_eq!(topic0, soroban_sdk::symbol_short!("batch_cap"));
-    let payload: fluxora_factory::BatchCapEnforcementUpdated =
-        data.try_into_val(&env).unwrap();
+    let payload: fluxora_factory::BatchCapEnforcementUpdated = data.try_into_val(&env).unwrap();
     assert_eq!(payload.enabled, false);
 }

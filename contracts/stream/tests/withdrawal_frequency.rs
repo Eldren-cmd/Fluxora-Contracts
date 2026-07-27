@@ -33,13 +33,25 @@ mod mock_token {
         pub fn mint(env: Env, _to: Address, _amount: i128) {
             env.storage().instance().extend_ttl(100_000, 100_000);
         }
-        pub fn approve(env: Env, _from: Address, _spender: Address, _amount: i128, _expiration_ledger: u32) {
+        pub fn approve(
+            env: Env,
+            _from: Address,
+            _spender: Address,
+            _amount: i128,
+            _expiration_ledger: u32,
+        ) {
             env.storage().instance().extend_ttl(100_000, 100_000);
         }
         pub fn transfer(env: Env, _from: Address, _to: Address, _amount: i128) {
             env.storage().instance().extend_ttl(100_000, 100_000);
         }
-        pub fn transfer_from(env: Env, _spender: Address, _from: Address, _to: Address, _amount: i128) {
+        pub fn transfer_from(
+            env: Env,
+            _spender: Address,
+            _from: Address,
+            _to: Address,
+            _amount: i128,
+        ) {
             env.storage().instance().extend_ttl(100_000, 100_000);
         }
         pub fn balance(env: Env, _id: Address) -> i128 {
@@ -637,7 +649,10 @@ fn zero_withdrawable_does_not_consume_the_interval() {
     ctx.advance_ledger(10); // 50 accrued, below the dust threshold.
 
     assert_eq!(ctx.client.withdraw(&stream_id), 0);
-    assert_eq!(ctx.client.get_stream_state(&stream_id).last_withdraw_ledger, 0);
+    assert_eq!(
+        ctx.client.get_stream_state(&stream_id).last_withdraw_ledger,
+        0
+    );
 
     ctx.advance_ledger(10); // 100 accrued, exactly at the threshold.
     assert_eq!(ctx.client.withdraw(&stream_id), 100);
@@ -663,7 +678,8 @@ fn batch_withdraw_shares_the_per_stream_interval() {
 
     ctx.client.batch_withdraw_to(&ctx.recipient, &withdrawals);
     assert_eq!(
-        ctx.client.try_batch_withdraw_to(&ctx.recipient, &withdrawals),
+        ctx.client
+            .try_batch_withdraw_to(&ctx.recipient, &withdrawals),
         Err(Ok(ContractError::WithdrawalTooFrequent))
     );
 
@@ -714,15 +730,11 @@ fn delegated_withdrawal_obeys_the_same_ledger_limit() {
         &signing_key,
         &delegated_message(&ctx.env, stream_id, 0, deadline, 0),
     );
-    assert!(ctx.client.delegated_withdraw(
-        &stream_id,
-        &relayer,
-        &public_key,
-        &0,
-        &deadline,
-        &0,
-        &first,
-    ) > 0);
+    assert!(
+        ctx.client
+            .delegated_withdraw(&stream_id, &relayer, &public_key, &0, &deadline, &0, &first,)
+            > 0
+    );
 
     let second = sign_message(
         &ctx.env,
@@ -731,7 +743,13 @@ fn delegated_withdrawal_obeys_the_same_ledger_limit() {
     );
     assert_eq!(
         ctx.client.try_delegated_withdraw(
-            &stream_id, &relayer, &public_key, &1, &deadline, &0, &second,
+            &stream_id,
+            &relayer,
+            &public_key,
+            &1,
+            &deadline,
+            &0,
+            &second,
         ),
         Err(Ok(ContractError::WithdrawalTooFrequent))
     );
@@ -995,7 +1013,7 @@ fn lookback_cliff_only_full_claim_after_cliff() {
 
     // Advance past cliff, and well past the lookback window.
     ctx.advance_ledger(60); // t=550, then 60 more... = 850
-    // Claimable = full deposit because CliffOnly entitlement bypasses cap.
+                            // Claimable = full deposit because CliffOnly entitlement bypasses cap.
     assert_eq!(
         ctx.client.get_withdrawable(&stream_id).unwrap(),
         1000,

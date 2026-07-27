@@ -816,9 +816,5 @@ fn test_two_streams_independent_metadata() {
 #[test]
 fn test_contract_version_is_9() {
     let ctx = Ctx::setup();
-    assert_eq!(
-        ctx.client().version(),
-        9,
-        "CONTRACT_VERSION must be 9"
-    );
+    assert_eq!(ctx.client().version(), 9, "CONTRACT_VERSION must be 9");
 }
