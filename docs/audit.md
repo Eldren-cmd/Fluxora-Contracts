@@ -95,6 +95,7 @@ The public entrypoint table below is kept in sync with every `pub fn` on the `Fl
 | `set_global_emergency_paused` | `env: Env`, `paused: bool` | — | Admin | Toggle global emergency pause blocking operational mutations. |
 | `set_lookback_window` | `env: Env`, `stream_id: u64`, `sender: Address`, `max_lookback_ledgers: Option<u32>` | — | Sender | Set or clear the per-stream lookback bound; rejects `Some(0)` and rejects Cancelled streams. |
 | `set_max_rate_per_second` | `env: Env`, `max_rate: i128` | — | Admin | Set maximum allowed stream rate for future rate updates. |
+| `set_stream_decommissioned` | `env: Env`, `stream_id: u64`, `sender: Address`, `decommissioned: bool` | — | Sender | Flag or clear stream decommission mode; blocks schedule and funding mutations while preserving withdrawals, pause/resume, and cancellation. |
 | `shorten_stream_end_time` | `env: Env`, `stream_id: u64`, `new_end_time: u64` | — | Sender | Reduce `end_time` and refund unstreamed tokens to sender; Active or Paused only. |
 | `sweep_excess` | `env: Env`, `recipient: Address` | `i128` | Admin | Recover token balance exceeding tracked liabilities to an admin-chosen address. |
 | `top_up_stream` | `env: Env`, `stream_id: u64`, `funder: Address`, `amount: i128` | — | Funder | Pull additional tokens into stream deposit; Active or Paused only. |
@@ -179,6 +180,22 @@ Auditors can use these as a checklist; the implementation is intended to preserv
 
 13. **Reentrancy Guard**
 
+    > **⚠️ OPEN / UNADDRESSED FINDING — This invariant is underspecified.**
+    >
+    > The header exists but no requirements, checks, or enforcement criteria
+    > are defined. See `docs/maintainer-security-checklist.md §14` for the
+    > full open-finding report and required maintainer follow-up.
+    >
+    > **Current implementation reality:**
+    > - A custom reentrancy lock (`DataKey::ReentrancyLock`) exists in storage
+    >   but is only used by `sweep_excess` and `trigger_auto_claim`.
+    > - `CEI_ANALYSIS.md` (Issue #262) claims `withdraw`, `withdraw_to`,
+    >   `batch_withdraw`, `cancel_stream`, and `cancel_stream_as_admin` are
+    >   wrapped in the lock, but the code does not reflect this.
+    > - All other token-transfer entrypoints rely solely on CEI ordering.
+    >
+    > **Action needed:** Specify this invariant's requirements and reconcile
+    > documentation with actual code coverage before the next formal audit.
 
 14. **Contract balance consistency**  
     Deposit is pulled in `create_stream`; refunds and withdrawals only move amounts derived from that deposit (unstreamed to sender, accrued to recipient). No minting or arbitrary transfers.

@@ -44,6 +44,7 @@ treasury tooling) can use this reference to handle protocol exceptions correctly
 | `PauseCooldownActive` | 30 | Stream pause cooldown period is still active | `pause_stream` |
 | `WithdrawalTooFrequent` | 31 | Withdrawal attempted before minimum interval elapsed | `withdraw`, `delegated_withdraw`, `batch_withdraw` |
 | `MetadataTooLarge` | 32 | Stream metadata exceeds size limits | `create_stream`, `create_streams`, `create_streams_partial` |
+| `KeeperGracePeriodNotElapsed` | 33 | Keeper cancellation attempted before the grace period elapsed | `keeper_cancel` |
 | `ReservationAlreadyActive` | 34 | A reservation is already active for this caller | `reserve_stream_ids` |
 | `InvalidDustThreshold` | 35 | Withdraw dust threshold is negative or exceeds deposit amount | `create_stream`, `create_streams`, `create_streams_partial`, `create_stream_relative`, `create_stream_from_template` |
 | `RateCooldownActive` | 36 | Rate update cooldown period is still active | `update_rate_per_second`, `decrease_rate_per_second` |
@@ -52,7 +53,6 @@ treasury tooling) can use this reference to handle protocol exceptions correctly
 | `OfferExpired` | 39 | Stream offer `expiry_time` has passed at acceptance | `accept_stream_offer` |
 | `OfferWrongRecipient` | 40 | Caller is not the intended recipient of this offer | `accept_stream_offer`, `reject_stream_offer` |
 | `OfferWrongSender` | 41 | Caller is not the original sender who created this offer | `cancel_stream_offer` |
-| `KeeperGracePeriodNotElapsed` | 42 | Keeper cancellation attempted before the grace period elapsed | `keeper_cancel` |
 | `CyclicDelegation` | 43 | Recipient-share delegation would create a cycle | `delegate_recipient_share` |
 | `DelegationDepthExceeded` | 44 | Recipient-share delegation exceeds the maximum delegation depth | `delegate_recipient_share` |
 | `TokenVerificationFailed` | 88 | Token contract does not expose the expected SEP-41 interface during initialization | `init` |
@@ -697,7 +697,7 @@ match client.try_delegated_withdraw(&relayer, &stream_id, &signature, &nonce, &e
 
 ---
 
-### KeeperGracePeriodNotElapsed (42)
+### KeeperGracePeriodNotElapsed (33)
 
 **Definition**: A keeper attempted to cancel an ended stream before the configured grace period elapsed.
 

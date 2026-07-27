@@ -63,6 +63,26 @@ Metadata is also propagated through `create_streams`, `create_streams_relative`,
 - No token movement occurs if metadata validation fails.
 - `StreamCreated` event includes the `metadata` field for indexer consumption.
 
+#### Compatibility rules (which operations preserve metadata)
+
+Metadata is written once at stream creation and **never mutated** by any subsequent
+operation. The table below documents which entry-points preserve the metadata map
+and which are unaffected (metadata is not read or written):
+
+| Operation | Metadata behavior |
+|---|---|
+| `pause_stream` / `resume_stream` | Unchanged — metadata is not read or written. |
+| `cancel_stream` | Unchanged — metadata persists in storage for post-terminal queries. |
+| `withdraw` / `batch_withdraw` | Unchanged — withdrawal only touches `withdrawn_amount`. |
+| `top_up_stream` | Unchanged — only `deposit_amount` is modified. |
+| `update_rate_per_second` / `decrease_rate_per_second` | Unchanged — rate fields are modified; metadata is untouched. |
+| `extend_stream_end_time` | Unchanged — `end_time` and `deposit_amount` are modified. |
+| `transfer_sender` | Unchanged — only the `sender` field is rotated. |
+| `update_recipient` | Unchanged — only the `recipient` field is rotated. |
+| `delegate_recipient_share` | Unchanged — delegation splits the rate, not metadata. |
+| `clone_stream` | **Inherited** — the cloned stream receives `source.metadata.clone()`. |
+| `create_stream_from_template` | **Passed through** — caller-supplied metadata is validated and stored. |
+
 #### Example (Rust client)
 
 ```rust
@@ -147,6 +167,29 @@ cliff would permanently strand the recipient's entitlement.
 - `None` removes the bound entirely (back to `accrued - withdrawn` per claim).
 - `Some(0)` is rejected with `ContractError::InvalidParams` to avoid a meaningless
   zero-width window that would prevent any claim.
+
+## Decommission Mode (`set_stream_decommissioned`)
+
+Decommission mode provides a graceful wind-down mechanism for payment streams. When a sender flags a stream as decommissioned (`set_stream_decommissioned`), all mutation and parameter-modification entrypoints are blocked, while leaving withdrawal and termination operations fully functional. This allows recipients to continue withdrawing their accrued balance without risk of the sender changing rates, extending parameters, or topping up the stream.
+
+### Entrypoint Availability Table
+
+| Entrypoint | Allowed when `decommissioned == true`? | Error Code on Block | Notes |
+|---|---|---|---|
+| `set_stream_decommissioned` | Yes | N/A | Sender can toggle `decommissioned` state back to `false` unless `irrevocable` is set. |
+| `withdraw` / `withdraw_to` / `batch_withdraw` | **Yes** | N/A | Recipients can drain accrued balance without restriction. |
+| `pause_stream` / `resume_stream` | **Yes** | N/A | Operational pausing and resuming remain functional. |
+| `cancel_stream` / `cancel_stream_as_admin` | **Yes** | N/A | Stream can still be terminated early, freezing accrual and refunding remaining unstreamed tokens. |
+| `update_rate_per_second` | **No** | `ContractError::InvalidState` | Rate increases are blocked. |
+| `decrease_rate_per_second` | **No** | `ContractError::InvalidState` | Rate decreases are blocked. |
+| `top_up_stream` | **No** | `ContractError::InvalidState` | Additional funding deposits are blocked. |
+| `extend_stream_end_time` | **No** | `ContractError::InvalidState` | Schedule extension is blocked. |
+| `clone_stream` | **No** | `ContractError::InvalidState` | Cloning from a decommissioned source stream is blocked. |
+
+### Reversibility and Irrevocable Precedence
+
+1. **Sender Reversibility**: The stream sender can call `set_stream_decommissioned(env, stream_id, sender, false)` to restore full mutation capabilities.
+2. **Irrevocable Precedence**: If a stream is marked `irrevocable` (`irrevocable == Some(true)`), attempts to clear the decommissioned flag (`decommissioned = false`) return `ContractError::Unauthorized`.
 
 #### Success semantics (observable)
 
@@ -573,6 +616,51 @@ return min(checkpointed_amount + added, deposit_amount).max(0)
 if current_time < cliff_time  → return 0
 else                         → return deposit_amount
 ```
+
+#### CliffOnly accrual
+
+`CliffOnly` streams are lump-sum unlocks, not continuous streams. Unlike
+`Linear` streams, they do not multiply elapsed seconds by `rate_per_second`
+after the cliff. Once `current_time >= cliff_time`, the accrued amount is the
+full `deposit_amount`, clamped to the deposited ceiling. The configured
+`rate_per_second` is therefore not part of CliffOnly accrual; valid CliffOnly
+state stores `rate_per_second = 0` to preserve the one-shot model.
+
+Worked example: before the cliff
+
+```text
+deposit_amount  = 1_000
+rate_per_second = 0
+start_time      = 1_000
+cliff_time      = 1_600
+end_time        = 2_000
+current_time    = 1_599
+
+current_time < cliff_time
+accrued = 0
+```
+
+At `1_599`, the stream has not reached its unlock timestamp. A `Linear` stream
+may have time-based accrual hidden behind the cliff, but a `CliffOnly` stream
+has no partial accrual to expose.
+
+Worked example: at or after the cliff
+
+```text
+deposit_amount  = 1_000
+rate_per_second = 0
+start_time      = 1_000
+cliff_time      = 1_600
+end_time        = 2_000
+current_time    = 1_750
+
+current_time >= cliff_time
+accrued = min(deposit_amount, deposit_amount) = 1_000
+```
+
+At `1_750`, the recipient's lifetime accrual is the full deposit. The result
+remains `1_000` at `end_time` or later. The clamp guarantees CliffOnly accrual
+never exceeds `deposit_amount`.
 
 ### Rules
 
