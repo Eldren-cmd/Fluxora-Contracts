@@ -131,12 +131,14 @@ pub(crate) fn emit_contract_pause_changed(env: &Env, payload: ContractPauseChang
 
 /// Emit `pr_pause` event when protocol is paused.
 pub(crate) fn emit_protocol_paused(env: &Env, admin: Address, payload: ProtocolPaused) {
-    env.events().publish((symbol_short!("pr_pause"), admin), payload);
+    env.events()
+        .publish((symbol_short!("pr_pause"), admin), payload);
 }
 
 /// Emit `pr_resume` event when protocol is resumed.
 pub(crate) fn emit_protocol_resumed(env: &Env, admin: Address, payload: ProtocolResumed) {
-    env.events().publish((symbol_short!("pr_resume"), admin), payload);
+    env.events()
+        .publish((symbol_short!("pr_resume"), admin), payload);
 }
 
 /// Emit `ac_set` event when auto-claim destination is set.
@@ -159,7 +161,8 @@ pub(crate) fn emit_auto_claim_triggered(env: &Env, stream_id: u64, payload: Auto
 
 /// Emit `ex_swept` event when admin sweeps excess tokens.
 pub(crate) fn emit_excess_swept(env: &Env, recipient: Address, payload: ExcessSwept) {
-    env.events().publish((symbol_short!("ex_swept"), recipient), payload);
+    env.events()
+        .publish((symbol_short!("ex_swept"), recipient), payload);
 }
 
 /// Emit the `cloned` event when a stream is cloned.

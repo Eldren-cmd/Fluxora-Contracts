@@ -821,9 +821,14 @@ fn test_metadata_inherited_by_clone_stream() {
     // Advance past start so cloning is valid.
     ctx.env.ledger().set_timestamp(1);
     let new_recipient = Address::generate(&ctx.env);
-    let cloned_id = ctx
-        .client()
-        .clone_stream(&source_id, &new_recipient, &1u64, &1000u64, &1000i128, &false);
+    let cloned_id = ctx.client().clone_stream(
+        &source_id,
+        &new_recipient,
+        &1u64,
+        &1000u64,
+        &1000i128,
+        &false,
+    );
 
     let got = ctx.client().get_stream_metadata(&cloned_id).unwrap();
     assert_eq!(
@@ -866,8 +871,8 @@ fn test_metadata_from_template() {
     // Register a template first.
     let template_id = ctx.client().register_stream_template(
         &ctx.sender,
-        &0u64,  // start_delay
-        &0u64,  // cliff_delay
+        &0u64,    // start_delay
+        &0u64,    // cliff_delay
         &1000u64, // duration
     );
 

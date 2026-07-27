@@ -734,7 +734,9 @@ fn failed_and_unauthorized_operations_do_not_mutate_total_liabilities() {
     assert_eq!(liabilities_before, 4_000);
 
     // Attempt invalid top-up (0 amount)
-    let err_topup = ctx.client().try_top_up_stream(&stream_id, &ctx.sender, &0i128);
+    let err_topup = ctx
+        .client()
+        .try_top_up_stream(&stream_id, &ctx.sender, &0i128);
     assert!(err_topup.is_err(), "top_up with 0 amount must fail");
 
     assert_eq!(
@@ -744,7 +746,9 @@ fn failed_and_unauthorized_operations_do_not_mutate_total_liabilities() {
     );
 
     // Attempt invalid rate decrease (rate > current rate)
-    let err_rate = ctx.client().try_decrease_rate_per_second(&stream_id, &100i128);
+    let err_rate = ctx
+        .client()
+        .try_decrease_rate_per_second(&stream_id, &100i128);
     assert!(err_rate.is_err(), "invalid rate decrease must fail");
 
     assert_eq!(

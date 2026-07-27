@@ -515,7 +515,9 @@ fn test_set_stream_decommissioned_blocks_mutations_only() {
     assert_eq!(res_dec, Err(Ok(ContractError::InvalidState)));
 
     // 3. top_up_stream must fail with InvalidState
-    let res_topup = ctx.client.try_top_up_stream(&stream_id, &ctx.sender, &100_i128);
+    let res_topup = ctx
+        .client
+        .try_top_up_stream(&stream_id, &ctx.sender, &100_i128);
     assert_eq!(res_topup, Err(Ok(ContractError::InvalidState)));
 
     // 4. extend_stream_end_time must fail with InvalidState
@@ -524,21 +526,17 @@ fn test_set_stream_decommissioned_blocks_mutations_only() {
 
     // 5. clone_stream must fail with InvalidState
     let new_rec = Address::generate(&ctx.env);
-    let res_clone = ctx.client.try_clone_stream(
-        &stream_id,
-        &new_rec,
-        &0u64,
-        &1000u64,
-        &1000_i128,
-        &false,
-    );
+    let res_clone = ctx
+        .client
+        .try_clone_stream(&stream_id, &new_rec, &0u64, &1000u64, &1000_i128, &false);
     assert_eq!(res_clone, Err(Ok(ContractError::InvalidState)));
 
     // --- Allowed operations ---
 
     // 1. pause_stream & resume_stream work
     ctx.env.ledger().with_mut(|l| l.sequence_number += 100);
-    ctx.client.pause_stream(&stream_id, &PauseReason::Operational);
+    ctx.client
+        .pause_stream(&stream_id, &PauseReason::Operational);
     assert_eq!(
         ctx.client.get_stream_state(&stream_id).status,
         StreamStatus::Paused
@@ -573,15 +571,23 @@ fn test_set_stream_decommissioned_reversibility_and_irrevocable_precedence() {
     // Decommission
     ctx.client
         .set_stream_decommissioned(&stream_id, &ctx.sender, &true);
-    assert_eq!(ctx.client.get_stream_state(&stream_id).decommissioned, Some(true));
+    assert_eq!(
+        ctx.client.get_stream_state(&stream_id).decommissioned,
+        Some(true)
+    );
 
     // Revert back to false
     ctx.client
         .set_stream_decommissioned(&stream_id, &ctx.sender, &false);
-    assert_eq!(ctx.client.get_stream_state(&stream_id).decommissioned, Some(false));
+    assert_eq!(
+        ctx.client.get_stream_state(&stream_id).decommissioned,
+        Some(false)
+    );
 
     // After setting back to false, top_up_stream succeeds again
-    let res_topup = ctx.client.try_top_up_stream(&stream_id, &ctx.sender, &100_i128);
+    let res_topup = ctx
+        .client
+        .try_top_up_stream(&stream_id, &ctx.sender, &100_i128);
     assert!(res_topup.is_ok());
 
     // --- Irrevocable stream behavior ---
@@ -590,10 +596,15 @@ fn test_set_stream_decommissioned_reversibility_and_irrevocable_precedence() {
     // Decommission the irrevocable stream
     ctx.client
         .set_stream_decommissioned(&irr_stream_id, &ctx.sender, &true);
-    assert_eq!(ctx.client.get_stream_state(&irr_stream_id).decommissioned, Some(true));
+    assert_eq!(
+        ctx.client.get_stream_state(&irr_stream_id).decommissioned,
+        Some(true)
+    );
 
     // Attempting to reverse decommission on irrevocable stream fails with Unauthorized
-    let res_revert = ctx.client.try_set_stream_decommissioned(&irr_stream_id, &ctx.sender, &false);
+    let res_revert = ctx
+        .client
+        .try_set_stream_decommissioned(&irr_stream_id, &ctx.sender, &false);
     assert_eq!(res_revert, Err(Ok(ContractError::Unauthorized)));
 }
 
@@ -605,13 +616,17 @@ fn test_set_stream_decommissioned_guards() {
 
     // Non-sender cannot set decommissioned
     let attacker = Address::generate(&ctx.env);
-    let res_auth = ctx.client.try_set_stream_decommissioned(&stream_id, &attacker, &true);
+    let res_auth = ctx
+        .client
+        .try_set_stream_decommissioned(&stream_id, &attacker, &true);
     assert_eq!(res_auth, Err(Ok(ContractError::Unauthorized)));
 
     // Cancel stream
     ctx.client.cancel_stream(&stream_id);
 
     // Cannot set decommissioned on cancelled stream
-    let res_terminal = ctx.client.try_set_stream_decommissioned(&stream_id, &ctx.sender, &true);
+    let res_terminal = ctx
+        .client
+        .try_set_stream_decommissioned(&stream_id, &ctx.sender, &true);
     assert_eq!(res_terminal, Err(Ok(ContractError::InvalidState)));
 }

@@ -608,10 +608,10 @@ class TestRealErrorMd:
         assert "FactoryError (factory)" in real_sections
         assert "GovernanceError (governance)" in real_sections
 
-    def test_factory_has_16_variants(self, real_sections):
+    def test_factory_has_18_variants(self, real_sections):
         factory = real_sections["FactoryError (factory)"]
         codes = {e.code for e in factory}
-        assert codes == set(range(1, 17))
+        assert codes == set(range(1, 19))
 
     def test_stream_has_no_intra_collisions_after_fix(self, real_sections):
         """docs/error.md stream table was fixed: no intra-section collisions remain."""

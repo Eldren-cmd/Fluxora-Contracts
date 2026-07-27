@@ -12,7 +12,9 @@
 //!
 //! Priority: numeric overflow, underflow, boundary conditions.
 
-use fluxora_factory::{FactoryError, FluxoraFactory, FluxoraFactoryClient, MAX_MIN_DURATION_SECONDS};
+use fluxora_factory::{
+    FactoryError, FluxoraFactory, FluxoraFactoryClient, MAX_MIN_DURATION_SECONDS,
+};
 use fluxora_stream::{FluxoraStream, FluxoraStreamClient};
 use proptest::prelude::*;
 use soroban_sdk::{

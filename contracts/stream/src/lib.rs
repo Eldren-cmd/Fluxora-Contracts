@@ -10,20 +10,20 @@ pub(crate) mod storage;
 mod token_check;
 mod types;
 
-pub use types::{ClaimOwnershipTransferred, CreateStreamRelativeParams, MAX_POOL_RECIPIENTS};
-
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env, Map};
 use soroban_sdk::xdr::ToXdr;
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env, Map};
 pub use storage::*;
 use token_check::verify_token_behavior;
 
 pub fn reject_duplicate_ids(env: &Env, ids: &soroban_sdk::Vec<u64>) -> Result<(), ContractError> {
-    let mut seen = soroban_sdk::Map::new(env);
+    let mut seen = soroban_sdk::Vec::<u64>::new(env);
     for id in ids.iter() {
-        if seen.contains_key(id) {
-            return Err(ContractError::DuplicateStreamId);
+        for existing in seen.iter() {
+            if existing == id {
+                return Err(ContractError::DuplicateStreamId);
+            }
         }
-        seen.set(id, ());
+        seen.push_back(id);
     }
     Ok(())
 }
@@ -519,7 +519,7 @@ pub enum ContractError {
     /// Metadata payload exceeds the allowed size.
     MetadataTooLarge = 32,
     /// Keeper attempted to close a stream before the grace period elapsed.
-    KeeperGracePeriodNotElapsed = 42,
+    KeeperGracePeriodNotElapsed = 33,
     ReservationAlreadyActive = 34,
     /// Withdraw dust threshold is negative or exceeds deposit amount.
     InvalidDustThreshold = 35,
@@ -1214,7 +1214,33 @@ pub struct StreamScheduleTemplate {
     pub duration: u64,
 }
 
-/// Maximum number of recipients allowed in a single pooled stream.
+/// Relative-timing stream creation parameters (offsets from current timestamp).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreateStreamRelativeParams {
+    /// Address that will receive streamed tokens for this stream entry.
+    pub recipient: Address,
+    /// Total amount escrowed for this stream entry.
+    pub deposit_amount: i128,
+    /// Streaming speed in tokens per second for this stream entry.
+    pub rate_per_second: i128,
+    /// Delay (in seconds) before stream accrual starts, relative to current timestamp.
+    pub start_delay: u64,
+    /// Delay (in seconds) before withdrawals are allowed, relative to current timestamp.
+    pub cliff_delay: u64,
+    /// Total duration the stream runs (in seconds) from start_time to end_time.
+    pub duration: u64,
+    /// Optional withdrawal threshold (raw units) to reduce fee spam.
+    pub withdraw_dust_threshold: Option<i128>,
+    /// Optional bounded memo for indexer correlation (e.g. payroll batch ID).
+    pub memo: Option<soroban_sdk::Bytes>,
+    /// The architectural style of the stream (Linear or CliffOnly).
+    pub kind: StreamKind,
+    /// Optional structured metadata for indexer consumption.
+    pub metadata: Option<soroban_sdk::Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
+    /// If true, the stream cannot be cancelled or shortened. Defaults to false (None).
+    pub irrevocable: Option<bool>,
+}
 
 /// Namespace for all contract storage keys.
 ///
@@ -2159,7 +2185,6 @@ const KEEPER_FEE_BPS: u32 = 50;
 /// Maximum number of rotation entries stored in a per-stream history.
 const MAX_ROTATION_HISTORY: u32 = 50;
 
-
 // ---------------------------------------------------------------------------
 // Internal Helpers
 // ---------------------------------------------------------------------------
@@ -2302,8 +2327,8 @@ impl FluxoraStream {
             metadata: metadata.clone(),
             memo: memo.clone(),
             kind,
-            irrevocable: None,
-            witness: None,
+            irrevocable,
+            witness,
             delegation_depth: 0,
             parent_stream_id: None,
         };
@@ -2400,8 +2425,8 @@ impl FluxoraStream {
             metadata: metadata.clone(),
             memo: memo.clone(),
             kind,
-            irrevocable: None,
-            witness: None,
+            irrevocable,
+            witness,
             delegation_depth: 0,
             parent_stream_id: None,
         };
@@ -2643,6 +2668,7 @@ impl FluxoraStream {
             withdraw_dust_threshold,
             params.memo,
             params.kind,
+            params.metadata,
             params.irrevocable,
             params.witness,
             None,
@@ -2664,6 +2690,7 @@ impl FluxoraStream {
         withdraw_dust_threshold: i128,
         memo: Option<soroban_sdk::Bytes>,
         kind: StreamKind,
+        metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
         irrevocable: Option<bool>,
         witness: Option<Address>,
         max_lookback_ledgers: Option<u32>,
@@ -2704,10 +2731,14 @@ impl FluxoraStream {
             withdraw_dust_threshold,
             memo,
             kind,
-            None,
-            None,
-            None,
+            metadata,
+            irrevocable,
+            witness,
         )?;
+
+        if max_lookback_ledgers.is_some() {
+            set_max_lookback_ledgers(&env, stream_id, max_lookback_ledgers)?;
+        }
 
         Ok(stream_id)
     }
@@ -2817,7 +2848,7 @@ impl FluxoraStream {
             params.memo,
             params.kind,
             params.metadata,
-            None,
+            params.irrevocable,
             None,
         )
     }
@@ -6839,9 +6870,7 @@ impl FluxoraStream {
             .as_ref()
             .ok_or(ContractError::InvalidParams)?;
 
-        if Self::ed25519_pubkey_from_address(&env, witness_addr)
-            != witness_public_key.to_array()
-        {
+        if Self::ed25519_pubkey_from_address(&env, witness_addr) != witness_public_key.to_array() {
             return Err(ContractError::InvalidSignature);
         }
 
