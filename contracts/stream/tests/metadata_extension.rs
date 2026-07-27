@@ -808,6 +808,154 @@ fn test_two_streams_independent_metadata() {
 }
 
 // ---------------------------------------------------------------------------
+// clone_stream: metadata is inherited by the cloned stream
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_metadata_inherited_by_clone_stream() {
+    let ctx = Ctx::setup();
+    let mut meta: Map<Bytes, Bytes> = Map::new(&ctx.env);
+    meta.set(ctx.make_key("ref"), ctx.make_val("CLONE_TEST"));
+    let source_id = ctx.create_stream_with_metadata(Some(meta.clone()));
+
+    // Advance past start so cloning is valid.
+    ctx.env.ledger().set_timestamp(1);
+    let new_recipient = Address::generate(&ctx.env);
+    let cloned_id = ctx.client().clone_stream(
+        &source_id,
+        &new_recipient,
+        &1u64,
+        &1000u64,
+        &1000i128,
+        &false,
+    );
+
+    let got = ctx.client().get_stream_metadata(&cloned_id).unwrap();
+    assert_eq!(
+        got.get(ctx.make_key("ref")).unwrap(),
+        ctx.make_val("CLONE_TEST"),
+        "cloned stream must inherit source metadata"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// top_up_stream: metadata is unchanged after top-up
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_metadata_unchanged_after_top_up() {
+    let ctx = Ctx::setup();
+    let mut meta: Map<Bytes, Bytes> = Map::new(&ctx.env);
+    meta.set(ctx.make_key("ref"), ctx.make_val("TOPUP_TEST"));
+    let stream_id = ctx.create_stream_with_metadata(Some(meta.clone()));
+
+    ctx.client()
+        .top_up_stream(&stream_id, &ctx.sender, &500_i128);
+
+    let got = ctx.client().get_stream_metadata(&stream_id).unwrap();
+    assert_eq!(
+        got.get(ctx.make_key("ref")).unwrap(),
+        ctx.make_val("TOPUP_TEST"),
+        "metadata must survive top-up"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// create_stream_from_template: metadata is passed through
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_metadata_from_template() {
+    let ctx = Ctx::setup();
+
+    // Register a template first.
+    let template_id = ctx.client().register_stream_template(
+        &ctx.sender,
+        &0u64,    // start_delay
+        &0u64,    // cliff_delay
+        &1000u64, // duration
+    );
+
+    let mut meta: Map<Bytes, Bytes> = Map::new(&ctx.env);
+    meta.set(ctx.make_key("src"), ctx.make_val("template"));
+
+    let stream_id = ctx.client().create_stream_from_template(
+        &ctx.sender,
+        &template_id,
+        &ctx.recipient,
+        &1000_i128,
+        &1_i128,
+        &0_i128,
+        &None,
+        &Some(meta.clone()),
+        &StreamKind::Linear,
+        &None,
+    );
+
+    let got = ctx.client().get_stream_metadata(&stream_id).unwrap();
+    assert_eq!(
+        got.get(ctx.make_key("src")).unwrap(),
+        ctx.make_val("template"),
+        "metadata from template must be stored"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: empty key (0 bytes) is valid
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_metadata_empty_key_valid() {
+    let ctx = Ctx::setup();
+    let mut meta: Map<Bytes, Bytes> = Map::new(&ctx.env);
+    meta.set(ctx.make_key(""), ctx.make_val("v"));
+    let stream_id = ctx.create_stream_with_metadata(Some(meta));
+    let got = ctx.client().get_stream_metadata(&stream_id).unwrap();
+    assert_eq!(
+        got.get(ctx.make_key("")).unwrap(),
+        ctx.make_val("v"),
+        "empty key must be accepted"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: empty value (0 bytes) is valid
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_metadata_empty_value_valid() {
+    let ctx = Ctx::setup();
+    let mut meta: Map<Bytes, Bytes> = Map::new(&ctx.env);
+    meta.set(ctx.make_key("k"), ctx.make_val(""));
+    let stream_id = ctx.create_stream_with_metadata(Some(meta));
+    let got = ctx.client().get_stream_metadata(&stream_id).unwrap();
+    assert_eq!(
+        got.get(ctx.make_key("k")).unwrap(),
+        ctx.make_val(""),
+        "empty value must be accepted"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: metadata with all keys at max byte length
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_metadata_all_keys_at_max_byte_length() {
+    let ctx = Ctx::setup();
+    // 2 entries × (32-byte key + 1-byte value) = 66 bytes < 512
+    let mut meta: Map<Bytes, Bytes> = Map::new(&ctx.env);
+    let key1 = Bytes::from_slice(&ctx.env, &vec![1u8; MAX_METADATA_KEY_BYTES as usize]);
+    let key2 = Bytes::from_slice(&ctx.env, &vec![2u8; MAX_METADATA_KEY_BYTES as usize]);
+    meta.set(key1.clone(), ctx.make_val("a"));
+    meta.set(key2.clone(), ctx.make_val("b"));
+    let stream_id = ctx.create_stream_with_metadata(Some(meta));
+    let got = ctx.client().get_stream_metadata(&stream_id).unwrap();
+    assert_eq!(got.get(key1).unwrap(), ctx.make_val("a"));
+    assert_eq!(got.get(key2).unwrap(), ctx.make_val("b"));
+}
+
+// ---------------------------------------------------------------------------
 // CONTRACT_VERSION bumped to 6 (V5 added metadata extension; V6 changed
 // sweep_excess to admin-only auth so cold treasury destinations need not
 // co-sign with the admin)
