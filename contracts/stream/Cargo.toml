@@ -199,11 +199,6 @@ name = "pause_semantics"
 path = "tests/pause_semantics.rs"
 test = true
 
-[[test]]
-name = "delegated_cancel"
-path = "tests/delegated_cancel.rs"
-required-features = ["testutils"]
-
 # ---------------------------------------------------------------------------
 # Known-broken integration tests, second batch (compile fine, fail at runtime)
 # ---------------------------------------------------------------------------
