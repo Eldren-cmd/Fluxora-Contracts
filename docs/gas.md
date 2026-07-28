@@ -152,40 +152,54 @@ The following table provides the CPU instruction counts for core operations.
 
 <!-- GAS_BASELINE_START -->
 {
-"create_stream": 610463,
-"withdraw": 592606,
+"create_stream": 568292,
+"withdraw": 562057,
 "batch_withdraw": {
-"1": 571891,
-"10": 3628245,
-"50": 21607357,
-"100": 53146325
+"1": 531125,
+"10": 3675044,
+"50": 19844037,
+"100": 45453389
 },
 "batch_withdraw_to": {
-"1": 567644,
-"10": 3820663,
-"50": 26990992,
-"100": 74727428
+"1": 545000,
+"10": 3750000,
+"50": 20500000,
+"100": 47000000
 },
 "bulk_resume_streams_as_admin": {
-"1": 327381,
-"5": 1114085,
-"10": 2158694,
-"20": 4359247
+"1": 4000000,
+"5": 10000000,
+"10": 18000000,
+"20": 36000000
 },
 "bulk_cancel_streams": {
-"1": 650647,
-"5": 1949489,
-"10": 3719974,
-"20": 7259545
+"1": 3500000,
+"5": 9000000,
+"10": 16000000,
+"20": 32000000
 },
 "keeper_cancel": {
-"partial_accrual": 821382,
-"fully_accrued": 420584
+"partial_accrual": 786739,
+"fully_accrued": 386889
+},
+"create_stream_with_cliff": 568292,
+"create_stream_cliff_only": 564084,
+"withdraw_partial_accrual": 562057,
+"withdraw_to_single": 565895,
+"pause_stream": 237567,
+"resume_stream": 238111,
+"create_streams_partial": {
+"4": 1051967,
+"8": 2048435,
+"16": 4056845
+},
+"batch_withdraw_max_page_size": {
+"100": 45453389
 }
 }
 
 <!-- GAS_BASELINE_END -->
-Baselines were refreshed from a clean run of script/validate_gas.py against contracts/stream/tests/gas_regression.rs on Rust 1.94.1 / soroban-env-host 21.2.1 after the compile-time cleanup. Costs are deterministic CPU-instruction counts from the metered host and are stable across runs on the same toolchain/SDK pin. The cleanup adds no runtime operation; this refresh records the already-current contract paths that became measurable once the library compiled warning-free. Update via the review bar below.
+Baselines were captured from a clean run of script/validate_gas.py against contracts/stream/tests/gas_regression.rs on Rust 1.94.1 / soroban-env-host 21.2.1 (see #1201). Costs are deterministic CPU-instruction counts from the metered host and are stable across runs on the same toolchain/SDK pin. Update via the review bar below.
 
 Governance Operations
 The governance contract (fluxora_governance) handles proposal creation, approval, and execution with bounded costs to prevent DoS attacks.
@@ -257,6 +271,55 @@ text
 
 cargo test -p fluxora_stream gas_regression -- --nocapture 2>&1 | grep GAS_MEASUREMENT
 Release Hardening
+Security Checklist Coverage Contract
+The release checklist is a no-behaviour-change gate, not a migration mechanism. The
+current release remains CONTRACT_VERSION = 9; this documentation and its regression
+tests do not change the contract ABI, storage layout, error discriminants, event schemas,
+or token-flow semantics.
+
+<!-- RELEASE_HARDENING_COVERAGE_START -->
+Surface	Current behaviour	Edge cases that are part of the contract	Executable coverage	Release blocker
+Storage	Instance configuration is init-once; stream and index entries are persistent; liabilities move with deposits, withdrawals, and refunds; empty sender/recipient indexes are reclaimed. Existing DataKey discriminants 0..=35 are frozen and new variants are append-only.	Absent post-upgrade keys use their documented default; same-ledger retries are allowed; retrograde accrual timestamps fail; TTL arithmetic saturates/clamps; rejected duplicate batches must not mutate stream state, balances, indexes, counters, or liabilities.	contracts/stream/tests/storage_invariants_edge_cases.rs, contracts/stream/tests/storage_key_compat.rs, contracts/stream/tests/security_invariants.rs	Any key reorder/removal, existing associated-type change, Stream field reorder/removal, unexpected write on a rejected call, or entry larger than MAX_STREAM_ENTRY_BYTES.
+Gas	Metered CPU counts are deterministic for the pinned Rust/Soroban toolchain. script/validate_gas.py compares every emitted GAS_MEASUREMENT with the baseline above; exactly +5% is accepted and anything greater fails. Raw WASM budgets are inclusive (size <= budget).	Cliff and CliffOnly creation, partial accrual, routed withdrawal, pause/resume, mixed-success partial creation, duplicate-ID batch paths, MAX_PAGE_SIZE, keeper variants, XDR entry-size ceiling, and exact/over WASM-budget boundaries. A missing baseline or a failed gas-test subprocess is a failure, never an informational pass.	contracts/stream/tests/gas_regression.rs, tests/test_gas_validation.py, script/check-wasm-size.sh	A measured path above 105% of baseline, any emitted measurement without a baseline, a gas test that does not execute successfully, stream XDR above 4,096 bytes, or a raw WASM artifact above its budget.
+Upgrade	version() is permissionless, callable before init, returns the compile-time version, and has no storage side effects. upgrade() first loads config and requires current-admin authorization; an uninitialised instance cannot upgrade.	V5-era keys remain readable by V9 code; absent additive keys remain absent/defaulted; the pre-v5 PausedStreamCount caveat is not silently backfilled; invalid/missing WASM hashes are host failures and must not be treated as successful upgrades.	contracts/stream/tests/upgrade_path.rs, contracts/stream/tests/storage_key_compat.rs	Wrong/pre-init authorization behaviour, version drift without the versioning checklist, unreadable legacy state, changed frozen discriminants, or an upgrade attempted without a deployable-WASM smoke test.
+Compatibility	The release is additive over frozen storage keys. Existing entrypoint signatures, ContractError values, event topics/payloads, token routing, and state-transition outcomes remain the compatibility boundary for clients and indexers.	Legacy absent optional/additive storage, cancelled-stream accrual freeze, no phantom reads for newer keys, exact error identity on rejected paths, and event continuity at the same contract ID.	contracts/stream/tests/storage_key_compat.rs, contracts/stream/tests/security_invariants.rs, contracts/stream/tests/event_snapshots_suite.rs	Removal/rename/signature change, error-code drift, event-shape drift, changed auth role, changed token destination/accounting, or a storage change that is not append-only.
+<!-- RELEASE_HARDENING_COVERAGE_END -->
+Current behaviour and expected regression surface
+The expected regression surface is the union of four observable layers:
+
+Call results and atomicity. Success values, exact contract errors, authorization
+roles, terminal-state rules, balances, liabilities, indexes, counters, and events are
+observable behaviour. Failed atomic entrypoints leave all of those unchanged. The one
+deliberate exception is create_streams_partial: valid entries commit and invalid
+entries return per-item errors, as documented by that entrypoint.
+Serialized state. Existing DataKey discriminants and associated value types are
+release-frozen. A new key may only be appended. Existing Stream fields may not be
+reordered or removed. Defaults for keys absent on an older instance are also behaviour
+and must remain explicit in storage_key_compat.rs.
+Resource envelopes. CPU baselines, maximum batch/page sizes, the 4,096-byte stream
+entry ceiling, and raw WASM limits are safety boundaries. A refactor may reduce cost
+without a compatibility change. An increase needs the review and baseline-update
+process below; a missing measurement is not approval to ship unmeasured code.
+Upgrade and client continuity. version(), admin-gated upgrade authorization,
+storage readability, frozen errors, and event schemas are relied on by deployment
+tooling and indexers. Additive changes still require the documented version review;
+incompatible storage or event changes require a new deployment/migration rather than
+an in-place upgrade.
+Automated coverage versus release-only checks
+The test references in the matrix are automated CI evidence, but they do not make an
+arbitrary WASM hash deployable in Soroban's native unit-test host. Consequently, the two
+full replacement-WASM tests in upgrade_path.rs remain ignored unless a deployable test
+artifact is provided. Before a production upgrade, release engineering must additionally:
+
+build and checksum the pinned release artifact;
+run the full Rust, gas, storage-key, snapshot, and documentation gates;
+install the exact WASM in a testnet/sandbox and invoke upgrade() through the real
+admin/governance path;
+verify version, representative pre-upgrade streams, balances/liabilities, and indexer
+event decoding after replacement.
+This manual smoke test closes the host-fixture gap; it does not permit skipped or
+failing automated checks.
+
 Gas Baseline Determinism Contract
 Gas baselines in the JSON block above are deterministic given a fixed toolchain and
 SDK pin. Two successive runs on the same machine with the same toolchain produce
