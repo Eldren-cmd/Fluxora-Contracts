@@ -20,7 +20,20 @@ use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env, Map};
 pub use storage::*;
 use token_check::verify_token_behavior;
-// Storage primitives are defined once in `storage.rs` and re-exported above.
+pub use crate::types::{ClaimOwnershipTransferred, Page, RecipientShareDelegated, Stream};
+
+pub fn reject_duplicate_ids(env: &Env, ids: &soroban_sdk::Vec<u64>) -> Result<(), ContractError> {
+    let mut seen = soroban_sdk::Vec::<u64>::new(env);
+    for id in ids.iter() {
+        for existing in seen.iter() {
+            if existing == id {
+                return Err(ContractError::DuplicateStreamId);
+            }
+        }
+        seen.push_back(id);
+    }
+    Ok(())
+}
 
 /// Re-export for adversarial auth tests: bump a recipient's delegated-withdraw nonce
 /// to simulate in-flight revocation without going through the full contract flow.
@@ -29,9 +42,7 @@ use token_check::verify_token_behavior;
 pub use storage::increment_delegated_nonce_test_only as increment_delegated_nonce;
 
 // ---------------------------------------------------------------------------
-// TTL constants
-// ---------------------------------------------------------------------------
-
+// TTL constants (defined in storage.rs)
 // ---------------------------------------------------------------------------
 // Pagination limits (DoS prevention)
 // ---------------------------------------------------------------------------
@@ -681,18 +692,6 @@ pub struct RateCapEnforced {
     pub max_rate_per_second: i128,
 }
 
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RecipientShareDelegated {
-    pub parent_stream_id: u64,
-    pub child_stream_id: u64,
-    pub delegator: Address,
-    pub delegatee: Address,
-    pub share_bps: u32,
-    pub new_parent_rate: i128,
-    pub child_rate: i128,
-}
-
 /// Emitted when the sender safely decreases the streaming rate via `decrease_rate_per_second`.
 ///
 /// The `checkpointed_amount` field records how many tokens were mathematically
@@ -808,23 +807,6 @@ pub struct KeeperCancelled {
     pub keeper_fee: i128,
     pub recipient_amount: i128,
     pub sender_refund: i128,
-}
-
-/// Emitted when claim ownership of a stream is transferred to a new address.
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct ClaimOwnershipTransferred {
-    pub stream_id: u64,
-    pub old_owner: Option<Address>,
-    pub new_owner: Address,
-}
-
-/// Event payload emitted when a stream's decommissioned state changes.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct StreamDecommissioned {
-    pub stream_id: u64,
-    pub decommissioned: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -1052,62 +1034,6 @@ pub struct RotationEntry {
     pub authoriser: Address,
 }
 
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Stream {
-    pub stream_id: u64,
-    pub sender: Address,
-    pub recipient: Address,
-    pub claim_owner: Option<Address>,
-    pub deposit_amount: i128,
-    pub rate_per_second: i128,
-    pub start_time: u64,
-    pub cliff_time: u64,
-    pub end_time: u64,
-    pub withdrawn_amount: i128,
-    pub status: StreamStatus,
-    pub cancelled_at: Option<u64>,
-    /// Total tokens mathematically accrued up to `checkpointed_at` under all
-    /// previous rates.
-    pub checkpointed_amount: i128,
-    /// Ledger timestamp of the last rate checkpoint.
-    pub checkpointed_at: u64,
-    /// Minimum non-terminal withdrawal amount in raw token units.
-    pub withdraw_dust_threshold: i128,
-    pub last_pause_toggle_ledger: u32,
-    pub last_withdraw_ledger: u32,
-    /// Ledger sequence of the last rate change; zero means no change yet.
-    pub last_rate_change_ledger: u32,
-    /// `Some(true)` identifies a multi-recipient pooled stream.
-    pub is_pooled: Option<bool>,
-    /// Optional structured metadata stored with the stream.
-    pub metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
-    /// Optional bounded memo for indexer correlation.
-    pub memo: Option<soroban_sdk::Bytes>,
-    pub kind: StreamKind,
-    /// `Some(true)` blocks cancellation and shortening paths.
-    pub irrevocable: Option<bool>,
-    /// Optional compliance witness authorized to cancel by attestation.
-    pub witness: Option<Address>,
-    /// Delegation depth (zero for a root stream).
-    pub delegation_depth: u32,
-    /// Parent stream ID for a delegated child; `None` for a root stream.
-    pub parent_stream_id: Option<u64>,
-    /// `Some(true)` restricts the stream to wind-down operations.
-    /// `None` preserves compatibility with stream entries written before this field.
-    pub decommissioned: Option<bool>,
-}
-
-/// Pagination result for recipient stream listing
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Page {
-    /// Stream IDs for this page (sorted ascending)
-    pub stream_ids: soroban_sdk::Vec<u64>,
-    /// Next cursor for pagination (0 if no more pages)
-    pub next_cursor: u64,
-}
-
 /// Paginated aggregate health report for a sender's entire stream portfolio.
 ///
 /// Returned by `get_sender_portfolio_health`. Each call processes up to
@@ -1327,7 +1253,6 @@ pub enum DataKey {
     LastPauseRecord(PauseKind),
     /// Rotation history for recipient/sender changes on a stream.
     RotationHistory(u64),
-    /// Last ledger timestamp observed for accrual clock-regression detection.
     /// Last ledger timestamp observed for accrual clock-regression detection.
     LastAccrualLedgerTimestamp,
     /// Protocol-wide count of streams currently in `StreamStatus::Paused` (`u64`, instance storage).
@@ -1626,9 +1551,9 @@ impl FluxoraStream {
             }
         }
 
-        // Validate metadata before allocating a stream ID or writing storage.
-        if let Some(ref metadata) = metadata {
-            validate_metadata(metadata)?;
+        // Validate metadata size bounds before allocating a stream ID.
+        if let Some(ref md) = metadata {
+            validate_metadata(md)?;
         }
 
         let stream_id = next_stream_id_for(env, &sender);
@@ -1651,12 +1576,16 @@ impl FluxoraStream {
             withdraw_dust_threshold,
             last_pause_toggle_ledger: 0,
             last_withdraw_ledger: 0,
-            last_rate_change_ledger: 0,
-            is_pooled: None,
-            metadata: metadata.clone(),
             memo: memo.clone(),
             kind,
-            metadata,
+            metadata: metadata.clone(),
+            witness: witness.clone(),
+            is_pooled: None,
+            last_rate_change_ledger: 0,
+            delegation_depth: 0,
+            parent_stream_id: None,
+            irrevocable,
+            decommissioned: None,
         };
 
         save_stream(env, &stream);
@@ -1746,12 +1675,16 @@ impl FluxoraStream {
             withdraw_dust_threshold,
             last_pause_toggle_ledger: 0,
             last_withdraw_ledger: 0,
-            last_rate_change_ledger: 0,
-            is_pooled: None,
-            metadata: metadata.clone(),
             memo: memo.clone(),
             kind,
-            metadata,
+            metadata: metadata.clone(),
+            witness: witness.clone(),
+            is_pooled: None,
+            last_rate_change_ledger: 0,
+            delegation_depth: 0,
+            parent_stream_id: None,
+            irrevocable,
+            decommissioned: None,
         };
 
         save_stream(env, &stream);
@@ -2019,11 +1952,9 @@ impl FluxoraStream {
         metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
         irrevocable: Option<bool>,
         witness: Option<Address>,
-        max_lookback_ledgers: Option<u32>,
     ) -> Result<u64, ContractError> {
         sender.require_auth();
         require_not_creation_paused(&env)?;
-        validate_lookback_window(max_lookback_ledgers)?;
 
         let mut final_rate = rate_per_second;
         if kind == StreamKind::CliffOnly {
@@ -2045,8 +1976,6 @@ impl FluxoraStream {
 
         pull_token(&env, &sender, deposit_amount)?;
 
-        // Single-stream creation does not accept metadata; use create_streams
-        // or create_streams_partial with CreateStreamParams for metadata.
         Self::persist_new_stream(
             &env,
             sender,
@@ -2062,74 +1991,6 @@ impl FluxoraStream {
             metadata,
             irrevocable,
             witness,
-        )?;
-
-        if max_lookback_ledgers.is_some() {
-            set_max_lookback_ledgers(&env, stream_id, max_lookback_ledgers)?;
-        }
-
-        Ok(stream_id)
-    }
-
-    /// Create a new payment stream with an optional per-stream lookback window.
-    ///
-    /// Identical to [`create_stream`] in every respect except that
-    /// `max_lookback_ledgers` is written atomically with stream creation so
-    /// the bound is active from the very first withdrawal call.
-    ///
-    /// # Parameters
-    /// - `sender`               : Address funding the stream (must authorize).
-    /// - `params`               : Full `CreateStreamParams` (same as `create_stream`).
-    /// - `max_lookback_ledgers` : Optional lookback cap.
-    ///   - `None`    – no bound; behaviour is identical to `create_stream`.
-    ///   - `Some(n)` – each single claim is capped to accrual earned during
-    ///                 the most recent `n` ledgers. Older unclaimed accrual
-    ///                 remains accessible in subsequent windows.
-    ///   - `Some(0)` – rejected with `ContractError::InvalidParams`.
-    ///
-    /// # Accrual vs. claimability distinction
-    /// `calculate_accrued` always returns the total lifetime entitlement and
-    /// is never affected by this setting. Only the per-call payout reported by
-    /// `get_withdrawable`, `get_claimable_at`, and the `withdraw*` family is
-    /// bounded.
-    ///
-    /// # No permanent loss guarantee
-    /// The cap limits *velocity*, not *total entitlement*. Repeated calls
-    /// across successive lookback windows eventually recover 100% of the
-    /// accrued amount; see `docs/streaming.md §Lookback-bounded withdrawals`
-    /// for the proof sketch.
-    ///
-    /// # CliffOnly bypass
-    /// `CliffOnly` streams bypass the cap once the cliff has elapsed so a
-    /// recipient whose first query arrives after `cliff_time + window_size`
-    /// does not permanently strand funds.
-    ///
-    /// # Errors
-    /// Same as `create_stream`, plus:
-    /// - `ContractError::InvalidParams` (3) when `max_lookback_ledgers == Some(0)`.
-    pub fn create_stream_with_lookback(
-        env: Env,
-        sender: Address,
-        params: CreateStreamParams,
-        max_lookback_ledgers: Option<u32>,
-    ) -> Result<u64, ContractError> {
-        let withdraw_dust_threshold = params.withdraw_dust_threshold.unwrap_or(0);
-        Self::create_stream_internal(
-            env,
-            sender,
-            params.recipient,
-            params.deposit_amount,
-            params.rate_per_second,
-            params.start_time,
-            params.cliff_time,
-            params.end_time,
-            withdraw_dust_threshold,
-            params.memo,
-            params.kind,
-            params.metadata,
-            params.irrevocable,
-            params.witness,
-            max_lookback_ledgers,
         )
     }
 
@@ -2241,7 +2102,6 @@ impl FluxoraStream {
             params.metadata,
             params.irrevocable,
             None,
-            None,
         )
     }
 
@@ -2352,13 +2212,13 @@ impl FluxoraStream {
             kind,
             last_pause_toggle_ledger: 0,
             last_withdraw_ledger: 0,
-            last_rate_change_ledger: 0,
             metadata: None,
             witness: None,
-            irrevocable: None,
+            is_pooled: Some(true),
+            last_rate_change_ledger: 0,
             delegation_depth: 0,
             parent_stream_id: None,
-            is_pooled: Some(true),
+            irrevocable: None,
             decommissioned: None,
         };
 
@@ -2838,7 +2698,7 @@ impl FluxoraStream {
                 params.kind,
                 params.metadata.clone(),
                 params.irrevocable,
-                params.witness.clone(),
+                params.witness,
             );
 
             match stream_id {
@@ -7759,7 +7619,7 @@ impl FluxoraStream {
             source.withdraw_dust_threshold,
             source.memo.clone(),
             source.kind,
-            None, // Clones reset metadata to avoid duplicating single-use identifiers.
+            None,
             source.irrevocable,
             source.witness.clone(),
         )?;
@@ -8392,13 +8252,13 @@ impl FluxoraStream {
             kind: offer.kind,
             last_pause_toggle_ledger: 0,
             last_withdraw_ledger: 0,
-            last_rate_change_ledger: 0,
             metadata: offer.metadata.clone(),
             witness: None,
-            irrevocable: None,
             is_pooled: None,
+            last_rate_change_ledger: 0,
             delegation_depth: 0,
             parent_stream_id: None,
+            irrevocable: None,
             decommissioned: None,
         };
 
