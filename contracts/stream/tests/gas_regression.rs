@@ -1,7 +1,7 @@
 use fluxora_stream::{
     CreateStreamParams, FluxoraStream, FluxoraStreamClient, PauseReason, StreamKind,
     WithdrawToParam, MAX_MEMO_BYTES, MAX_METADATA_BYTES, MAX_METADATA_KEYS, MAX_METADATA_KEY_BYTES,
-    MAX_PAGE_SIZE, MAX_STREAM_ENTRY_BYTES,
+    MAX_METADATA_VALUE_BYTES, MAX_PAGE_SIZE, MAX_STREAM_ENTRY_BYTES,
 };
 use soroban_sdk::{token::Client as TokenClient, Address, Bytes, Env, Map};
 
@@ -125,6 +125,19 @@ fn test_withdraw_gas() {
     println!("GAS_MEASUREMENT: withdraw: single: {}", cost);
 }
 
+/// Gas regression baseline for `batch_withdraw`.
+///
+/// Measures CPU instruction cost for `batch_withdraw` across batch sizes 1, 10, 50, and 100
+/// (up to `MAX_PAGE_SIZE`). Exercises the O(n²) duplicate-ID scan (`reject_duplicate_ids`),
+/// which performs ~n*(n-1)/2 element-by-element comparisons (approx ~4,950 comparisons,
+/// ~10,000 loop operations at MAX_PAGE_SIZE = 100).
+///
+/// Asserts that measured CPU instruction cost stays within Soroban's per-invocation CPU budget
+/// (`PER_INVOCATION_CPU_BUDGET = 25,000,000,000`, providing a 75% safety margin under Soroban's
+/// 100B instruction ceiling).
+///
+/// Companion refactor: expected to improve significantly once the companion refactor
+/// replaces the O(n²) scan in `reject_duplicate_ids` with an O(n) helper (e.g. Map/Set lookup).
 #[test]
 fn test_batch_withdraw_gas() {
     let sizes = [1, 10, 50, 100];
@@ -155,9 +168,19 @@ fn test_batch_withdraw_gas() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Gas regression: metadata operations
-// ---------------------------------------------------------------------------
+/// Gas regression baseline for `batch_withdraw_to`.
+///
+/// Uses a distinct destination address per withdrawal to exercise the
+/// per-entry destination validation path alongside the O(n²) duplicate-ID
+/// scan in `reject_duplicate_ids`.  The O(n²) scan costs roughly
+/// n*(n-1)/2 comparisons at batch size n, so at MAX_PAGE_SIZE (100) the
+/// worst case is ~4 950 element-by-element comparisons inside the helper.
+///
+/// Asserts that measured CPU instruction cost stays within Soroban's per-invocation CPU budget
+/// (`PER_INVOCATION_CPU_BUDGET`). Baseline expected to improve once companion O(n) refactor lands.
+#[test]
+fn test_batch_withdraw_to_gas() {
+    let sizes = [1, 10, 50, 100];
 
 /// Helper: build a metadata map with `count` entries "k0"→"v0", … "kN"→"vN".
 fn metadata_n(env: &Env, count: u32) -> Map<Bytes, Bytes> {
@@ -170,10 +193,18 @@ fn metadata_n(env: &Env, count: u32) -> Map<Bytes, Bytes> {
     m
 }
 
-/// Measure gas for `create_streams_partial` with a single entry carrying metadata.
+/// Gas regression baseline for `bulk_resume_streams_as_admin`.
+///
+/// Creates streams, pauses each one (advancing the ledger far enough to
+/// clear the pause cooldown), then resumes them all in a single admin-authed
+/// call. Batch sizes 1, 10, 50, and 100 (up to MAX_PAGE_SIZE) mirror the documented gas baseline matrix
+/// and exercise the O(n²) duplicate-ID scan in `reject_duplicate_ids`.
+///
+/// Asserts that measured CPU instruction cost stays within Soroban's per-invocation CPU budget
+/// (`PER_INVOCATION_CPU_BUDGET`). Baseline expected to improve once companion O(n) refactor lands.
 #[test]
-fn test_create_stream_with_metadata_gas() {
-    let ctx = TestContext::setup();
+fn test_bulk_resume_streams_as_admin_gas() {
+    let sizes = [1, 10, 50, 100];
 
     // Full metadata: MAX_METADATA_KEYS × (32-byte key + 128-byte value) at max aggregate.
     let meta = metadata_n(&ctx.env, fluxora_stream::MAX_METADATA_KEYS);
@@ -237,10 +268,17 @@ fn test_create_stream_with_metadata_gas() {
     );
 }
 
-/// Measure gas for `get_stream_metadata` on a stream with full metadata.
+/// Gas regression baseline for `bulk_cancel_streams`.
+///
+/// Creates active streams owned by the sender then cancels them all in a
+/// single call. Batch sizes 1, 10, 50, and 100 (up to MAX_PAGE_SIZE) mirror the documented gas
+/// baseline matrix and exercise the O(n²) duplicate-ID scan in `reject_duplicate_ids`.
+///
+/// Asserts that measured CPU instruction cost stays within Soroban's per-invocation CPU budget
+/// (`PER_INVOCATION_CPU_BUDGET`). Baseline expected to improve once companion O(n) refactor lands.
 #[test]
-fn test_get_stream_metadata_gas() {
-    let ctx = TestContext::setup();
+fn test_bulk_cancel_streams_gas() {
+    let sizes = [1, 10, 50, 100];
 
     // Create a stream with metadata so we can read it back
     let meta = metadata_n(&ctx.env, fluxora_stream::MAX_METADATA_KEYS);
@@ -1158,7 +1196,212 @@ fn test_withdraw_partial_accrual_gas() {
 
     assert!(
         cost <= PER_INVOCATION_CPU_BUDGET,
-        "extend_stream_end_time exceeded per-invocation CPU budget: {} > {}",
+        "withdraw (partial_accrual) exceeded per-invocation CPU budget: {} > {}",
+        cost,
+        PER_INVOCATION_CPU_BUDGET,
+    );
+
+    println!(
+        "GAS_MEASUREMENT: withdraw_partial_accrual: single: {}",
+        cost
+    );
+}
+
+/// Gas baseline for `withdraw_to` (single stream, custom destination).
+///
+/// `withdraw_to` shares the accrual and token-transfer logic of `withdraw` but
+/// routes the proceeds to an explicit destination address instead of the stream
+/// recipient. The destination-routing branch is the only material difference;
+/// this test documents its incremental cost.
+///
+/// Setup: same 1 000-token linear stream as `create_default_stream`, t=500.
+#[test]
+fn test_withdraw_to_single_gas() {
+    let ctx = TestContext::setup();
+
+    let stream_id = ctx.create_default_stream();
+    ctx.env.ledger().set_timestamp(500);
+
+    // Send the accrued funds to a distinct destination (not the recipient itself).
+    let destination = Address::generate(&ctx.env);
+
+    let cost = measure_gas(&ctx, |ctx| {
+        ctx.client.withdraw_to(&stream_id, &destination);
+    });
+
+    assert!(
+        cost <= PER_INVOCATION_CPU_BUDGET,
+        "withdraw_to (single) exceeded per-invocation CPU budget: {} > {}",
+        cost,
+        PER_INVOCATION_CPU_BUDGET,
+    );
+
+    println!("GAS_MEASUREMENT: withdraw_to_single: single: {}", cost);
+}
+
+/// Gas baseline for `pause_stream` + `resume_stream` on a single stream.
+///
+/// Guards the round-trip cost of the pause/resume state machine. The cooldown
+/// check (`MIN_PAUSE_INTERVAL_LEDGERS = 17`) is exercised by advancing the
+/// ledger sequence past the threshold between the two operations. Captures both
+/// legs so a regression in either half (e.g. extra storage writes or a new
+/// duplicate event check) is visible.
+///
+/// Two separate GAS_MEASUREMENT lines are printed so validate_gas.py can track
+/// each leg independently against the docs/gas.md baseline.
+#[test]
+fn test_pause_then_resume_single_gas() {
+    let ctx = TestContext::setup();
+
+    let stream_id = ctx.create_default_stream();
+
+    // Advance ledger sequence past the pause/resume cooldown.
+    ctx.env.ledger().with_mut(|l| l.sequence_number += 32);
+
+    let pause_cost = measure_gas(&ctx, |ctx| {
+        ctx.client
+            .pause_stream(&stream_id, &PauseReason::Operational);
+    });
+
+    assert!(
+        pause_cost <= PER_INVOCATION_CPU_BUDGET,
+        "pause_stream (single) exceeded per-invocation CPU budget: {} > {}",
+        pause_cost,
+        PER_INVOCATION_CPU_BUDGET,
+    );
+
+    println!("GAS_MEASUREMENT: pause_stream: single: {}", pause_cost);
+
+    // Advance past the resume cooldown before resuming.
+    ctx.env.ledger().with_mut(|l| l.sequence_number += 32);
+
+    let resume_cost = measure_gas(&ctx, |ctx| {
+        ctx.client.resume_stream(&stream_id);
+    });
+
+    assert!(
+        resume_cost <= PER_INVOCATION_CPU_BUDGET,
+        "resume_stream (single) exceeded per-invocation CPU budget: {} > {}",
+        resume_cost,
+        PER_INVOCATION_CPU_BUDGET,
+    );
+
+    println!("GAS_MEASUREMENT: resume_stream: single: {}", resume_cost);
+}
+
+/// Gas baseline for `create_streams_partial` with a mixed batch.
+///
+/// `create_streams_partial` isolates per-entry failures: valid entries are
+/// committed and invalid entries produce an error result without reverting the
+/// whole call. The per-entry overhead (validation + result push) is captured here
+/// at three batch sizes.
+///
+/// Mixed batch composition per size:
+///   - Half the entries are valid (deposit=1 000, rate=1, 0→1 000).
+///   - Half are invalid (deposit=0, which fails validation).
+///
+/// This exercises the fast-fail path for the rejected entries alongside the
+/// normal commit path for the accepted entries.
+///
+/// The GAS_MEASUREMENT lines use the "partial_N" key so validate_gas.py
+/// can store them separately from the all-success `create_streams` baseline.
+#[test]
+fn test_create_streams_partial_gas() {
+    // Use small sizes: partial is not designed for MAX_PAGE_SIZE batches and the
+    // mixed failure path makes the per-entry cost harder to compare at large n.
+    let sizes: &[(u32, &str)] = &[(4, "4"), (8, "8"), (16, "16")];
+
+    for &(size, label) in sizes {
+        let ctx = TestContext::setup();
+
+        let mut params = soroban_sdk::Vec::new(&ctx.env);
+        for i in 0..size {
+            if i % 2 == 0 {
+                // Valid entry.
+                params.push_back(CreateStreamParams {
+                    recipient: ctx.recipient.clone(),
+                    deposit_amount: 1_000_i128,
+                    rate_per_second: 1_i128,
+                    start_time: 0u64,
+                    cliff_time: 0u64,
+                    end_time: 1_000u64,
+                    withdraw_dust_threshold: Some(0_i128),
+                    memo: None,
+                    metadata: None,
+                    kind: StreamKind::Linear,
+                    irrevocable: None,
+                    witness: None,
+                });
+            } else {
+                // Invalid entry: deposit_amount = 0 → fails `InvalidAmount`.
+                params.push_back(CreateStreamParams {
+                    recipient: ctx.recipient.clone(),
+                    deposit_amount: 0_i128,
+                    rate_per_second: 1_i128,
+                    start_time: 0u64,
+                    cliff_time: 0u64,
+                    end_time: 1_000u64,
+                    withdraw_dust_threshold: Some(0_i128),
+                    memo: None,
+                    metadata: None,
+                    kind: StreamKind::Linear,
+                    irrevocable: None,
+                    witness: None,
+                });
+            }
+        }
+
+        let cost = measure_gas(&ctx, |ctx| {
+            ctx.client.create_streams_partial(&ctx.sender, &params);
+        });
+
+        assert!(
+            cost <= PER_INVOCATION_CPU_BUDGET,
+            "create_streams_partial at size {} exceeded per-invocation CPU budget: {} > {}",
+            size,
+            cost,
+            PER_INVOCATION_CPU_BUDGET,
+        );
+
+        println!(
+            "GAS_MEASUREMENT: create_streams_partial: {}: {}",
+            label, cost
+        );
+    }
+}
+
+/// Gas boundary test: `batch_withdraw` at exactly `MAX_PAGE_SIZE`.
+///
+/// This test exercises the O(n²) `reject_duplicate_ids` scan at the documented
+/// worst-case batch size and asserts that the per-invocation CPU budget is not
+/// exceeded. It is a specialised variant of `test_batch_withdraw_gas` that
+/// explicitly names the boundary so that any future change to `MAX_PAGE_SIZE`
+/// (which changes the worst-case cost) shows up as a test failure before
+/// the CI gas baseline report catches it.
+///
+/// The test also prints a `GAS_MEASUREMENT` line tagged `max_page_size` so
+/// validate_gas.py can record it separately from the existing size-100 entry.
+#[test]
+fn test_batch_withdraw_max_page_size_gas() {
+    let ctx = TestContext::setup();
+
+    let page = MAX_PAGE_SIZE as usize; // 100 at time of writing
+
+    let mut streams = soroban_sdk::Vec::new(&ctx.env);
+    for _ in 0..page {
+        streams.push_back(ctx.create_default_stream());
+    }
+
+    ctx.env.ledger().set_timestamp(500);
+
+    let cost = measure_gas(&ctx, |ctx| {
+        ctx.client.batch_withdraw(&ctx.recipient, &streams);
+    });
+
+    assert!(
+        cost <= PER_INVOCATION_CPU_BUDGET,
+        "batch_withdraw at MAX_PAGE_SIZE ({}) exceeded per-invocation CPU budget: {} > {}",
+        page,
         cost,
         PER_INVOCATION_CPU_BUDGET,
     );

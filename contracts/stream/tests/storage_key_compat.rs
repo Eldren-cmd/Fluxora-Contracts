@@ -1658,4 +1658,3 @@ fn test_regression_staleness_mismatch_detection() {
         "Stale CONTRACT_VERSION mapping must be detected as mismatched against live DataKey count"
     );
 }
-

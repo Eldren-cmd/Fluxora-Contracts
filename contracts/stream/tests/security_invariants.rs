@@ -13,8 +13,8 @@
 extern crate std;
 
 use fluxora_stream::{
-    ContractError, CreateStreamParams, FluxoraStream, FluxoraStreamClient, PauseReason,
-    StreamKind, StreamStatus,
+    ContractError, CreateStreamParams, FluxoraStream, FluxoraStreamClient, PauseReason, StreamKind,
+    StreamStatus,
 };
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger},
@@ -134,7 +134,8 @@ fn cei_withdraw_state_before_transfer() {
         let topic1: Symbol = events.get_unchecked(last - 1).0;
         if topic1 == Symbol::new(&ctx.env, "completed") {
             assert_eq!(
-                topic0, Symbol::new(&ctx.env, "withdrew"),
+                topic0,
+                Symbol::new(&ctx.env, "withdrew"),
                 "withdrew event must precede completed event"
             );
         }
@@ -319,9 +320,7 @@ fn terminal_rate_update_cancelled_fails() {
     ctx.env.ledger().set_timestamp(300);
     ctx.client().cancel_stream(&stream_id);
 
-    let result = ctx
-        .client()
-        .try_update_rate_per_second(&stream_id, &2);
+    let result = ctx.client().try_update_rate_per_second(&stream_id, &2);
     assert!(result.is_err());
 }
 
@@ -496,7 +495,6 @@ fn duplicate_id_batch_withdraw_rejected() {
 
     let ids = vec![&ctx.env, stream_id, stream_id];
     let result = ctx.client().try_batch_withdraw(&ctx.recipient, &ids);
-
     assert_eq!(result, Err(Ok(ContractError::DuplicateStreamId)));
     assert_eq!(ctx.client().get_stream_state(&stream_id), state_before);
     assert_eq!(
@@ -541,7 +539,6 @@ fn duplicate_id_batch_withdraw_to_rejected() {
         },
     ];
     let result = ctx.client().try_batch_withdraw_to(&ctx.recipient, &params);
-
     assert_eq!(result, Err(Ok(ContractError::DuplicateStreamId)));
     assert_eq!(ctx.client().get_stream_state(&stream_id), state_before);
     assert_eq!(
@@ -880,10 +877,7 @@ fn datakey_discriminant_count_stable() {
     // tests, but we can assert the CONTRACT_VERSION constant hasn't been
     // bumped without documentation. This is a sentinel.
     let version = client.version();
-    assert!(
-        version >= 9,
-        "CONTRACT_VERSION must be at least 9"
-    );
+    assert!(version >= 9, "CONTRACT_VERSION must be at least 9");
 }
 
 // ---------------------------------------------------------------------------
@@ -915,7 +909,10 @@ fn irrevocable_cancel_rejected() {
     );
 
     let result = ctx.client().try_cancel_stream(&stream_id);
-    assert!(result.is_err(), "irrevocable stream must reject cancellation");
+    assert!(
+        result.is_err(),
+        "irrevocable stream must reject cancellation"
+    );
 }
 
 /// An irrevocable stream cannot be shortened.
@@ -942,8 +939,6 @@ fn irrevocable_shorten_rejected() {
         },
     );
 
-    let result = ctx
-        .client()
-        .try_shorten_stream_end_time(&stream_id, &500);
+    let result = ctx.client().try_shorten_stream_end_time(&stream_id, &500);
     assert!(result.is_err(), "irrevocable stream must reject shortening");
 }

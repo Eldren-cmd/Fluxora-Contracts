@@ -42,7 +42,9 @@ pub fn reject_duplicate_ids(env: &Env, ids: &soroban_sdk::Vec<u64>) -> Result<()
 pub use storage::increment_delegated_nonce_test_only as increment_delegated_nonce;
 
 // ---------------------------------------------------------------------------
-// TTL constants (defined in storage.rs)
+// TTL constants
+// ---------------------------------------------------------------------------
+
 // ---------------------------------------------------------------------------
 // Pagination limits (DoS prevention)
 // ---------------------------------------------------------------------------
@@ -1034,6 +1036,16 @@ pub struct RotationEntry {
     pub authoriser: Address,
 }
 
+/// Pagination result for recipient stream listing
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Page {
+    /// Stream IDs for this page (sorted ascending)
+    pub stream_ids: soroban_sdk::Vec<u64>,
+    /// Next cursor for pagination (0 if no more pages)
+    pub next_cursor: u64,
+}
+
 /// Paginated aggregate health report for a sender's entire stream portfolio.
 ///
 /// Returned by `get_sender_portfolio_health`. Each call processes up to
@@ -1406,7 +1418,49 @@ const MAX_ROTATION_HISTORY: u32 = 50;
 /// Maximum number of recipients in a pooled stream.
 pub const MAX_POOL_RECIPIENTS: u32 = 100;
 
-// Pooled-stream storage helpers are canonical in `storage.rs`.
+// ---------------------------------------------------------------------------
+// Pooled stream storage helpers
+// ---------------------------------------------------------------------------
+
+/// Load the share distribution for a pooled stream.
+fn read_pooled_stream_shares(
+    env: &Env,
+    stream_id: u64,
+) -> Result<soroban_sdk::Vec<(Address, u32)>, ContractError> {
+    let key = DataKey::PooledStreamShares(stream_id);
+    env.storage()
+        .persistent()
+        .get(&key)
+        .ok_or(ContractError::StreamNotFound)
+}
+
+/// Persist the share distribution for a pooled stream.
+fn save_pooled_stream_shares(env: &Env, stream_id: u64, shares: &soroban_sdk::Vec<(Address, u32)>) {
+    let key = DataKey::PooledStreamShares(stream_id);
+    env.storage().persistent().set(&key, shares);
+    env.storage().persistent().extend_ttl(
+        &key,
+        PERSISTENT_LIFETIME_THRESHOLD,
+        PERSISTENT_BUMP_AMOUNT,
+    );
+}
+
+/// Load the amount already withdrawn by a specific recipient from a pooled stream.
+fn read_pooled_stream_withdrawn(env: &Env, stream_id: u64, recipient: Address) -> i128 {
+    let key = DataKey::PooledStreamWithdrawn(stream_id, recipient);
+    env.storage().persistent().get(&key).unwrap_or(0i128)
+}
+
+/// Persist the amount withdrawn by a specific recipient from a pooled stream.
+fn save_pooled_stream_withdrawn(env: &Env, stream_id: u64, recipient: Address, amount: i128) {
+    let key = DataKey::PooledStreamWithdrawn(stream_id, recipient);
+    env.storage().persistent().set(&key, &amount);
+    env.storage().persistent().extend_ttl(
+        &key,
+        PERSISTENT_LIFETIME_THRESHOLD,
+        PERSISTENT_BUMP_AMOUNT,
+    );
+}
 
 // ---------------------------------------------------------------------------
 // Internal Helpers
@@ -1576,6 +1630,10 @@ impl FluxoraStream {
             withdraw_dust_threshold,
             last_pause_toggle_ledger: 0,
             last_withdraw_ledger: 0,
+            metadata: metadata.clone(),
+            witness: witness.clone(),
+            last_rate_change_ledger: 0,
+            is_pooled: None,
             memo: memo.clone(),
             kind,
             metadata: metadata.clone(),
@@ -1675,6 +1733,10 @@ impl FluxoraStream {
             withdraw_dust_threshold,
             last_pause_toggle_ledger: 0,
             last_withdraw_ledger: 0,
+            metadata: metadata.clone(),
+            witness: witness.clone(),
+            last_rate_change_ledger: 0,
+            is_pooled: None,
             memo: memo.clone(),
             kind,
             metadata: metadata.clone(),
@@ -1952,9 +2014,11 @@ impl FluxoraStream {
         metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
         irrevocable: Option<bool>,
         witness: Option<Address>,
+        max_lookback_ledgers: Option<u32>,
     ) -> Result<u64, ContractError> {
         sender.require_auth();
         require_not_creation_paused(&env)?;
+        validate_lookback_window(max_lookback_ledgers)?;
 
         let mut final_rate = rate_per_second;
         if kind == StreamKind::CliffOnly {
@@ -1991,6 +2055,74 @@ impl FluxoraStream {
             metadata,
             irrevocable,
             witness,
+        )?;
+
+        if max_lookback_ledgers.is_some() {
+            set_max_lookback_ledgers(&env, stream_id, max_lookback_ledgers)?;
+        }
+
+        Ok(stream_id)
+    }
+
+    /// Create a new payment stream with an optional per-stream lookback window.
+    ///
+    /// Identical to [`create_stream`] in every respect except that
+    /// `max_lookback_ledgers` is written atomically with stream creation so
+    /// the bound is active from the very first withdrawal call.
+    ///
+    /// # Parameters
+    /// - `sender`               : Address funding the stream (must authorize).
+    /// - `params`               : Full `CreateStreamParams` (same as `create_stream`).
+    /// - `max_lookback_ledgers` : Optional lookback cap.
+    ///   - `None`    – no bound; behaviour is identical to `create_stream`.
+    ///   - `Some(n)` – each single claim is capped to accrual earned during
+    ///                 the most recent `n` ledgers. Older unclaimed accrual
+    ///                 remains accessible in subsequent windows.
+    ///   - `Some(0)` – rejected with `ContractError::InvalidParams`.
+    ///
+    /// # Accrual vs. claimability distinction
+    /// `calculate_accrued` always returns the total lifetime entitlement and
+    /// is never affected by this setting. Only the per-call payout reported by
+    /// `get_withdrawable`, `get_claimable_at`, and the `withdraw*` family is
+    /// bounded.
+    ///
+    /// # No permanent loss guarantee
+    /// The cap limits *velocity*, not *total entitlement*. Repeated calls
+    /// across successive lookback windows eventually recover 100% of the
+    /// accrued amount; see `docs/streaming.md §Lookback-bounded withdrawals`
+    /// for the proof sketch.
+    ///
+    /// # CliffOnly bypass
+    /// `CliffOnly` streams bypass the cap once the cliff has elapsed so a
+    /// recipient whose first query arrives after `cliff_time + window_size`
+    /// does not permanently strand funds.
+    ///
+    /// # Errors
+    /// Same as `create_stream`, plus:
+    /// - `ContractError::InvalidParams` (3) when `max_lookback_ledgers == Some(0)`.
+    pub fn create_stream_with_lookback(
+        env: Env,
+        sender: Address,
+        params: CreateStreamParams,
+        max_lookback_ledgers: Option<u32>,
+    ) -> Result<u64, ContractError> {
+        let withdraw_dust_threshold = params.withdraw_dust_threshold.unwrap_or(0);
+        Self::create_stream_internal(
+            env,
+            sender,
+            params.recipient,
+            params.deposit_amount,
+            params.rate_per_second,
+            params.start_time,
+            params.cliff_time,
+            params.end_time,
+            withdraw_dust_threshold,
+            params.memo,
+            params.kind,
+            params.metadata,
+            params.irrevocable,
+            params.witness,
+            max_lookback_ledgers,
         )
     }
 
