@@ -7734,6 +7734,7 @@ impl FluxoraStream {
                 start_time,
                 cliff_time: new_cliff_time,
                 end_time,
+                withdraw_dust_threshold: source.withdraw_dust_threshold,
             },
         );
 

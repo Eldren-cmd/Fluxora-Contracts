@@ -24,9 +24,401 @@ use soroban_sdk::{contracttype, Address};
 
 /// The canonical persistent record for a single payment/vesting stream.
 ///
-/// Fields are ordered to match the historical on-chain layout; appending new
-/// `Option<_>` fields at the end (with `None` meaning "pre-upgrade default")
-/// preserves backward compatibility. Never reorder or remove existing fields.
+/// The status controls the stream's lifecycle and affects both accrual calculation
+/// and operation availability. Status transitions follow strict rules to maintain
+/// system integrity and prevent unauthorized state changes.
+///
+/// ## State Transition Rules
+///
+/// ```text
+/// Active ↔ Paused    (via pause_stream/resume_stream)
+/// Active → Cancelled (via cancel_stream, terminal)
+/// Paused → Cancelled (via cancel_stream, terminal)
+/// Active → Completed (via withdraw when withdrawn_amount == deposit_amount, terminal)
+/// ```
+///
+/// Terminal states (`Completed`, `Cancelled`) cannot transition to other states.
+///
+/// ## Time-Terminal Behavior
+///
+/// Stream status values are imported from the crate root (`lib.rs`) where they
+/// are defined alongside the `#[soroban_sdk::contract]` implementation.
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum StreamEvent {
+    Paused(u64),
+    Resumed(u64),
+    StreamCancelled(u64),
+    StreamCompleted(u64),
+    StreamClosed(u64),
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct StreamCreated {
+    pub stream_id: u64,
+    pub sender: Address,
+    pub recipient: Address,
+    pub deposit_amount: i128,
+    pub rate_per_second: i128,
+    pub start_time: u64,
+    pub cliff_time: u64,
+    pub end_time: u64,
+    /// Optional withdrawal threshold (raw units). Withdrawals below this
+    /// amount are skipped unless they are the final drain or the stream is terminal.
+    pub withdraw_dust_threshold: i128,
+    /// Optional bounded memo for indexer correlation (e.g. payroll batch ID).
+    /// `None` when no memo was supplied at creation time.
+    pub memo: Option<soroban_sdk::Bytes>,
+    /// Optional structured metadata emitted for indexer consumption.
+    /// Mirrors the validated `metadata` field stored on the stream.
+    pub metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
+}
+
+/// Emitted when a stream is cloned via `clone_stream`.
+///
+/// Carries both the source stream ID (for audit trail) and the full parameters
+/// of the newly created stream so indexers can correlate the two without a
+/// separate `get_stream_state` call.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct StreamCloned {
+    /// The newly created stream's ID.
+    pub new_stream_id: u64,
+    /// The source stream that was cloned.
+    pub source_stream_id: u64,
+    /// Sender of the new stream (same as the caller / original sender).
+    pub sender: Address,
+    /// Recipient of the new stream (may differ from the source stream's recipient).
+    pub recipient: Address,
+    /// Deposit amount locked into the new stream.
+    pub deposit_amount: i128,
+    /// Rate per second inherited from the source stream.
+    pub rate_per_second: i128,
+    /// Absolute start time of the new stream.
+    pub start_time: u64,
+    /// Cliff time of the new stream (preserves the source cliff offset).
+    pub cliff_time: u64,
+    /// End time of the new stream.
+    pub end_time: u64,
+    /// Withdrawal threshold inherited from the source stream.
+    pub withdraw_dust_threshold: i128,
+}
+
+/// Result of a single stream creation attempt in a partial batch.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreateStreamResult {
+    /// True if the stream was created successfully.
+    pub success: bool,
+    /// The unique identifier of the created stream (None if success is false).
+    pub stream_id: Option<u64>,
+    /// The error code if the creation failed (None if success is true).
+    pub error: Option<u32>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct Withdrawal {
+    pub stream_id: u64,
+    pub recipient: Address,
+    pub amount: i128,
+}
+
+/// Emitted when a recipient withdraws to a specified destination via `withdraw_to`.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct WithdrawalTo {
+    pub stream_id: u64,
+    pub recipient: Address,
+    pub destination: Address,
+    pub amount: i128,
+}
+
+/// Emitted when a recipient rotates their receiving address for a stream.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecipientUpdated {
+    pub stream_id: u64,
+    pub old_recipient: Address,
+    pub new_recipient: Address,
+}
+
+/// Emitted when a recipient delegates a portion of their stream to a new recipient.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecipientShareDelegated {
+    pub parent_stream_id: u64,
+    pub child_stream_id: u64,
+    pub delegator: Address,
+    pub delegatee: Address,
+    pub share_bps: u32,
+    pub new_parent_rate: i128,
+    pub child_rate: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingRecipientUpdate {
+    pub stream_id: u64,
+    pub proposed_recipient: Address,
+}
+
+/// Per-stream result for `batch_withdraw`.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct BatchWithdrawResult {
+    pub stream_id: u64,
+    pub amount: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WithdrawToParam {
+    pub stream_id: u64,
+    pub destination: Address,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct RateUpdated {
+    pub stream_id: u64,
+    pub old_rate_per_second: i128,
+    pub new_rate_per_second: i128,
+    /// Ledger timestamp when the rate update became effective.
+    pub effective_time: u64,
+}
+
+/// Event emitted when a rate update is rejected due to exceeding the governance cap.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct RateCapEnforced {
+    pub stream_id: u64,
+    pub attempted_rate: i128,
+    pub max_rate_per_second: i128,
+}
+
+/// Emitted when the sender safely decreases the streaming rate via `decrease_rate_per_second`.
+///
+/// The `checkpointed_amount` field records how many tokens were mathematically
+/// accrued under the **old** rate at the moment of the rate change. The new rate
+/// is applied only to the remaining stream duration from `effective_time` onward.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct RateDecreased {
+    pub stream_id: u64,
+    pub old_rate_per_second: i128,
+    pub new_rate_per_second: i128,
+    /// Ledger timestamp when the decrease became effective (== `checkpointed_at`).
+    pub effective_time: u64,
+    /// Accrued amount locked in at `effective_time` under the old rate.
+    pub checkpointed_amount: i128,
+    /// Tokens refunded to the sender: `old_deposit - new_max_payable`.
+    pub refund_amount: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct StreamEndShortened {
+    /// Stream whose schedule was shortened.
+    pub stream_id: u64,
+    /// Previous `end_time` before this mutation.
+    pub old_end_time: u64,
+    /// New `end_time` after this mutation.
+    pub new_end_time: u64,
+    /// Tokens refunded to sender: `old_deposit_amount - new_deposit_amount`.
+    pub refund_amount: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct StreamEndExtended {
+    pub stream_id: u64,
+    pub old_end_time: u64,
+    pub new_end_time: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct StreamToppedUp {
+    pub stream_id: u64,
+    pub top_up_amount: i128,
+    pub new_deposit_amount: i128,
+    /// `end_time` after the top-up (unchanged by top-up itself; included so
+    /// indexers can correlate with any subsequent `extend_stream_end_time` call).
+    pub new_end_time: u64,
+}
+
+/// Emitted when the stream sender is rotated via `transfer_sender`.
+///
+/// The `old_sender` loses all sender-role privileges (pause, cancel, rate updates, etc.)
+/// and the `new_sender` gains them immediately. Recipient entitlement is unchanged.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct SenderTransferred {
+    pub stream_id: u64,
+    pub old_sender: Address,
+    pub new_sender: Address,
+}
+
+/// Emitted when a stream's claim ownership is transferred.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClaimOwnershipTransferred {
+    pub stream_id: u64,
+    pub old_owner: Option<Address>,
+    pub new_owner: Address,
+}
+
+/// Emitted when a stream's funding health status transitions between
+/// adequately funded and underfunded states.
+///
+/// A stream is **underfunded** when `remaining_balance < rate_per_second × seconds_remaining`.
+/// Terminal streams (`Completed`, `Cancelled`) always have `seconds_remaining = 0`
+/// and are never considered underfunded.
+///
+/// This event is only emitted when the `is_underfunded` flag actually changes,
+/// not on every mutation.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct StreamHealthChanged {
+    pub stream_id: u64,
+    pub is_underfunded: bool,
+    pub remaining_balance: i128,
+    pub seconds_remaining: u64,
+}
+
+/// Emitted when the contract admin toggles the global emergency pause flag.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct GlobalEmergencyPauseChanged {
+    pub paused: bool,
+}
+
+/// Emitted when the admin sweeps excess tokens from the contract.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ExcessSwept {
+    pub to: Address,
+    pub amount: i128,
+}
+
+/// Emitted when a recipient sets an auto-claim destination.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct AutoClaimSet {
+    pub stream_id: u64,
+    pub destination: Address,
+}
+
+/// Emitted when a recipient revokes their auto-claim destination.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct AutoClaimRevoked {
+    pub stream_id: u64,
+}
+
+/// Emitted when an auto-claim is triggered.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct AutoClaimTriggered {
+    pub stream_id: u64,
+    pub destination: Address,
+    pub amount: i128,
+}
+
+/// Payload for a valid auto-claim destination.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AutoClaimValidPayload {
+    pub destination: Address,
+    pub claimable: i128,
+}
+
+/// Payload for an invalid auto-claim destination.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AutoClaimInvalidPayload {
+    pub destination: Address,
+}
+
+/// Status of auto-claim configuration for a stream.
+///
+/// Returned by `get_auto_claim_status` to allow callers to validate
+/// the auto-claim destination before executing `trigger_auto_claim`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AutoClaimStatus {
+    /// No auto-claim destination has been set for this stream.
+    NotSet,
+    /// Auto-claim destination is set and valid.
+    ValidDestination(AutoClaimValidPayload),
+    /// Auto-claim destination is set but invalid (zero address or contract itself).
+    InvalidDestination(AutoClaimInvalidPayload),
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct GlobalResumed {
+    pub resumed_at: u64,
+}
+
+/// Emitted when the contract admin toggles the creation-pause flag via `set_contract_paused`.
+///
+/// When `paused == true`, `create_stream` and `create_streams` revert with
+/// `ContractError::ContractPaused`. All other operations are unaffected.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ContractPauseChanged {
+    pub paused: bool,
+}
+
+/// Emitted when the protocol is globally paused via `pause_protocol`.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ProtocolPaused {
+    pub reason: soroban_sdk::String,
+    pub paused_at: u64,
+}
+
+/// Emitted when the protocol is globally resumed via `resume_protocol`.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ProtocolResumed {
+    pub resumed_at: u64,
+}
+
+/// Information about the current protocol pause state.
+/// Returned by `get_pause_info()` query entrypoint.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct PauseInfo {
+    pub is_paused: bool,
+    pub reason: Option<soroban_sdk::String>,
+    pub paused_at: Option<u64>,
+    pub paused_by: Option<Address>,
+}
+
+/// Role type for rotation history entries.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RotationRole {
+    Recipient = 0,
+    Sender = 1,
+}
+
+/// Audit log entry for recipient or sender rotation.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RotationEntry {
+    pub old_addr: Address,
+    pub new_addr: Address,
+    pub ledger: u32,
+    pub role: RotationRole,
+    pub authoriser: Address,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Stream {
