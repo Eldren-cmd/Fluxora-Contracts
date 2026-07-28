@@ -1109,24 +1109,17 @@ pub struct Stream {
     pub memo: Option<soroban_sdk::Bytes>,
     /// The architectural style of the stream (Linear or CliffOnly).
     pub kind: StreamKind,
-    /// If true, blocks all cancellation and shortening paths (cancel_stream, cancel_stream_as_admin, keeper_cancel, shorten_stream_end_time).
-    /// Defaults to false (None) for full backward compatibility with existing streams.
-    pub irrevocable: Option<bool>,
-    /// Optional compliance witness authorized to cancel via signed attestation.
-    /// `None` when not configured (default for backward compatibility).
-    pub witness: Option<Address>,
-    /// Ledger sequence number of the last rate change.
-    /// Used to enforce the minimum rate-change interval (MIN_RATE_INTERVAL_LEDGERS).
-    /// Zero when no rate change has occurred yet.
-    pub last_rate_change_ledger: u32,
-    /// Whether this stream is a pooled multi-recipient stream.
-    /// `None` / `Some(false)` = normal stream; `Some(true)` = pooled stream.
-    pub is_pooled: Option<bool>,
-    /// Parent stream ID for delegated sub-streams (stream-delegation feature).
-    /// `None` for top-level streams.
-    pub parent_stream_id: Option<u64>,
-    /// Delegation chain depth. 0 for top-level streams, incremented on sub-stream creation.
-    pub delegation_depth: u32,
+    /// Optional structured metadata map for rich integration data (e.g. invoice ID,
+    /// project code, external reference URI).
+    ///
+    /// - At most `MAX_METADATA_KEYS` (8) entries.
+    /// - Each key ≤ `MAX_METADATA_KEY_BYTES` (32 bytes).
+    /// - Each value ≤ `MAX_METADATA_VALUE_BYTES` (128 bytes).
+    /// - Total key+value bytes ≤ `MAX_METADATA_BYTES` (512 bytes).
+    ///
+    /// Validated at `create_stream` time and **immutable** post-creation to prevent
+    /// indexer confusion.
+    pub metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
 }
 
 /// Pagination result for recipient stream listing
@@ -1208,10 +1201,12 @@ pub struct CreateStreamParams {
     pub metadata: Option<soroban_sdk::Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
     /// The architectural style of the stream (Linear, CliffOnly, or CliffSlope).
     pub kind: StreamKind,
-    /// If true, the stream cannot be cancelled or shortened. Defaults to false (None).
-    pub irrevocable: Option<bool>,
-    /// Optional compliance witness authorized to cancel via signed attestation.
-    pub witness: Option<Address>,
+    /// Optional structured key-value metadata (TLV extension, issue #580).
+    ///
+    /// Validated at creation: ≤`MAX_METADATA_KEYS` entries, each key ≤`MAX_METADATA_KEY_BYTES`
+    /// bytes, each value ≤`MAX_METADATA_VALUE_BYTES` bytes, total ≤`MAX_METADATA_BYTES` bytes.
+    /// Immutable post-creation. Pass `None` to omit.
+    pub metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
 }
 
 #[contracttype]
@@ -1233,10 +1228,11 @@ pub struct CreateStreamOptions {
     pub withdraw_dust_threshold: Option<i128>,
     /// The architectural style of the stream (Linear, CliffOnly, or CliffSlope).
     pub kind: StreamKind,
-    /// If true, the stream cannot be cancelled or shortened. Defaults to false (None).
-    pub irrevocable: Option<bool>,
-    /// Optional compliance witness authorized to cancel via signed attestation.
-    pub witness: Option<Address>,
+    /// Optional structured key-value metadata (TLV extension, issue #580).
+    ///
+    /// Same validation rules as `CreateStreamParams.metadata`.
+    /// Immutable post-creation. Pass `None` to omit.
+    pub metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
 }
 
 /// Reusable relative schedule (offsets only). Amounts are supplied when creating a stream.
@@ -1874,9 +1870,6 @@ impl FluxoraStream {
         memo: Option<soroban_sdk::Bytes>,
         kind: StreamKind,
         metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
-        irrevocable: Option<bool>,
-        witness: Option<Address>,
-        metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
     ) -> Result<u64, ContractError> {
         // Validate memo length before allocating a stream ID.
         if let Some(ref m) = memo {
@@ -1885,19 +1878,9 @@ impl FluxoraStream {
             }
         }
 
-        // Validate metadata size bounds before allocating a stream ID.
-        if let Some(ref md) = metadata {
-            validate_metadata(md)?;
-        }
-
-        // Validate metadata if present (fail-before-allocate).
+        // Validate metadata bounds before allocating a stream ID.
         if let Some(ref meta) = metadata {
-            storage::validate_metadata(meta)?;
-        }
-
-        // Validate metadata if present (fail-before-allocate).
-        if let Some(ref meta) = metadata {
-            storage::validate_metadata(meta)?;
+            validate_metadata(meta)?;
         }
 
         let stream_id = next_stream_id_for(env, &sender);
@@ -1927,11 +1910,7 @@ impl FluxoraStream {
             metadata: metadata.clone(),
             memo: memo.clone(),
             kind,
-            irrevocable,
-            witness,
-            delegation_depth: 0,
-            parent_stream_id: None,
-            decommissioned: None,
+            metadata,
         };
 
         save_stream(env, &stream);
@@ -1961,7 +1940,7 @@ impl FluxoraStream {
                 end_time,
                 withdraw_dust_threshold,
                 memo,
-                metadata,
+                metadata: stream.metadata,
             },
         );
 
@@ -1987,9 +1966,6 @@ impl FluxoraStream {
         memo: Option<soroban_sdk::Bytes>,
         kind: StreamKind,
         metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
-        irrevocable: Option<bool>,
-        witness: Option<Address>,
-        metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
     ) -> Result<u64, ContractError> {
         if let Some(ref m) = memo {
             if m.len() as usize > MAX_MEMO_BYTES {
@@ -1997,9 +1973,9 @@ impl FluxoraStream {
             }
         }
 
-        // Validate metadata size bounds before allocating a stream ID.
-        if let Some(ref md) = metadata {
-            validate_metadata(md)?;
+        // Validate metadata bounds before allocating a stream ID.
+        if let Some(ref meta) = metadata {
+            validate_metadata(meta)?;
         }
 
         let stream_id = next_stream_id_for(env, &sender);
@@ -2029,11 +2005,7 @@ impl FluxoraStream {
             metadata: metadata.clone(),
             memo: memo.clone(),
             kind,
-            irrevocable,
-            witness,
-            delegation_depth: 0,
-            parent_stream_id: None,
-            decommissioned: None,
+            metadata,
         };
 
         save_stream(env, &stream);
@@ -2059,7 +2031,7 @@ impl FluxoraStream {
                 end_time,
                 withdraw_dust_threshold,
                 memo,
-                metadata,
+                metadata: stream.metadata,
             },
         );
 
@@ -2330,7 +2302,9 @@ impl FluxoraStream {
 
         pull_token(&env, &sender, deposit_amount)?;
 
-        let stream_id = Self::persist_new_stream(
+        // Single-stream creation does not accept metadata; use create_streams
+        // or create_streams_partial with CreateStreamParams for metadata.
+        Self::persist_new_stream(
             &env,
             sender,
             recipient,
@@ -2342,10 +2316,7 @@ impl FluxoraStream {
             withdraw_dust_threshold,
             memo,
             kind,
-            metadata,
-            irrevocable,
-            witness,
-            metadata,
+            None,
         )
     }
 
@@ -2440,9 +2411,15 @@ impl FluxoraStream {
             .checked_add(params.duration)
             .ok_or(ContractError::InvalidParams)?;
 
-        // Delegate to standard create_stream with computed absolute times
-        Self::persist_new_stream(
-            &env,
+        let mut final_rate = params.rate_per_second;
+        if params.kind == StreamKind::CliffOnly {
+            final_rate = 0;
+        }
+
+        // Delegate to standard create_stream with computed absolute times.
+        // metadata is passed through only via batch APIs (create_streams_relative).
+        Self::create_stream(
+            env,
             sender,
             params.recipient,
             params.deposit_amount,
@@ -2802,10 +2779,7 @@ impl FluxoraStream {
                 params.withdraw_dust_threshold.unwrap_or(0),
                 params.memo.clone(),
                 params.kind,
-                params.metadata.clone(),
-                params.irrevocable,
-                params.witness.clone(),
-                params.metadata.clone(),
+                params.metadata,
             )?;
             created_ids.push_back(stream_id);
 
@@ -2952,8 +2926,7 @@ impl FluxoraStream {
                 memo: rel.memo,
                 metadata: rel.metadata,
                 kind: rel.kind,
-                irrevocable: rel.irrevocable,
-                witness: None,
+                metadata: rel.metadata,
             });
         }
 
@@ -3054,9 +3027,6 @@ impl FluxoraStream {
                 params.withdraw_dust_threshold.unwrap_or(0),
                 params.memo.clone(),
                 params.kind,
-                params.metadata.clone(),
-                params.irrevocable,
-                params.witness,
                 params.metadata,
             );
 
@@ -5969,6 +5939,7 @@ impl FluxoraStream {
                 duration: tpl.duration,
                 withdraw_dust_threshold: Some(withdraw_dust_threshold),
                 memo,
+                kind: StreamKind::Linear,
                 metadata,
                 kind,
                 irrevocable,
