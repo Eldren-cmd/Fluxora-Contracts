@@ -3217,6 +3217,14 @@ impl FluxoraStream {
     /// - For cancelled streams, only the accrued amount (not refunded) can be withdrawn,
     ///   and status remains `Cancelled` (no `Completed` transition)
     ///
+    /// # Slippage Guard (`min_expected_amount`)
+    /// Protects the recipient from MEV-style withdrawal-ordering risk where their realized
+    /// payout is silently reduced by a transaction ordered ahead of their `withdraw` call.
+    /// Ordering scenarios this protects against include:
+    /// - `top_up_stream` expanding the deposit (and potentially shifting lookback bounds)
+    /// - `decrease_rate_per_second` lowering the accrual rate before execution
+    /// - Lookback cap logic triggering based on a modified effective time
+    ///
     /// # Examples
     /// - Stream: 1000 tokens over 1000 seconds (1 token/sec)
     /// - At t=0 (before cliff): withdraw() returns 0 (no transfer)
@@ -3224,7 +3232,11 @@ impl FluxoraStream {
     /// - At t=300 (again): withdraw() returns 0 (already withdrawn)
     /// - At t=800: withdraw() returns 500 tokens (800 - 300 already withdrawn)
     /// - At t=1000: withdraw() returns 200 tokens, status → Completed
-    pub fn withdraw(env: Env, stream_id: u64) -> Result<i128, ContractError> {
+    pub fn withdraw(
+        env: Env,
+        stream_id: u64,
+        min_expected_amount: Option<i128>,
+    ) -> Result<i128, ContractError> {
         require_not_globally_paused(&env)?;
         let mut stream = load_stream(&env, stream_id)?;
 
@@ -3267,6 +3279,12 @@ impl FluxoraStream {
         let contract_balance =
             token::Client::new(&env, &token_address).balance(&env.current_contract_address());
         withdrawable = withdrawable.min(contract_balance);
+
+        if let Some(min) = min_expected_amount {
+            if withdrawable < min {
+                return Err(ContractError::BelowMinimumAmount);
+            }
+        }
 
         if withdrawable <= 0 {
             return Ok(0);

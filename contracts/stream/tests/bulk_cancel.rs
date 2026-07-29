@@ -237,7 +237,7 @@ fn test_bulk_cancel_rejects_completed_stream() {
     let stream_id = create_test_stream(&env, &client, &sender, &recipient, 1000, 1, 0, 0, 1000);
     advance_time(&env, 1001);
     env.mock_all_auths();
-    client.withdraw(&stream_id);
+    client.withdraw(&stream_id, &None);
 
     let result = client.try_bulk_cancel_streams(&sender, &vec![&env, stream_id]);
     assert!(result.is_err());

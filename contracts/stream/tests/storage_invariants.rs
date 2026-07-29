@@ -144,7 +144,7 @@ fn terminal_cancelled_stream_bypasses_dust_threshold() {
     ctx.env.ledger().set_timestamp(50);
     ctx.client.cancel_stream(&stream_id);
 
-    let withdrawn = ctx.client.withdraw(&stream_id);
+    let withdrawn = ctx.client.withdraw(&stream_id, &None);
     assert_eq!(
         withdrawn, 50,
         "cancelled terminal stream must bypass dust threshold (50 < 500)"
@@ -159,13 +159,13 @@ fn final_drain_bypasses_dust_threshold() {
 
     // Advance to withdraw 900, which is above the threshold (500).
     ctx.env.ledger().set_timestamp(900);
-    let withdrawn1 = ctx.client.withdraw(&stream_id);
+    let withdrawn1 = ctx.client.withdraw(&stream_id, &None);
     assert_eq!(withdrawn1, 900);
 
     // Advance to end of stream. 100 tokens remain, which is below the threshold (500).
     // Because it's the final drain (remaining balance = 100), the withdrawal should bypass the threshold.
     ctx.env.ledger().set_timestamp(1_000);
-    let withdrawn2 = ctx.client.withdraw(&stream_id);
+    let withdrawn2 = ctx.client.withdraw(&stream_id, &None);
     assert_eq!(
         withdrawn2, 100,
         "final drain must bypass dust threshold (100 < 500)"

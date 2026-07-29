@@ -12,7 +12,15 @@ withdraw
 After all checks (auth, status, withdrawable amount), the contract updates withdrawn_amount and, when applicable, sets status to Completed, then persists the stream with save_stream. Only after that does it call the token contract to transfer tokens to the recipient.
 Completion is only allowed from Active status; cancelled streams remain Cancelled even when their accrued portion is fully withdrawn.
 
-After all checks (auth, status, withdrawable amount), the contract:
+Slippage Guard (`min_expected_amount`)
+The `withdraw` entrypoint accepts an optional `min_expected_amount` parameter. When provided, the contract verifies that the computed withdrawable amount is at least this minimum. This protects the recipient against MEV-style withdrawal-ordering risks where their realized payout could be silently reduced by transactions ordered ahead of their `withdraw` call. The ordering scenarios this protects against include:
+- `top_up_stream` expanding the deposit (and potentially shifting lookback bounds)
+- `decrease_rate_per_second` lowering the accrual rate before execution
+- Lookback cap logic triggering based on a modified effective time
+
+If the computed withdrawable amount is less than the requested minimum, the transaction reverts with `ContractError::BelowMinimumAmount`.
+
+After all checks (auth, status, withdrawable amount, and slippage guard), the contract:
 
 Updates withdrawn_amount in the stream struct.
 Conditionally sets status to Completed if the stream is now fully drained.

@@ -245,7 +245,7 @@ fn test_keeper_cancel_with_prior_withdrawal() {
     // Recipient withdraws 500 at t=500
     ctx.env.ledger().set_timestamp(500);
     ctx.env.ledger().set_sequence_number(1);
-    let withdrawn = ctx.client().withdraw(&sid);
+    let withdrawn = ctx.client().withdraw(&sid, &None);
     assert_eq!(withdrawn, 500);
 
     // Advance past grace period
@@ -360,7 +360,7 @@ fn test_keeper_cancel_completed_stream_errors() {
 
     ctx.env.ledger().set_timestamp(1_000);
     ctx.env.ledger().set_sequence_number(1);
-    ctx.client().withdraw(&sid); // fully withdraws → Completed
+    ctx.client().withdraw(&sid, &None); // fully withdraws → Completed
 
     ctx.env.ledger().set_timestamp(1_000 + GRACE + 1);
     let result = ctx.client().try_keeper_cancel(&sid, &ctx.keeper);
@@ -390,7 +390,7 @@ fn test_keeper_cancel_token_conservation_deterministic() {
     // Partial withdrawal at t=200
     ctx.env.ledger().set_timestamp(200);
     ctx.env.ledger().set_sequence_number(1);
-    let withdrawn = ctx.client().withdraw(&sid);
+    let withdrawn = ctx.client().withdraw(&sid, &None);
 
     ctx.env.ledger().set_timestamp(1_000 + GRACE + 1);
 
@@ -504,7 +504,7 @@ fn test_keeper_cancel_event_reconciles_with_prior_withdrawal() {
 
     ctx.env.ledger().set_timestamp(200);
     ctx.env.ledger().set_sequence_number(1);
-    ctx.client().withdraw(&sid);
+    ctx.client().withdraw(&sid, &None);
     let prior_withdrawn = ctx.balance(&ctx.recipient);
 
     ctx.env.ledger().set_timestamp(1_000 + GRACE + 1);
@@ -715,7 +715,7 @@ proptest! {
         let withdrawn_before: i128 = if do_withdraw && wt > 0 {
             ctx.env.ledger().set_timestamp(wt);
             ctx.env.ledger().set_sequence_number((wt / 5 + 1).max(1) as u32);
-            match ctx.client().try_withdraw(&sid) {
+            match ctx.client().try_withdraw(&sid, &None) {
                 Ok(Ok(amt)) => amt,
                 _ => 0,
             }
@@ -918,7 +918,7 @@ proptest! {
             let t = t.min(end);
             ctx.env.ledger().set_timestamp(t);
             ctx.env.ledger().set_sequence_number((seq as u32 + 1).max(1));
-            if let Ok(Ok(amt)) = ctx.client().try_withdraw(&sid) {
+            if let Ok(Ok(amt)) = ctx.client().try_withdraw(&sid, &None) {
                 total_withdrawn += amt;
             }
         }

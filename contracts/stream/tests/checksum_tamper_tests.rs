@@ -108,7 +108,7 @@ fn test_checksum_basic_functionality() {
     let stream_id = ctx.create_test_stream();
 
     // Get the stream state
-    let stream = ctx.client.get_stream_state(&stream_id).unwrap();
+    let stream = ctx.client.get_stream_state(&stream_id);
 
     // Compute checksum of the stream (assuming this function exists)
     // If checksum module is not yet implemented, this test will guide
@@ -131,7 +131,7 @@ fn test_checksum_basic_functionality() {
 fn test_tamper_detection_stream_id() {
     let ctx = ChecksumTestContext::setup();
     let original_stream_id = ctx.create_test_stream();
-    let mut stream = ctx.client.get_stream_state(&original_stream_id).unwrap();
+    let mut stream = ctx.client.get_stream_state(&original_stream_id);
 
     let original_checksum = compute_stream_checksum(&ctx.env, &stream);
 
@@ -143,7 +143,7 @@ fn test_tamper_detection_stream_id() {
     // Since we can't mutate the stream directly in storage, we need to
     // verify that the checksum would detect a mismatch by comparing
     // the checksum of a different stream
-    let different_stream = ctx.client.get_stream_state(&tampered_stream_id);
+    let different_stream = ctx.client.try_get_stream_state(&tampered_stream_id);
 
     // If the stream doesn't exist, we can't test directly, but this test
     // demonstrates the concept. In a real implementation, you'd have
@@ -277,7 +277,7 @@ fn test_excluded_fields_are_documented() {
 
     let ctx = ChecksumTestContext::setup();
     let stream_id = ctx.create_test_stream();
-    let stream = ctx.client.get_stream_state(&stream_id).unwrap();
+    let stream = ctx.client.get_stream_state(&stream_id);
 
     // Verify that excluded fields can change without affecting the checksum
     let original_checksum = compute_stream_checksum(&ctx.env, &stream);
@@ -327,7 +327,7 @@ fn test_excluded_fields_are_documented() {
 fn test_all_included_fields_detect_tampering() {
     let ctx = ChecksumTestContext::setup();
     let stream_id = ctx.create_test_stream();
-    let stream = ctx.client.get_stream_state(&stream_id).unwrap();
+    let stream = ctx.client.get_stream_state(&stream_id);
 
     let original_checksum = compute_stream_checksum(&ctx.env, &stream);
 
@@ -398,7 +398,7 @@ fn test_all_included_fields_detect_tampering() {
 fn test_option_fields_none_vs_some() {
     let ctx = ChecksumTestContext::setup();
     let stream_id = ctx.create_test_stream();
-    let stream = ctx.client.get_stream_state(&stream_id).unwrap();
+    let stream = ctx.client.get_stream_state(&stream_id);
 
     let checksum_none = compute_stream_checksum(&ctx.env, &stream);
 
@@ -428,7 +428,7 @@ fn test_option_fields_none_vs_some() {
 fn test_checksum_consistency() {
     let ctx = ChecksumTestContext::setup();
     let stream_id = ctx.create_test_stream();
-    let stream = ctx.client.get_stream_state(&stream_id).unwrap();
+    let stream = ctx.client.get_stream_state(&stream_id);
 
     // Compute checksum multiple times
     let checksum1 = compute_stream_checksum(&ctx.env, &stream);
@@ -472,7 +472,7 @@ fn test_checksum_integration_with_formal_verification() {
     // formal verification smoke test suite.
     let ctx = ChecksumTestContext::setup();
     let stream_id = ctx.create_test_stream();
-    let stream = ctx.client.get_stream_state(&stream_id).unwrap();
+    let stream = ctx.client.get_stream_state(&stream_id);
 
     // Just verify we can compute a checksum
     let checksum = compute_stream_checksum(&ctx.env, &stream);

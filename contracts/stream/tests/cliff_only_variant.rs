@@ -265,7 +265,7 @@ fn test_cliffonly_keeper_cancel_rejects_completed_stream() {
     // Full withdrawal after cliff → stream becomes Completed
     ctx.env.ledger().set_timestamp(600);
     ctx.env.ledger().set_sequence_number(1);
-    let withdrawn = ctx.client().withdraw(&sid);
+    let withdrawn = ctx.client().withdraw(&sid, &None);
     assert_eq!(withdrawn, deposit, "CliffOnly: full deposit withdrawable at t=600");
 
     let stream = ctx.client().get_stream_state(&sid);
