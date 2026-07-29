@@ -470,6 +470,9 @@ pub struct Stream {
     pub metadata: Option<soroban_sdk::Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
     /// Optional compliance witness authorized to cancel via signed attestation.
     pub witness: Option<Address>,
+    /// If true, blocks all cancellation and shortening paths.
+    /// Defaults to false (None) for backward compatibility.
+    pub irrevocable: Option<bool>,
     /// Whether this stream is a pooled multi-recipient stream.
     pub is_pooled: Option<bool>,
     /// Ledger sequence number of the last rate change (or creation).
@@ -493,19 +496,6 @@ pub struct Stream {
 pub struct StreamDecommissioned {
     pub stream_id: u64,
     pub decommissioned: bool,
-}
-
-/// Emitted when a recipient delegates a share of their stream.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RecipientShareDelegated {
-    pub parent_stream_id: u64,
-    pub child_stream_id: u64,
-    pub delegator: Address,
-    pub delegatee: Address,
-    pub share_bps: u32,
-    pub new_parent_rate: i128,
-    pub child_rate: i128,
 }
 
 /// Pagination result for paginated stream listings.
