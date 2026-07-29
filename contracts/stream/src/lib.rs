@@ -61,6 +61,19 @@ use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{contract, contracttype, symbol_short, token, Address, Env, Map};
 pub use storage::*;
 use token_check::verify_token_behavior;
+
+pub fn reject_duplicate_ids(env: &Env, ids: &soroban_sdk::Vec<u64>) -> Result<(), ContractError> {
+    let mut seen = soroban_sdk::Vec::<u64>::new(env);
+    for id in ids.iter() {
+        for existing in seen.iter() {
+            if existing == id {
+                return Err(ContractError::DuplicateStreamId);
+            }
+        }
+        seen.push_back(id);
+    }
+    Ok(())
+}
 // NOTE: `crate::types` is intentionally minimal — it holds the `Stream`
 // persistent struct (the largest contracttype; exposed via Soroban's
 // generated client) plus a small set of supplementary event/pagination
@@ -915,6 +928,15 @@ pub struct KeeperCancelled {
     pub sender_refund: i128,
 }
 
+/// Emitted when claim ownership of a stream is transferred to a new address.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ClaimOwnershipTransferred {
+    pub stream_id: u64,
+    pub old_owner: Option<Address>,
+    pub new_owner: Address,
+}
+
 // ---------------------------------------------------------------------------
 // Offer-then-accept types (two-phase stream creation)
 // ---------------------------------------------------------------------------
@@ -1185,19 +1207,14 @@ pub struct Stream {
     /// Optional compliance witness authorized to cancel via signed attestation.
     /// `None` when not configured (default for backward compatibility).
     pub witness: Option<Address>,
-    /// Delegation depth of this stream in the recipient-share delegation tree
-    /// (0 for a root stream, N for the Nth level of delegated child stream).
-    pub delegation_depth: u32,
-    /// Parent stream id when this stream is a delegated child of another stream.
-    /// `None` for root streams.
+    /// Parent stream ID for delegated sub-streams (stream-delegation feature).
+    /// `None` for top-level streams.
     pub parent_stream_id: Option<u64>,
-    /// If true, the stream is decommissioned and restricted to cancel-or-no-op.
-    /// Defaults to false (None) for backward compatibility with existing streams.
+    /// Delegation chain depth. 0 for top-level streams, incremented on sub-stream creation.
+    pub delegation_depth: u32,
+    /// Whether this stream has been flagged for wind-down via `set_stream_decommissioned`.
+    /// `None` / `Some(false)` = normal stream; `Some(true)` = decommissioned.
     pub decommissioned: Option<bool>,
-    /// Ledger timestamp when the stream was last paused (0 if not paused).
-    pub paused_at_timestamp: u64,
-    /// Total seconds the stream has been in Paused state across all pause cycles.
-    pub cumulative_paused_duration: u64,
 }
 
 /// Pagination result for recipient stream listing
@@ -1563,6 +1580,29 @@ fn apply_lookback_cap(
     claimable.min(cap).max(0)
 }
 
+// ---------------------------------------------------------------------------
+// Global state, pause, and config helpers — delegated to storage.rs
+// ---------------------------------------------------------------------------
+// (acquire_reentrancy_lock, release_reentrancy_lock, compute_adaptive_ttl,
+//  get_config, load_config, get_token, get_admin, is_global_emergency_paused,
+//  is_creation_paused, require_not_globally_paused, require_not_creation_paused,
+//  is_protocol_paused, get_pause_reason, get_pause_timestamp, get_pause_admin,
+//  get_max_rate_per_second, set_max_rate_per_second, read_stream_count,
+//  set_stream_count, read_paused_stream_count, write_paused_stream_count,
+//  reconcile_paused_stream_count) all come from storage.rs via the glob
+//  re-export above. Local copies were removed: several had silently drifted
+//  from storage.rs's TTL-safe implementations (missing `bump_instance_ttl`
+//  / `extend_ttl` calls), which would have let instance/persistent storage
+//  entries expire unexpectedly.
+
+// ---------------------------------------------------------------------------
+// IdReservation storage helpers — delegated to storage.rs
+// ---------------------------------------------------------------------------
+
+use storage::{
+    load_id_reservation, next_stream_id_for, remove_id_reservation, save_id_reservation,
+};
+
 /// Enforce the rate-change cooldown and record the current ledger as the last change.
 ///
 /// Shared by `update_rate_per_second` and `decrease_rate_per_second` so the
@@ -1602,6 +1642,18 @@ const MAX_ROTATION_HISTORY: u32 = 50;
 pub const MAX_POOL_RECIPIENTS: u32 = 100;
 
 // ---------------------------------------------------------------------------
+// Pooled stream storage helpers
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Pooled stream storage helpers — delegated to storage.rs
+// ---------------------------------------------------------------------------
+// (read_pooled_stream_shares, save_pooled_stream_shares,
+//  read_pooled_stream_withdrawn, save_pooled_stream_withdrawn) come from
+//  storage.rs via the glob re-export. The local `read_*` copies removed here
+//  were missing the `extend_ttl` calls storage.rs's versions perform, which
+//  would have let these persistent entries expire without ever being
+//  refreshed by a read-only access.
 // Pooled stream storage helpers are defined in `storage.rs` and re-exported
 // above (`pub use storage::*;`). The canonical implementations live there so
 // TTL bumping and error handling live in one place; the previous local
@@ -1750,6 +1802,9 @@ impl FluxoraStream {
             }
         }
 
+        // Validate metadata if present (fail-before-allocate).
+        if let Some(ref meta) = metadata {
+            storage::validate_metadata(meta)?;
         // Validate metadata size bounds before allocating a stream ID.
         if let Some(ref md) = metadata {
             validate_metadata(md)?;
@@ -1778,6 +1833,12 @@ impl FluxoraStream {
             last_pause_toggle_ledger: 0,
             last_withdraw_ledger: 0,
             metadata: metadata.clone(),
+            last_rate_change_ledger: 0,
+            is_pooled: None,
+            memo: memo.clone(),
+            kind,
+            irrevocable,
+            witness,
             witness: witness.clone(),
             is_pooled: None,
             last_rate_change_ledger: 0,
@@ -1878,6 +1939,12 @@ impl FluxoraStream {
             last_pause_toggle_ledger: 0,
             last_withdraw_ledger: 0,
             metadata: metadata.clone(),
+            last_rate_change_ledger: 0,
+            is_pooled: None,
+            memo: memo.clone(),
+            kind,
+            irrevocable,
+            witness,
             witness: witness.clone(),
             is_pooled: None,
             last_rate_change_ledger: 0,
@@ -2131,7 +2198,6 @@ impl FluxoraStream {
             params.metadata,
             params.irrevocable,
             params.witness,
-            None,
         )
     }
 
@@ -2153,6 +2219,9 @@ impl FluxoraStream {
         metadata: Option<Map<soroban_sdk::Bytes, soroban_sdk::Bytes>>,
         irrevocable: Option<bool>,
         witness: Option<Address>,
+    ) -> Result<u64, ContractError> {
+        sender.require_auth();
+        require_not_creation_paused(&env)?;
         max_lookback_ledgers: Option<u32>,
     ) -> Result<u64, ContractError> {
         sender.require_auth();
@@ -2179,7 +2248,7 @@ impl FluxoraStream {
 
         pull_token(&env, &sender, deposit_amount)?;
 
-        let stream_id = Self::persist_new_stream(
+        Self::persist_new_stream(
             &env,
             sender,
             recipient,
@@ -2372,6 +2441,7 @@ impl FluxoraStream {
             params.kind,
             params.metadata,
             params.irrevocable,
+            None,
             params.witness,
             None, // max_lookback_ledgers
         )
@@ -8057,6 +8127,7 @@ impl FluxoraStream {
             source.withdraw_dust_threshold,
             source.memo.clone(),
             source.kind,
+            None, // Clone resets metadata to prevent single-use ID duplication
             None,
             source.irrevocable,
             source.witness.clone(),
