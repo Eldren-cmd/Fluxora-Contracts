@@ -462,13 +462,14 @@ mod tests {
         assert_eq!(MEMO_POS, 14);
     }
 
-    /// Stream struct field count with both `is_pooled` and `irrevocable` appended.
-    /// V5 (14) + memo (1) + kind (1) + pause_ledger (1) + withdraw_ledger (1) + metadata (1)
-    /// + is_pooled (1) + irrevocable (1) = 21 fields.
+    /// Stream struct field count with `paused_at_timestamp` and
+    /// `cumulative_paused_duration` appended.
+    /// Prior count (21) + decommissioned (1) + paused_at_timestamp (1)
+    /// + cumulative_paused_duration (1) = 24 fields.
     #[test]
-    fn stream_struct_has_21_fields_with_is_pooled_and_irrevocable() {
-        const TOTAL_STREAM_FIELDS: usize = 21;
-        assert_eq!(TOTAL_STREAM_FIELDS, 21);
+    fn stream_struct_has_24_fields_with_paused_duration_tracking() {
+        const TOTAL_STREAM_FIELDS: usize = 24;
+        assert_eq!(TOTAL_STREAM_FIELDS, 24);
     }
 
     /// Checksum verification must be deterministic across retries.
