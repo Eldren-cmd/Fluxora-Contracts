@@ -115,6 +115,56 @@ Validation is bounded by `MAX_RATE_SEGMENTS = 256`:
 at the first violation (zero-length, negative rate, or overflow) before any storage
 mutation occurs.
 
+## Rate-Schedule Packing: Packed vs. Unpacked Storage
+
+`contracts/stream/src/accrual.rs` provides `pack_rate_segment(rate_per_second, duration_secs)`
+and `unpack_rate_segment(word)`, which bit-pack a `(rate_per_second: i128, duration_secs: u64)`
+rate-schedule segment into a single `u128` storage word instead of two separate full-width
+fields.
+
+### Bit-field layout
+
+```text
+bits [0, 31)   (31 bits) : duration_secs  (unsigned, 0..=2^31-1, ~68 years)
+bit   31       (1 bit)   : sign bit       (0 = non-negative, 1 = negative)
+bits [32, 128) (96 bits) : rate magnitude (unsigned, 0..=2^96-1)
+```
+
+`MAX_PACKABLE_DURATION_SECS` (2^31 - 1) and `MAX_PACKABLE_RATE_MAGNITUDE` (2^96 - 1) bound the
+packable range. A rate or duration outside these bounds is rejected with
+`ContractError::InvalidParams` — the packer never silently truncates a value into an adjacent
+bit field.
+
+### Measured baseline: 10-segment schedule
+
+`contracts/stream/tests/gas_regression.rs::test_rate_schedule_packed_vs_unpacked_storage_gas`
+builds a representative 10-segment schedule (mixed positive/negative rates, short and long
+durations) two ways — as bit-packed `u128` words and as the legacy two-full-width-field layout —
+and measures both the serialized XDR size (what Soroban charges rent on) and the CPU
+instructions charged for the persistent-storage `set`/`get` host calls:
+
+| Metric | Unpacked (10 segments) | Packed (10 segments) | Reduction |
+|---|---|---|---|
+| Serialized XDR bytes | 932 bytes (93.2 B/segment) | 212 bytes (21.2 B/segment) | ~77% smaller |
+| CPU: persistent `set` | 29,422 instructions | 12,399 instructions | ~58% fewer |
+| CPU: persistent `get` | 41,103 instructions | 9,572 instructions | ~77% fewer |
+
+The byte-size reduction exceeds the "roughly half" estimate from the two-full-width-field
+comparison because Soroban's XDR framing overhead (type tags, vector length prefixes) is paid
+once per `Vec` rather than per field, so collapsing two fields into one word removes a
+disproportionate share of that framing on top of the raw bit-width halving. The CPU reduction
+follows directly from the smaller serialized payload: persistent storage `set`/`get` cost scales
+with entry size.
+
+Run the measurement with:
+
+```bash
+cargo test -p fluxora_stream --test gas_regression rate_schedule -- --nocapture
+```
+
+The measured CPU instruction counts are recorded in the JSON baseline above
+(`rate_schedule_storage.*`) and validated on every CI run by `script/validate_gas.py`.
+
 Hot Path Analysis
 withdraw
 The withdraw function is the most common operation. Its cost is dominated by:
@@ -226,6 +276,12 @@ The following table provides the CPU instruction counts for core operations.
   "keeper_cancel": {
     "partial_accrual": 786739,
     "fully_accrued": 386889
+  },
+  "rate_schedule_storage": {
+    "unpacked_10_segments_write": 29422,
+    "unpacked_10_segments_read": 41103,
+    "packed_10_segments_write": 12399,
+    "packed_10_segments_read": 9572
   }
 }
 

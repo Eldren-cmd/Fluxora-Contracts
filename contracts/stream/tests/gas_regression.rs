@@ -34,15 +34,17 @@
 /// baseline update procedure, and upgrade-compatibility notes.
 // See docs/gas.md for the baseline update process and review bar.
 use fluxora_stream::{
-    BatchWithdrawResult, CreateStreamParams, FluxoraStream,
-    FluxoraStreamClient, StreamKind, WithdrawToParam,
+    accrual::pack_rate_segment, BatchWithdrawResult, CreateStreamParams, FluxoraStream,
+    FluxoraStreamClient, PauseReason, StreamKind, WithdrawToParam,
     MAX_MEMO_BYTES, MAX_METADATA_BYTES, MAX_METADATA_KEYS,
     MAX_METADATA_KEY_BYTES, MAX_METADATA_VALUE_BYTES,
     MAX_STREAM_ENTRY_BYTES,
 };
 use soroban_sdk::{
+    contracttype, symbol_short,
     testutils::{Address as _, Ledger},
     token::{Client as TokenClient, StellarAssetClient},
+    xdr::ToXdr,
     Address, Bytes, Env, Map, Vec,
 };
 
@@ -298,6 +300,8 @@ fn test_create_streams_gas() {
                 end_time: 1000u64,
                 memo: None,
                 metadata: None,
+                irrevocable: None,
+                witness: None,
             });
         }
 
@@ -512,12 +516,12 @@ fn test_batch_withdraw_duplicate_ids_idempotent() {
     stream_ids.push_back(id2);
     stream_ids.push_back(id1); // duplicate
 
-    let result1 = ctx.client.batch_withdraw(&ctx.recipient, &stream_ids);
+    let result1 = ctx.client.try_batch_withdraw(&ctx.recipient, &stream_ids);
     assert!(result1.is_err());
     let error_type1 = if result1.is_err() { "DuplicateStreamId" } else { "Unknown" };
 
     // Retry with same duplicate list should produce identical error (idempotent)
-    let result2 = ctx.client.batch_withdraw(&ctx.recipient, &stream_ids);
+    let result2 = ctx.client.try_batch_withdraw(&ctx.recipient, &stream_ids);
     let error_type2 = if result2.is_err() { "DuplicateStreamId" } else { "Unknown" };
 
     assert_eq!(error_type1, error_type2);
@@ -542,19 +546,19 @@ fn test_batch_withdraw_valid_ids_deterministic() {
     stream_ids.push_back(id1);
     stream_ids.push_back(id2);
 
-    let result1 = ctx.client.batch_withdraw(&ctx.recipient, &stream_ids).expect("should succeed");
+    let result1 = ctx.client.batch_withdraw(&ctx.recipient, &stream_ids);
     assert_eq!(result1.len(), 2);
 
     // After withdrawal, withdrawable should be 0 for both streams
-    let s1_state = ctx.client.get_stream_state(&id1).expect("should exist");
+    let s1_state = ctx.client.get_stream_state(&id1);
     assert_eq!(s1_state.withdrawn_amount, 500);
 
     // Retry batch on already-withdrawn streams
-    let result2 = ctx.client.batch_withdraw(&ctx.recipient, &stream_ids).expect("should succeed");
+    let result2 = ctx.client.batch_withdraw(&ctx.recipient, &stream_ids);
     assert_eq!(result2.len(), 2);
 
     // Withdrawn amounts should be unchanged
-    let s1_state_after = ctx.client.get_stream_state(&id1).expect("should exist");
+    let s1_state_after = ctx.client.get_stream_state(&id1);
     assert_eq!(s1_state_after.withdrawn_amount, 500);
 }
 
@@ -571,7 +575,7 @@ fn test_batch_withdraw_zero_amount_mixed_terminal() {
 
     // Complete the first stream
     ctx.env.ledger().set_timestamp(500);
-    ctx.client.withdraw(&completed_id);
+    ctx.client.withdraw(&completed_id, &None);
 
     ctx.env.ledger().set_timestamp(1000);
 
@@ -580,7 +584,7 @@ fn test_batch_withdraw_zero_amount_mixed_terminal() {
     stream_ids.push_back(completed_id);
 
     // Batch with both active and completed streams
-    let result1 = ctx.client.batch_withdraw(&ctx.recipient, &stream_ids).expect("should succeed");
+    let result1 = ctx.client.batch_withdraw(&ctx.recipient, &stream_ids);
     assert_eq!(result1.len(), 2);
 
     // Result should have 0 for completed and >0 for active
@@ -608,7 +612,7 @@ fn test_batch_withdraw_empty_batch() {
 
     let mut stream_ids = soroban_sdk::Vec::new(&ctx.env);
 
-    let result = ctx.client.batch_withdraw(&ctx.recipient, &stream_ids).expect("empty batch should succeed");
+    let result = ctx.client.batch_withdraw(&ctx.recipient, &stream_ids);
     assert_eq!(result.len(), 0);
 }
 
@@ -637,12 +641,12 @@ fn test_batch_withdraw_to_duplicate_destinations_idempotent() {
         destination: destination_b.clone(), // Duplicate destination
     });
 
-    let result1 = ctx.client.batch_withdraw_to(&ctx.recipient, &withdrawals);
+    let result1 = ctx.client.try_batch_withdraw_to(&ctx.recipient, &withdrawals);
     assert!(result1.is_err());
     let error_type1 = if result1.is_err() { "DuplicateDestination" } else { "Unknown" };
 
     // Retry with same duplicate list should produce identical error (idempotent)
-    let result2 = ctx.client.batch_withdraw_to(&ctx.recipient, &withdrawals);
+    let result2 = ctx.client.try_batch_withdraw_to(&ctx.recipient, &withdrawals);
     let error_type2 = if result2.is_err() { "DuplicateDestination" } else { "Unknown" };
 
     assert_eq!(error_type1, error_type2);
@@ -744,7 +748,7 @@ fn test_stream_entry_xdr_size_worst_case() {
             memo: Some(memo.clone()),
             metadata: Some(metadata.clone()),
             kind: StreamKind::Linear,
-            irrevoca: Some(true),
+            irrevocable: Some(true),
             witness: Some(witness.clone()),
         }
     ];
@@ -819,7 +823,7 @@ fn test_stream_entry_xdr_size_baseline() {
             memo: None,
             metadata: None,
             kind: StreamKind::Linear,
-            irrevocabled: None,
+            irrevocable: None,
             witness: None,
         }
     ];
@@ -887,7 +891,7 @@ fn test_stream_entry_xdr_size_memo_only() {
             memo: Some(memo),
             metadata: None,
             kind: StreamKind::Linear,
-            irrevoca: None,
+            irrevocable: None,
             witness: None,
         }
     ];
@@ -954,7 +958,7 @@ fn test_stream_entry_xdr_size_metadata_only() {
             memo: None,
             metadata: Some(metadata),
             kind: StreamKind::Linear,
-            irrevoca: None,
+            irrevocable: None,
             witness: None,
         }
     ];
@@ -977,4 +981,163 @@ fn test_stream_entry_xdr_size_metadata_only() {
         serialized_len,
         MAX_STREAM_ENTRY_BYTES
     );
+}
+
+// ---------------------------------------------------------------------------
+// Bit-packed rate-schedule storage: packed vs. unpacked gas/rent comparison
+//
+// Backs the storage-savings claim in the rate-schedule bit-packing issue:
+// packing each `(rate_per_second: i128, duration_secs: u64)` segment into a
+// single bit-packed `u128` word (`accrual::pack_rate_segment`) roughly halves
+// the persistent-storage footprint versus storing the two fields separately.
+// ---------------------------------------------------------------------------
+
+/// Test-only mirror of the legacy two-full-width-field segment layout
+/// described in the issue. `accrual::RateSegment` is intentionally a plain
+/// (non-`#[contracttype]`) validation helper, so this type lets the
+/// benchmark persist a 10-segment schedule exactly as an unpacked on-chain
+/// layout would store it, for an apples-to-apples XDR/rent comparison
+/// against the packed `Vec<u128>` representation.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct UnpackedRateSegment {
+    rate_per_second: i128,
+    duration_secs: u64,
+}
+
+/// A representative 10-segment rate schedule spanning the packable range,
+/// including a mix of positive/negative rates and short/long durations.
+fn sample_rate_schedule_10_segments() -> [(i128, u32); 10] {
+    [
+        (1, 3_600),
+        (1_000, 86_400),
+        (-500, 604_800),
+        (1_000_000, 1),
+        (0, 1),
+        (42, 999_999),
+        (5_000_000_000, 100),
+        (-1, 2_147_483_647),
+        (7_777_777, 2_592_000),
+        (-42_000, 31_536_000),
+    ]
+}
+
+/// Compares the persistent-storage rent cost of a 10-segment piecewise rate
+/// schedule stored as bit-packed `u128` words versus the legacy two-field
+/// layout, on two axes:
+///
+/// 1. **Serialized XDR bytes** — what Soroban actually charges rent on.
+/// 2. **CPU instructions for the `set`/`get` persistent-storage host calls** —
+///    measured via `env.budget()` inside `env.as_contract(...)`, so the cost
+///    is the genuine metered cost of writing/reading each representation to
+///    a real persistent ledger entry (not a wall-clock proxy).
+///
+/// See `docs/gas.md` §"Rate-Schedule Packing: Packed vs. Unpacked Storage"
+/// for the measured baseline and update procedure.
+#[test]
+fn test_rate_schedule_packed_vs_unpacked_storage_gas() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, FluxoraStream);
+    let segments = sample_rate_schedule_10_segments();
+
+    // --- Unpacked layout: two full-width fields per segment ---
+    let mut unpacked: Vec<UnpackedRateSegment> = Vec::new(&env);
+    for &(rate, duration) in &segments {
+        unpacked.push_back(UnpackedRateSegment {
+            rate_per_second: rate,
+            duration_secs: duration as u64,
+        });
+    }
+    let unpacked_bytes = unpacked.clone().to_xdr(&env).len();
+
+    let unpacked_key = symbol_short!("unpckd");
+    env.budget().reset_unlimited();
+    env.as_contract(&contract_id, || {
+        env.storage().persistent().set(&unpacked_key, &unpacked);
+    });
+    let unpacked_write_cost = env.budget().cpu_instruction_cost();
+
+    env.budget().reset_unlimited();
+    let _: Vec<UnpackedRateSegment> = env.as_contract(&contract_id, || {
+        env.storage().persistent().get(&unpacked_key).unwrap()
+    });
+    let unpacked_read_cost = env.budget().cpu_instruction_cost();
+
+    // --- Packed layout: one bit-packed u128 word per segment ---
+    let mut packed: Vec<u128> = Vec::new(&env);
+    for &(rate, duration) in &segments {
+        let word = pack_rate_segment(rate, duration).expect("segment within packable range");
+        packed.push_back(word);
+    }
+    let packed_bytes = packed.clone().to_xdr(&env).len();
+
+    let packed_key = symbol_short!("packed");
+    env.budget().reset_unlimited();
+    env.as_contract(&contract_id, || {
+        env.storage().persistent().set(&packed_key, &packed);
+    });
+    let packed_write_cost = env.budget().cpu_instruction_cost();
+
+    env.budget().reset_unlimited();
+    let _: Vec<u128> = env.as_contract(&contract_id, || {
+        env.storage().persistent().get(&packed_key).unwrap()
+    });
+    let packed_read_cost = env.budget().cpu_instruction_cost();
+
+    println!(
+        "GAS_MEASUREMENT: rate_schedule_storage: unpacked_10_segments_write: {}",
+        unpacked_write_cost
+    );
+    println!(
+        "GAS_MEASUREMENT: rate_schedule_storage: unpacked_10_segments_read: {}",
+        unpacked_read_cost
+    );
+    println!(
+        "GAS_MEASUREMENT: rate_schedule_storage: packed_10_segments_write: {}",
+        packed_write_cost
+    );
+    println!(
+        "GAS_MEASUREMENT: rate_schedule_storage: packed_10_segments_read: {}",
+        packed_read_cost
+    );
+    println!(
+        "RATE_SCHEDULE_XDR_SIZE: unpacked_10_segments: {} bytes ({:.1} bytes/segment)",
+        unpacked_bytes,
+        unpacked_bytes as f64 / segments.len() as f64
+    );
+    println!(
+        "RATE_SCHEDULE_XDR_SIZE: packed_10_segments: {} bytes ({:.1} bytes/segment)",
+        packed_bytes,
+        packed_bytes as f64 / segments.len() as f64
+    );
+
+    assert!(
+        packed_bytes < unpacked_bytes,
+        "packed rate-schedule XDR size ({} bytes) must be smaller than unpacked ({} bytes)",
+        packed_bytes,
+        unpacked_bytes
+    );
+
+    // "Roughly half": allow slack for XDR framing overhead (type tags, vector
+    // length prefixes) that doesn't scale down with the per-field bit-width
+    // halving.
+    assert!(
+        (packed_bytes as f64) <= (unpacked_bytes as f64) * 0.75,
+        "expected packed storage to be substantially smaller (packed={} bytes, unpacked={} bytes)",
+        packed_bytes,
+        unpacked_bytes
+    );
+}
+
+/// Round-trip sanity check: every segment in the sample 10-segment schedule
+/// survives `pack_rate_segment` → `unpack_rate_segment` unchanged. This
+/// guards the benchmark above against a silently-wrong packed fixture.
+#[test]
+fn test_rate_schedule_packed_segments_round_trip() {
+    use fluxora_stream::accrual::unpack_rate_segment;
+
+    for &(rate, duration) in &sample_rate_schedule_10_segments() {
+        let word = pack_rate_segment(rate, duration).expect("segment within packable range");
+        assert_eq!(unpack_rate_segment(word), (rate, duration));
+    }
 }

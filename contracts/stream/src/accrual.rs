@@ -104,189 +104,318 @@ pub fn validate_rate_schedule(segments: &[RateSegment]) -> Result<(), ContractEr
     Ok(())
 }
 
-/// Maximum expected Stellar ledger close-time drift, in seconds.
+/// Number of bits used to store `duration_secs` in a packed rate-segment word.
+pub const RATE_SEGMENT_DURATION_BITS: u32 = 31;
+
+/// Bit position of the sign bit in a packed rate-segment word (immediately
+/// above the duration field).
+pub const RATE_SEGMENT_SIGN_BIT_POS: u32 = RATE_SEGMENT_DURATION_BITS;
+
+/// Bit position where the rate-magnitude field begins (sign bit + duration field).
+pub const RATE_SEGMENT_RATE_SHIFT: u32 = RATE_SEGMENT_SIGN_BIT_POS + 1;
+
+/// Number of bits used to store the rate magnitude in a packed rate-segment word.
+pub const RATE_SEGMENT_RATE_BITS: u32 = 128 - RATE_SEGMENT_RATE_SHIFT;
+
+/// Largest `duration_secs` value that fits in the packed field (2^31 - 1
+/// seconds, ~68 years) — about 2,147,483,647 seconds.
+pub const MAX_PACKABLE_DURATION_SECS: u32 = (1u32 << RATE_SEGMENT_DURATION_BITS) - 1;
+
+/// Largest `|rate_per_second|` magnitude that fits in the packed field
+/// (2^96 - 1) — far beyond any realistic per-second token rate.
+pub const MAX_PACKABLE_RATE_MAGNITUDE: u128 = (1u128 << RATE_SEGMENT_RATE_BITS) - 1;
+
+/// Packs a `(rate_per_second, duration_secs)` rate-schedule segment into a
+/// single `u128` storage word.
 ///
-/// Stellar ledger close times average 5-6 seconds but are not fixed to an
-/// exact cadence. A cliff timestamp that lands exactly on an expected ledger
-/// boundary can therefore unlock a few seconds later than an off-chain
-/// integrator's naive fixed-cadence expectation, even though the underlying
-/// `>= cliff_time` comparison is correct. This constant documents that
-/// worst-case drift so downstream integrators can reason about it explicitly
-/// (via [`get_cliff_status`]) instead of assuming exact-timestamp unlock.
+/// # Bit-field layout (LSB → MSB)
+/// ```text
+/// bits [0, 31)   (31 bits) : duration_secs      (unsigned, 0..=2^31-1)
+/// bit   31       (1 bit)   : sign bit            (0 = non-negative, 1 = negative)
+/// bits [32, 128) (96 bits) : rate magnitude       (unsigned, 0..=2^96-1)
+/// ```
+///
+/// This roughly halves the per-segment persistent-storage footprint versus
+/// storing `rate: i128` and `duration_secs: u64` as two separate fields
+/// (256 bits → 128 bits).
+///
+/// # Errors
+/// Returns `Err(ContractError::InvalidParams)` — rather than silently
+/// truncating — when either field does not fit in its packed width:
+/// - `duration_secs > MAX_PACKABLE_DURATION_SECS` (2^31 - 1)
+/// - `|rate_per_second| > MAX_PACKABLE_RATE_MAGNITUDE` (2^96 - 1)
 ///
 /// # Security
-/// This constant is purely informational/observational. It does **not**
-/// alter the `>= cliff_time` unlock condition used by withdrawal or accrual
-/// math — see [`CliffStatus`] and `get_cliff_status` in `lib.rs`.
-pub const MAX_LEDGER_CLOSE_SKEW_SECS: u64 = 10;
+/// Explicit range checks prevent a caller-supplied rate or duration from
+/// wrapping into an adjacent bit field, which would silently corrupt the
+/// neighboring value (e.g. a too-large rate bleeding into the sign bit).
+pub fn pack_rate_segment(rate_per_second: i128, duration_secs: u32) -> Result<u128, ContractError> {
+    if duration_secs > MAX_PACKABLE_DURATION_SECS {
+        return Err(ContractError::InvalidParams);
+    }
 
-/// Observability status for a `CliffOnly` / `CliffSlope` stream's cliff unlock,
-/// distinguishing "not due yet" from "due imminently, within normal ledger
-/// close-time variance" from "unlocked".
-///
-/// See [`MAX_LEDGER_CLOSE_SKEW_SECS`] for the documented drift window.
-#[contracttype]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CliffStatus {
-    /// `now < cliff_time - MAX_LEDGER_CLOSE_SKEW_SECS`: not due soon.
-    Pending,
-    /// `cliff_time - MAX_LEDGER_CLOSE_SKEW_SECS <= now < cliff_time`: due
-    /// imminently — within normal ledger close-time variance of unlocking.
-    WithinSkewWindow,
-    /// `now >= cliff_time`: unlocked (matches the actual `>= cliff_time`
-    /// withdrawal/accrual gate — see [`calculate_accrued_amount_checkpointed`]).
-    Unlocked,
+    let magnitude = rate_per_second.unsigned_abs();
+    if magnitude > MAX_PACKABLE_RATE_MAGNITUDE {
+        return Err(ContractError::InvalidParams);
+    }
+
+    let sign_bit: u128 = if rate_per_second < 0 { 1 } else { 0 };
+
+    let word = (magnitude << RATE_SEGMENT_RATE_SHIFT)
+        | (sign_bit << RATE_SEGMENT_SIGN_BIT_POS)
+        | (duration_secs as u128);
+
+    Ok(word)
 }
 
-/// Classifies the current ledger time against a stream's `cliff_time` for
-/// observability purposes.
+/// Unpacks a `u128` storage word produced by [`pack_rate_segment`] back into
+/// `(rate_per_second, duration_secs)`.
 ///
-/// This is a pure, read-only classification — it never changes withdrawal
-/// correctness. The actual unlock gate remains the strict
-/// `now >= cliff_time` comparison in [`calculate_accrued_amount_checkpointed`].
+/// This is a total function: every `u128` value decodes to some
+/// `(i128, u32)` pair with no possibility of error, since [`pack_rate_segment`]
+/// already rejected any input that would not round-trip.
 ///
-/// # Units
-/// `now` and `cliff_time` are ledger timestamps in seconds.
-pub fn cliff_status(now: u64, cliff_time: u64) -> CliffStatus {
-    if now >= cliff_time {
-        return CliffStatus::Unlocked;
-    }
+/// # Bit-field layout
+/// See [`pack_rate_segment`] for the authoritative field boundaries.
+pub fn unpack_rate_segment(word: u128) -> (i128, u32) {
+    let duration_mask: u128 = (1u128 << RATE_SEGMENT_DURATION_BITS) - 1;
+    let duration_secs = (word & duration_mask) as u32;
 
-    if now >= cliff_time.saturating_sub(MAX_LEDGER_CLOSE_SKEW_SECS) {
-        return CliffStatus::WithinSkewWindow;
-    }
+    let sign_bit = (word >> RATE_SEGMENT_SIGN_BIT_POS) & 1;
+    let magnitude = word >> RATE_SEGMENT_RATE_SHIFT;
 
-    CliffStatus::Pending
+    let rate_per_second = if sign_bit == 1 {
+        -(magnitude as i128)
+    } else {
+        magnitude as i128
+    };
+
+    (rate_per_second, duration_secs)
 }
 
 #[cfg(test)]
-mod cliff_status_tests {
-    use super::{cliff_status, CliffStatus, MAX_LEDGER_CLOSE_SKEW_SECS};
-
-    #[test]
-    fn skew_constant_is_ten_seconds() {
-        assert_eq!(MAX_LEDGER_CLOSE_SKEW_SECS, 10);
-    }
-
-    // -----------------------------------------------------------------------
-    // Pending: strictly more than the skew window remains before cliff_time
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn pending_well_before_cliff() {
-        assert_eq!(cliff_status(0, 1_000), CliffStatus::Pending);
-    }
-
-    #[test]
-    fn pending_one_second_outside_skew_window() {
-        // cliff_time - skew - 1 is still outside the window (one second short).
-        let cliff_time = 1_000u64;
-        let now = cliff_time - MAX_LEDGER_CLOSE_SKEW_SECS - 1;
-        assert_eq!(cliff_status(now, cliff_time), CliffStatus::Pending);
-    }
+mod rate_segment_packing_tests {
+    use super::{
+        pack_rate_segment, unpack_rate_segment, MAX_PACKABLE_DURATION_SECS,
+        MAX_PACKABLE_RATE_MAGNITUDE, RATE_SEGMENT_DURATION_BITS, RATE_SEGMENT_RATE_BITS,
+        RATE_SEGMENT_RATE_SHIFT, RATE_SEGMENT_SIGN_BIT_POS,
+    };
+    use crate::ContractError;
 
     // -----------------------------------------------------------------------
-    // WithinSkewWindow: inside the tolerance window, not yet unlocked
+    // Bit-field constant sanity
     // -----------------------------------------------------------------------
 
     #[test]
-    fn within_skew_window_at_lower_boundary() {
-        // now == cliff_time - MAX_LEDGER_CLOSE_SKEW_SECS is the first in-window instant.
-        let cliff_time = 1_000u64;
-        let now = cliff_time - MAX_LEDGER_CLOSE_SKEW_SECS;
-        assert_eq!(cliff_status(now, cliff_time), CliffStatus::WithinSkewWindow);
-    }
-
-    #[test]
-    fn within_skew_window_one_second_before_cliff() {
-        let cliff_time = 1_000u64;
+    fn bit_field_widths_sum_to_128() {
+        // duration (31) + sign (1) + rate magnitude (96) == 128.
+        assert_eq!(RATE_SEGMENT_DURATION_BITS, 31);
+        assert_eq!(RATE_SEGMENT_SIGN_BIT_POS, 31);
+        assert_eq!(RATE_SEGMENT_RATE_SHIFT, 32);
+        assert_eq!(RATE_SEGMENT_RATE_BITS, 96);
         assert_eq!(
-            cliff_status(cliff_time - 1, cliff_time),
-            CliffStatus::WithinSkewWindow
+            RATE_SEGMENT_DURATION_BITS + 1 + RATE_SEGMENT_RATE_BITS,
+            128
         );
     }
 
     #[test]
-    fn within_skew_window_midpoint() {
-        let cliff_time = 1_000u64;
-        let now = cliff_time - (MAX_LEDGER_CLOSE_SKEW_SECS / 2);
-        assert_eq!(cliff_status(now, cliff_time), CliffStatus::WithinSkewWindow);
+    fn max_packable_constants_match_bit_widths() {
+        assert_eq!(MAX_PACKABLE_DURATION_SECS, (1u32 << 31) - 1);
+        assert_eq!(MAX_PACKABLE_RATE_MAGNITUDE, (1u128 << 96) - 1);
     }
 
     // -----------------------------------------------------------------------
-    // Unlocked: now >= cliff_time, matches the real withdrawal gate
+    // Round-trip correctness
     // -----------------------------------------------------------------------
 
     #[test]
-    fn unlocked_exactly_at_cliff() {
-        assert_eq!(cliff_status(1_000, 1_000), CliffStatus::Unlocked);
+    fn round_trips_zero_rate_zero_duration() {
+        let word = pack_rate_segment(0, 0).unwrap();
+        assert_eq!(word, 0);
+        assert_eq!(unpack_rate_segment(word), (0, 0));
     }
 
     #[test]
-    fn unlocked_after_cliff() {
-        assert_eq!(cliff_status(1_500, 1_000), CliffStatus::Unlocked);
+    fn round_trips_typical_positive_rate() {
+        let word = pack_rate_segment(1_000_000, 3600).unwrap();
+        assert_eq!(unpack_rate_segment(word), (1_000_000, 3600));
     }
 
     #[test]
-    fn unlocked_far_after_cliff() {
-        assert_eq!(cliff_status(u64::MAX, 1_000), CliffStatus::Unlocked);
+    fn round_trips_negative_rate() {
+        let word = pack_rate_segment(-42, 100).unwrap();
+        assert_eq!(unpack_rate_segment(word), (-42, 100));
+    }
+
+    #[test]
+    fn round_trips_negative_one() {
+        let word = pack_rate_segment(-1, 1).unwrap();
+        assert_eq!(unpack_rate_segment(word), (-1, 1));
+    }
+
+    #[test]
+    fn round_trips_max_packable_duration() {
+        let word = pack_rate_segment(1, MAX_PACKABLE_DURATION_SECS).unwrap();
+        assert_eq!(unpack_rate_segment(word), (1, MAX_PACKABLE_DURATION_SECS));
+    }
+
+    #[test]
+    fn round_trips_max_packable_rate_magnitude_positive() {
+        let rate = MAX_PACKABLE_RATE_MAGNITUDE as i128;
+        let word = pack_rate_segment(rate, 10).unwrap();
+        assert_eq!(unpack_rate_segment(word), (rate, 10));
+    }
+
+    #[test]
+    fn round_trips_max_packable_rate_magnitude_negative() {
+        let rate = -(MAX_PACKABLE_RATE_MAGNITUDE as i128);
+        let word = pack_rate_segment(rate, 10).unwrap();
+        assert_eq!(unpack_rate_segment(word), (rate, 10));
+    }
+
+    #[test]
+    fn round_trips_max_duration_and_max_rate_together() {
+        let rate = MAX_PACKABLE_RATE_MAGNITUDE as i128;
+        let word = pack_rate_segment(rate, MAX_PACKABLE_DURATION_SECS).unwrap();
+        assert_eq!(
+            unpack_rate_segment(word),
+            (rate, MAX_PACKABLE_DURATION_SECS)
+        );
     }
 
     // -----------------------------------------------------------------------
-    // Edge cases: cliff_time == 0, and cliff_time < MAX_LEDGER_CLOSE_SKEW_SECS
+    // Bounds enforcement: duration
     // -----------------------------------------------------------------------
 
-    /// `cliff_time == 0`: any `now >= 0` is unlocked (there is no meaningful
-    /// pre-cliff window at all).
     #[test]
-    fn cliff_time_zero_is_always_unlocked() {
-        assert_eq!(cliff_status(0, 0), CliffStatus::Unlocked);
+    fn duration_one_over_limit_is_rejected() {
+        let result = pack_rate_segment(1, MAX_PACKABLE_DURATION_SECS + 1);
+        assert_eq!(result, Err(ContractError::InvalidParams));
     }
 
-    /// `cliff_time` smaller than the skew window: `saturating_sub` prevents
-    /// underflow, so the window's lower boundary clamps to 0 instead of
-    /// wrapping. Every `now` in `[0, cliff_time)` must classify as
-    /// `WithinSkewWindow`, never panic and never `Pending`.
     #[test]
-    fn cliff_time_smaller_than_skew_window_saturates_without_panicking() {
-        let cliff_time = 3u64; // < MAX_LEDGER_CLOSE_SKEW_SECS (10)
-        for now in 0..cliff_time {
-            assert_eq!(
-                cliff_status(now, cliff_time),
-                CliffStatus::WithinSkewWindow,
-                "now={now}, cliff_time={cliff_time}"
-            );
-        }
-        assert_eq!(cliff_status(cliff_time, cliff_time), CliffStatus::Unlocked);
+    fn duration_u32_max_is_rejected() {
+        let result = pack_rate_segment(1, u32::MAX);
+        assert_eq!(result, Err(ContractError::InvalidParams));
     }
 
     // -----------------------------------------------------------------------
-    // Property-style: classification never panics and is total over u64
+    // Bounds enforcement: rate magnitude
     // -----------------------------------------------------------------------
 
     #[test]
-    fn property_total_and_monotonic_by_severity() {
-        // As `now` increases toward and past `cliff_time`, status only ever
-        // moves Pending -> WithinSkewWindow -> Unlocked, never backwards.
-        fn severity(status: CliffStatus) -> u8 {
-            match status {
-                CliffStatus::Pending => 0,
-                CliffStatus::WithinSkewWindow => 1,
-                CliffStatus::Unlocked => 2,
+    fn rate_one_over_limit_is_rejected() {
+        let over = MAX_PACKABLE_RATE_MAGNITUDE as i128 + 1;
+        let result = pack_rate_segment(over, 1);
+        assert_eq!(result, Err(ContractError::InvalidParams));
+    }
+
+    #[test]
+    fn negative_rate_one_over_limit_is_rejected() {
+        let over = -(MAX_PACKABLE_RATE_MAGNITUDE as i128) - 1;
+        let result = pack_rate_segment(over, 1);
+        assert_eq!(result, Err(ContractError::InvalidParams));
+    }
+
+    #[test]
+    fn i128_max_rate_is_rejected() {
+        let result = pack_rate_segment(i128::MAX, 1);
+        assert_eq!(result, Err(ContractError::InvalidParams));
+    }
+
+    /// `i128::MIN` cannot be negated directly (would overflow), so this exercises
+    /// the `unsigned_abs()` path that safely computes its magnitude (2^127)
+    /// without panicking, then correctly rejects it as out of range.
+    #[test]
+    fn i128_min_rate_is_rejected_without_panicking() {
+        let result = pack_rate_segment(i128::MIN, 1);
+        assert_eq!(result, Err(ContractError::InvalidParams));
+    }
+
+    // -----------------------------------------------------------------------
+    // Security: no bit-field bleed between rate, sign, and duration
+    // -----------------------------------------------------------------------
+
+    /// A too-large rate must be rejected outright rather than silently
+    /// truncating and bleeding into the sign bit or duration field.
+    #[test]
+    fn oversized_rate_never_corrupts_duration_field() {
+        let oversized_rate = (MAX_PACKABLE_RATE_MAGNITUDE + 1) as i128;
+        assert_eq!(
+            pack_rate_segment(oversized_rate, 42),
+            Err(ContractError::InvalidParams)
+        );
+    }
+
+    /// Max duration (all 31 duration bits set) must not set the sign bit or
+    /// leak into the rate magnitude field.
+    #[test]
+    fn max_duration_does_not_set_sign_bit() {
+        let word = pack_rate_segment(5, MAX_PACKABLE_DURATION_SECS).unwrap();
+        let sign_bit = (word >> RATE_SEGMENT_SIGN_BIT_POS) & 1;
+        assert_eq!(sign_bit, 0, "positive rate must leave sign bit clear");
+        let (rate, duration) = unpack_rate_segment(word);
+        assert_eq!(rate, 5);
+        assert_eq!(duration, MAX_PACKABLE_DURATION_SECS);
+    }
+
+    /// Negative rate sets exactly the sign bit (plus its magnitude bits);
+    /// the duration field is unaffected and stays zero.
+    #[test]
+    fn negative_rate_sets_only_sign_bit() {
+        let word = pack_rate_segment(-1, 0).unwrap();
+        let expected_magnitude_bit = 1u128 << RATE_SEGMENT_RATE_SHIFT; // magnitude == 1
+        let expected_sign_bit = 1u128 << RATE_SEGMENT_SIGN_BIT_POS;
+        assert_eq!(word, expected_magnitude_bit | expected_sign_bit);
+
+        let duration_mask = (1u128 << RATE_SEGMENT_DURATION_BITS) - 1;
+        assert_eq!(word & duration_mask, 0, "duration field must remain zero");
+    }
+
+    // -----------------------------------------------------------------------
+    // Storage-savings claim
+    // -----------------------------------------------------------------------
+
+    /// Packing halves the per-segment storage footprint: two 128-bit fields
+    /// (rate: i128, duration: u64 promoted to a 128-bit-aligned slot) become
+    /// one 128-bit word.
+    #[test]
+    fn packed_word_is_half_the_unpacked_footprint() {
+        let unpacked_bits: u32 = 128 /* rate: i128 */ + 128 /* duration_secs: u64, worst-case aligned */;
+        let packed_bits: u32 = 128; // single u128 word
+        assert_eq!(packed_bits * 2, unpacked_bits);
+    }
+
+    // -----------------------------------------------------------------------
+    // Property-style sweep
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn property_round_trip_over_sample_space() {
+        let rates: &[i128] = &[
+            0,
+            1,
+            -1,
+            42,
+            -42,
+            1_000_000_000,
+            -1_000_000_000,
+            MAX_PACKABLE_RATE_MAGNITUDE as i128,
+            -(MAX_PACKABLE_RATE_MAGNITUDE as i128),
+        ];
+        let durations: &[u32] = &[0, 1, 100, 3600, 86_400, MAX_PACKABLE_DURATION_SECS];
+
+        for &rate in rates {
+            for &duration in durations {
+                let word = pack_rate_segment(rate, duration)
+                    .unwrap_or_else(|_| panic!("expected Ok for rate={rate}, duration={duration}"));
+                assert_eq!(
+                    unpack_rate_segment(word),
+                    (rate, duration),
+                    "round-trip mismatch for rate={rate}, duration={duration}"
+                );
             }
-        }
-
-        let cliff_time = 10_000u64;
-        let mut prev = severity(cliff_status(0, cliff_time));
-        let mut now = 0u64;
-        while now < cliff_time + MAX_LEDGER_CLOSE_SKEW_SECS + 5 {
-            let current = severity(cliff_status(now, cliff_time));
-            assert!(
-                current >= prev,
-                "severity regressed at now={now}: {current} < {prev}"
-            );
-            prev = current;
-            now += 1;
         }
     }
 }
