@@ -223,7 +223,7 @@ fn withdraw_blocked_while_paused() {
         StreamStatus::Paused
     );
 
-    let err = ctx.client.try_withdraw(&id);
+    let err = ctx.client.try_withdraw(&id, &None);
     assert_eq!(err, Err(Ok(ContractError::InvalidState)));
 }
 
@@ -281,7 +281,7 @@ fn withdraw_allowed_on_paused_stream_past_end_time() {
     // Advance past end_time — time-terminal override kicks in.
     ctx.env.ledger().with_mut(|l| l.timestamp += 101);
 
-    let withdrawn = ctx.client.withdraw(&id);
+    let withdrawn = ctx.client.withdraw(&id, &None);
     assert_eq!(withdrawn, 100); // full deposit
 }
 
@@ -298,7 +298,7 @@ fn time_terminal_withdraw_from_paused_completes_stream() {
     // Advance past end_time.
     ctx.env.ledger().with_mut(|l| l.timestamp += 51);
 
-    let withdrawn = ctx.client.withdraw(&id);
+    let withdrawn = ctx.client.withdraw(&id, &None);
     assert_eq!(withdrawn, 50);
     assert_eq!(
         ctx.client.get_stream_state(&id).status,
@@ -386,7 +386,7 @@ fn pause_rejected_on_completed_stream() {
 
     // Advance past end_time and withdraw everything to reach Completed.
     ctx.env.ledger().with_mut(|l| l.timestamp += 51);
-    ctx.client.withdraw(&id);
+    ctx.client.withdraw(&id, &None);
     assert_eq!(
         ctx.client.get_stream_state(&id).status,
         StreamStatus::Completed
@@ -430,7 +430,7 @@ fn accrual_continues_while_paused() {
         "accrual must have continued for the 300 seconds the stream was paused"
     );
 
-    let withdrawn = ctx.client.withdraw(&id);
+    let withdrawn = ctx.client.withdraw(&id, &None);
     assert_eq!(withdrawn, 500);
 }
 
@@ -461,7 +461,7 @@ fn cancel_from_paused_refunds_unstreamed() {
     assert_eq!(ctx.client.get_paused_stream_count(), 0);
 
     // Recipient should be able to withdraw the 400 accrued tokens.
-    let withdrawn = ctx.client.withdraw(&id);
+    let withdrawn = ctx.client.withdraw(&id, &None);
     assert_eq!(
         withdrawn, 400,
         "recipient must be able to claim accrued amount after cancel-from-paused"
@@ -509,7 +509,7 @@ fn global_pause_blocks_withdraw() {
     ctx.env.ledger().with_mut(|l| l.timestamp += 100);
     ctx.client.set_global_emergency_paused(&true);
 
-    let err = ctx.client.try_withdraw(&id);
+    let err = ctx.client.try_withdraw(&id, &None);
     assert_eq!(err, Err(Ok(ContractError::ContractPaused)));
 }
 
@@ -560,7 +560,7 @@ fn global_resume_unblocks_withdraw() {
 
     // Blocked while paused.
     assert_eq!(
-        ctx.client.try_withdraw(&id),
+        ctx.client.try_withdraw(&id, &None),
         Err(Ok(ContractError::ContractPaused))
     );
 
@@ -569,7 +569,7 @@ fn global_resume_unblocks_withdraw() {
     assert!(!ctx.client.get_global_emergency_paused());
 
     // Now withdraw should succeed.
-    let withdrawn = ctx.client.withdraw(&id);
+    let withdrawn = ctx.client.withdraw(&id, &None);
     assert_eq!(withdrawn, 100);
 }
 

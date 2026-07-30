@@ -275,7 +275,7 @@ fn update_rate_per_second_completed_stream_fails() {
     let stream_id = ctx.create_default_stream();
 
     ctx.env.ledger().set_timestamp(1000);
-    ctx.client.withdraw(&stream_id);
+    ctx.client.withdraw(&stream_id, &None);
     let result = ctx.client.try_update_rate_per_second(&stream_id, &2_i128);
     assert_eq!(result, Err(Ok(ContractError::InvalidState)));
 }
@@ -1290,7 +1290,7 @@ fn withdraw_after_rate_increase_uses_new_accrual() {
     let stream_id = ctx.create_stream_with_rate(2, 4000, 1000);
 
     ctx.env.ledger().set_timestamp(200);
-    ctx.client.withdraw(&stream_id); // withdraw 400 (2*200)
+    ctx.client.withdraw(&stream_id, &None); // withdraw 400 (2*200)
 
     ctx.advance_ledger(17);
     ctx.client.update_rate_per_second(&stream_id, &4_i128);
@@ -1314,7 +1314,7 @@ fn withdraw_after_rate_decrease_uses_new_accrual() {
     let stream_id = ctx.create_rate2_stream();
 
     ctx.env.ledger().set_timestamp(200);
-    ctx.client.withdraw(&stream_id); // withdraw 400 (2*200)
+    ctx.client.withdraw(&stream_id, &None); // withdraw 400 (2*200)
 
     ctx.client.decrease_rate_per_second(&stream_id, &1_i128);
 

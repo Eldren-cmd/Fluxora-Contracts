@@ -115,7 +115,7 @@ fn test_delegate_recipient_share_preserves_checkpoint_after_withdraw() {
         li.timestamp = 1010;
         li.sequence_number = 20;
     });
-    assert_eq!(client.withdraw(&stream_id), 100);
+    assert_eq!(client.withdraw(&stream_id, &None), 100);
     assert_eq!(token.balance(&recipient1), 100);
 
     let child_id = client.delegate_recipient_share(&stream_id, &recipient1, &5000, &recipient2);

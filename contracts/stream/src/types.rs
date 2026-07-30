@@ -501,6 +501,8 @@ pub struct StreamDecommissioned {
     pub decommissioned: bool,
 }
 
+
+
 /// Pagination result for paginated stream listings.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]

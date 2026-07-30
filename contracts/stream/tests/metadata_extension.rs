@@ -903,7 +903,7 @@ fn test_metadata_unchanged_after_partial_withdraw() {
     let stream_id = ctx.create_stream_with_metadata(Some(meta.clone()));
 
     ctx.env.ledger().set_timestamp(LEDGER_START_TIMESTAMP + 200);
-    ctx.client().withdraw(&stream_id);
+    ctx.client().withdraw(&stream_id, &None);
 
     let got = ctx.client().get_stream_metadata(&stream_id).unwrap();
     assert_eq!(
@@ -2185,7 +2185,7 @@ fn test_metadata_readable_after_stream_completion() {
     ctx.env.ledger().set_timestamp(LEDGER_START_TIMESTAMP + 1_001);
 
     // Withdraw all available tokens to mark the stream as completed.
-    ctx.client().withdraw(&stream_id);
+    ctx.client().withdraw(&stream_id, &None);
 
     let state = ctx.client().get_stream_state(&stream_id);
     assert_eq!(

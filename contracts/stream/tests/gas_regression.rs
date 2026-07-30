@@ -169,7 +169,7 @@ fn test_withdraw_gas() {
     ctx.env.ledger().set_timestamp(500); // Accrue 500 tokens
 
     let cost = measure_gas(&ctx, |ctx| {
-        ctx.client.withdraw(&stream_id);
+        ctx.client.withdraw(&stream_id, &None);
     });
 
     println!("GAS_MEASUREMENT: withdraw: single: {}", cost);
@@ -264,7 +264,7 @@ fn test_batch_withdraw_mixed_state_gas() {
     ctx.client.cancel_stream(&cancelled_id);
 
     ctx.env.ledger().set_timestamp(1000);
-    ctx.client.withdraw(&completed_id);
+    ctx.client.withdraw(&completed_id, &None);
 
     let mut stream_ids = Vec::new(&ctx.env);
     stream_ids.push_back(active_id);

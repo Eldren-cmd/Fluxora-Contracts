@@ -382,7 +382,7 @@ proptest! {
             match op {
                 Op::Withdraw(i) => {
                     let sid = stream_ids[*i % num_streams];
-                    let result = ctx.client().try_withdraw(&sid);
+                    let result = ctx.client().try_withdraw(&sid, &None);
                     if let Ok(Ok(amount)) = result {
                         tracked_liabilities -= amount;
                     }
@@ -723,7 +723,7 @@ fn total_liabilities_preserves_invariant_across_upgrades() {
 
     // Post-upgrade operations continue maintaining invariant
     ctx.env.ledger().set_timestamp(200);
-    ctx.client().withdraw(&stream_id);
+    ctx.client().withdraw(&stream_id, &None);
 
     let post_op_liabilities = ctx.client().get_total_liabilities();
     let balance = ctx.contract_balance();
@@ -841,7 +841,7 @@ fn total_liabilities_invariant_holds_across_pause_resume_cycles() {
 
     // Withdraw after resume
     ctx.env.ledger().set_timestamp(200);
-    ctx.client().withdraw(&stream_id);
+    ctx.client().withdraw(&stream_id, &None);
 
     let liabilities_after_withdraw = ctx.client().get_total_liabilities();
     assert!(
@@ -895,7 +895,7 @@ fn multiple_top_ups_correctly_increase_total_liabilities() {
 
     // Advance time and withdraw
     ctx.env.ledger().set_timestamp(200);
-    ctx.client().withdraw(&stream_id);
+    ctx.client().withdraw(&stream_id, &None);
 
     let liabilities_after_withdraw = ctx.client().get_total_liabilities();
     assert!(
@@ -921,7 +921,7 @@ fn cliff_slope_stream_liability_invariant() {
 
     // Withdraw before cliff (should succeed with 0 accrued - or some minimal amount)
     ctx.env.ledger().set_timestamp(100);
-    let _ = ctx.client().try_withdraw(&stream_id);
+    let _ = ctx.client().try_withdraw(&stream_id, &None);
 
     let liabilities_post = ctx.client().get_total_liabilities();
     assert!(ctx.contract_balance() >= liabilities_post);
@@ -934,7 +934,7 @@ fn cliff_slope_stream_liability_invariant() {
 
     // Withdraw after cliff
     ctx.env.ledger().set_timestamp(500);
-    ctx.client().withdraw(&stream_id);
+    ctx.client().withdraw(&stream_id, &None);
 
     let liabilities_after = ctx.client().get_total_liabilities();
     assert!(ctx.contract_balance() >= liabilities_after);
@@ -965,9 +965,9 @@ fn batch_withdraw_liability_invariant() {
     ctx.env.ledger().set_timestamp(200);
 
     // Withdraw from each stream individually
-    let w1 = ctx.client().withdraw(&id1);
-    let w2 = ctx.client().withdraw(&id2);
-    let w3 = ctx.client().withdraw(&id3);
+    let w1 = ctx.client().withdraw(&id1, &None);
+    let w2 = ctx.client().withdraw(&id2, &None);
+    let w3 = ctx.client().withdraw(&id3, &None);
 
     let total_withdrawn = w1 + w2 + w3;
     let liabilities_after = ctx.client().get_total_liabilities();

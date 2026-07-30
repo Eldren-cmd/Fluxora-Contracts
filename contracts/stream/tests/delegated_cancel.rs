@@ -443,7 +443,7 @@ fn delegated_cancel_recipient_can_withdraw_after_cancel() {
         .delegated_cancel(&stream_id, &ctx.relayer, &ctx.sender_pk, &0, &9999, &sig);
 
     let recipient_balance_before = ctx.balance(&ctx.recipient);
-    ctx.client().withdraw(&stream_id);
+    ctx.client().withdraw(&stream_id, &None);
     let recipient_balance_after = ctx.balance(&ctx.recipient);
 
     assert_eq!(
@@ -930,7 +930,7 @@ fn delegated_cancel_completed_stream_rejected() {
 
     // Advance to end and withdraw everything to reach Completed.
     ctx.env.ledger().set_timestamp(1000);
-    ctx.client().withdraw(&stream_id);
+    ctx.client().withdraw(&stream_id, &None);
 
     let sig = ctx.sign_cancel(stream_id, 0, 99999);
     let result = ctx.client().try_delegated_cancel(
