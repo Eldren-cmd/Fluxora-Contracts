@@ -4650,6 +4650,61 @@ impl FluxoraStream {
         load_stream(&env, stream_id)
     }
 
+    /// Classifies the current ledger time against a stream's `cliff_time`,
+    /// exposing the documented ledger close-time skew tolerance
+    /// (`accrual::MAX_LEDGER_CLOSE_SKEW_SECS`) so clients can distinguish
+    /// "not yet due" from "due imminently, within normal ledger close-time
+    /// variance" instead of assuming a fixed unlock cadence.
+    ///
+    /// # Why this exists
+    /// Stellar ledger close times average 5-6 seconds but are not fixed to
+    /// an exact cadence. A cliff timestamp that lands exactly on an expected
+    /// ledger boundary can unlock a few seconds later than an off-chain
+    /// integrator's naive fixed-cadence expectation, even though the
+    /// underlying `>= cliff_time` comparison is correct. This view makes
+    /// that expected drift explicit and queryable instead of leaving
+    /// integrators to guess.
+    ///
+    /// # Returns
+    /// - `CliffStatus::Pending` — more than `MAX_LEDGER_CLOSE_SKEW_SECS`
+    ///   seconds remain before `cliff_time`.
+    /// - `CliffStatus::WithinSkewWindow` — within `MAX_LEDGER_CLOSE_SKEW_SECS`
+    ///   seconds of `cliff_time`, but not yet reached.
+    /// - `CliffStatus::Unlocked` — `now >= cliff_time`. This matches exactly
+    ///   the `>= cliff_time` gate used by `calculate_accrued`/`withdraw`.
+    ///
+    /// # Errors
+    /// - `ContractError::StreamNotFound` if `stream_id` does not exist.
+    ///
+    /// # Security
+    /// This is a pure, read-only observability view. It does **not** alter
+    /// the strict `>= cliff_time` unlock condition used by withdrawal or
+    /// accrual math — see `accrual::cliff_status` and
+    /// `calculate_accrued_amount_checkpointed`. Calling this function can
+    /// never change withdrawable amounts, stream state, or token balances.
+    ///
+    /// # Usage Notes
+    /// - This is a view function (read-only, no state changes); no
+    ///   authorization required (public information).
+    /// - Meaningful for all stream kinds. For `Linear` streams without a
+    ///   distinct cliff (`cliff_time == start_time`), this simply reports
+    ///   `Unlocked` once `now >= start_time`.
+    /// - For `Cancelled` streams, uses `cancelled_at` as the evaluation
+    ///   timestamp, consistent with `calculate_accrued`'s frozen-accrual
+    ///   semantics — a cancelled stream's cliff status does not keep
+    ///   advancing with wall-clock time after cancellation.
+    pub fn get_cliff_status(env: Env, stream_id: u64) -> Result<accrual::CliffStatus, ContractError> {
+        let stream = load_stream(&env, stream_id)?;
+
+        let now = if stream.status == StreamStatus::Cancelled {
+            stream.cancelled_at.ok_or(ContractError::InvalidState)?
+        } else {
+            current_accrual_timestamp(&env)?
+        };
+
+        Ok(accrual::cliff_status(now, stream.cliff_time))
+    }
+
     /// Returns the total duration (in seconds) the stream has been in Paused state.
     ///
     /// This includes all past pause cycles. If the stream is currently paused,
