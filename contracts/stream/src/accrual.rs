@@ -103,6 +103,95 @@ pub fn validate_rate_schedule(segments: &[RateSegment]) -> Result<(), ContractEr
     Ok(())
 }
 
+/// Number of bits used to store `duration_secs` in a packed rate-segment word.
+pub const RATE_SEGMENT_DURATION_BITS: u32 = 31;
+
+/// Bit position of the sign bit in a packed rate-segment word (immediately
+/// above the duration field).
+pub const RATE_SEGMENT_SIGN_BIT_POS: u32 = RATE_SEGMENT_DURATION_BITS;
+
+/// Bit position where the rate-magnitude field begins (sign bit + duration field).
+pub const RATE_SEGMENT_RATE_SHIFT: u32 = RATE_SEGMENT_SIGN_BIT_POS + 1;
+
+/// Number of bits used to store the rate magnitude in a packed rate-segment word.
+pub const RATE_SEGMENT_RATE_BITS: u32 = 128 - RATE_SEGMENT_RATE_SHIFT;
+
+/// Largest `duration_secs` value that fits in the packed field (2^31 - 1
+/// seconds, ~68 years) — about 2,147,483,647 seconds.
+pub const MAX_PACKABLE_DURATION_SECS: u32 = (1u32 << RATE_SEGMENT_DURATION_BITS) - 1;
+
+/// Largest `|rate_per_second|` magnitude that fits in the packed field
+/// (2^96 - 1) — far beyond any realistic per-second token rate.
+pub const MAX_PACKABLE_RATE_MAGNITUDE: u128 = (1u128 << RATE_SEGMENT_RATE_BITS) - 1;
+
+/// Packs a `(rate_per_second, duration_secs)` rate-schedule segment into a
+/// single `u128` storage word.
+///
+/// # Bit-field layout (LSB → MSB)
+/// ```text
+/// bits [0, 31)   (31 bits) : duration_secs      (unsigned, 0..=2^31-1)
+/// bit   31       (1 bit)   : sign bit            (0 = non-negative, 1 = negative)
+/// bits [32, 128) (96 bits) : rate magnitude       (unsigned, 0..=2^96-1)
+/// ```
+///
+/// This roughly halves the per-segment persistent-storage footprint versus
+/// storing `rate: i128` and `duration_secs: u64` as two separate fields
+/// (256 bits → 128 bits).
+///
+/// # Errors
+/// Returns `Err(ContractError::InvalidParams)` — rather than silently
+/// truncating — when either field does not fit in its packed width:
+/// - `duration_secs > MAX_PACKABLE_DURATION_SECS` (2^31 - 1)
+/// - `|rate_per_second| > MAX_PACKABLE_RATE_MAGNITUDE` (2^96 - 1)
+///
+/// # Security
+/// Explicit range checks prevent a caller-supplied rate or duration from
+/// wrapping into an adjacent bit field, which would silently corrupt the
+/// neighboring value (e.g. a too-large rate bleeding into the sign bit).
+pub fn pack_rate_segment(rate_per_second: i128, duration_secs: u32) -> Result<u128, ContractError> {
+    if duration_secs > MAX_PACKABLE_DURATION_SECS {
+        return Err(ContractError::InvalidParams);
+    }
+
+    let magnitude = rate_per_second.unsigned_abs();
+    if magnitude > MAX_PACKABLE_RATE_MAGNITUDE {
+        return Err(ContractError::InvalidParams);
+    }
+
+    let sign_bit: u128 = if rate_per_second < 0 { 1 } else { 0 };
+
+    let word = (magnitude << RATE_SEGMENT_RATE_SHIFT)
+        | (sign_bit << RATE_SEGMENT_SIGN_BIT_POS)
+        | (duration_secs as u128);
+
+    Ok(word)
+}
+
+/// Unpacks a `u128` storage word produced by [`pack_rate_segment`] back into
+/// `(rate_per_second, duration_secs)`.
+///
+/// This is a total function: every `u128` value decodes to some
+/// `(i128, u32)` pair with no possibility of error, since [`pack_rate_segment`]
+/// already rejected any input that would not round-trip.
+///
+/// # Bit-field layout
+/// See [`pack_rate_segment`] for the authoritative field boundaries.
+pub fn unpack_rate_segment(word: u128) -> (i128, u32) {
+    let duration_mask: u128 = (1u128 << RATE_SEGMENT_DURATION_BITS) - 1;
+    let duration_secs = (word & duration_mask) as u32;
+
+    let sign_bit = (word >> RATE_SEGMENT_SIGN_BIT_POS) & 1;
+    let magnitude = word >> RATE_SEGMENT_RATE_SHIFT;
+
+    let rate_per_second = if sign_bit == 1 {
+        -(magnitude as i128)
+    } else {
+        magnitude as i128
+    };
+
+    (rate_per_second, duration_secs)
+}
+
 /// Assert that ledger-backed accrual time has not moved backwards.
 ///
 /// # Security
