@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env bash 
 # =============================================================================
 # deploy-testnet.sh — Fluxora Contracts | Soroban CLI deploy script for testnet
 # =============================================================================
