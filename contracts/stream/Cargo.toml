@@ -277,3 +277,9 @@ required-features = ["testutils"]
 name = "delegated_flow_reentrancy"
 path = "tests/delegated_flow_reentrancy.rs"
 required-features = ["testutils"]
+
+[[test]]
+name = "storage_invariants_edge_cases"
+path = "tests/storage_invariants_edge_cases.rs"
+test = true
+required-features = ["testutils"]
