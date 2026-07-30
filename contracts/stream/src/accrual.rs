@@ -103,6 +103,60 @@ pub fn validate_rate_schedule(segments: &[RateSegment]) -> Result<(), ContractEr
     Ok(())
 }
 
+/// Maximum expected Stellar ledger close-time drift, in seconds.
+///
+/// Stellar ledger close times average 5-6 seconds but are not fixed to an
+/// exact cadence. A cliff timestamp that lands exactly on an expected ledger
+/// boundary can therefore unlock a few seconds later than an off-chain
+/// integrator's naive fixed-cadence expectation, even though the underlying
+/// `>= cliff_time` comparison is correct. This constant documents that
+/// worst-case drift so downstream integrators can reason about it explicitly
+/// (via [`get_cliff_status`]) instead of assuming exact-timestamp unlock.
+///
+/// # Security
+/// This constant is purely informational/observational. It does **not**
+/// alter the `>= cliff_time` unlock condition used by withdrawal or accrual
+/// math — see [`CliffStatus`] and `get_cliff_status` in `lib.rs`.
+pub const MAX_LEDGER_CLOSE_SKEW_SECS: u64 = 10;
+
+/// Observability status for a `CliffOnly` / `CliffSlope` stream's cliff unlock,
+/// distinguishing "not due yet" from "due imminently, within normal ledger
+/// close-time variance" from "unlocked".
+///
+/// See [`MAX_LEDGER_CLOSE_SKEW_SECS`] for the documented drift window.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CliffStatus {
+    /// `now < cliff_time - MAX_LEDGER_CLOSE_SKEW_SECS`: not due soon.
+    Pending,
+    /// `cliff_time - MAX_LEDGER_CLOSE_SKEW_SECS <= now < cliff_time`: due
+    /// imminently — within normal ledger close-time variance of unlocking.
+    WithinSkewWindow,
+    /// `now >= cliff_time`: unlocked (matches the actual `>= cliff_time`
+    /// withdrawal/accrual gate — see [`calculate_accrued_amount_checkpointed`]).
+    Unlocked,
+}
+
+/// Classifies the current ledger time against a stream's `cliff_time` for
+/// observability purposes.
+///
+/// This is a pure, read-only classification — it never changes withdrawal
+/// correctness. The actual unlock gate remains the strict
+/// `now >= cliff_time` comparison in [`calculate_accrued_amount_checkpointed`].
+///
+/// # Units
+/// `now` and `cliff_time` are ledger timestamps in seconds.
+pub fn cliff_status(now: u64, cliff_time: u64) -> CliffStatus {
+    if now >= cliff_time {
+        return CliffStatus::Unlocked;
+    }
+
+    if now >= cliff_time.saturating_sub(MAX_LEDGER_CLOSE_SKEW_SECS) {
+        return CliffStatus::WithinSkewWindow;
+    }
+
+    CliffStatus::Pending
+}
+
 /// Assert that ledger-backed accrual time has not moved backwards.
 ///
 /// # Security
