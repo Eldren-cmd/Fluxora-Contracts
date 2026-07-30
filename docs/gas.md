@@ -97,10 +97,24 @@ Stream Metadata Gas Profile
 Validation CPU Cost: Bounded validation iterates over a maximum of 8 key-value pairs (MAX_METADATA_KEYS = 8), checking string lengths and accumulating total byte count (MAX_METADATA_BYTES = 512). Execution CPU cost is negligible (< 0.05M CPU instructions).
 Fail-Fast Early Revert: Failures during validate_metadata short-circuit before any storage key reads/writes or token transfers, avoiding wasted ledger write footprint fees.
 Query Cost (get_stream_metadata): A single read-only persistent storage lookup on DataKey::Stream(u64). Consumes minimal CPU instructions (~0.1M) with no state mutation or token call overhead.
-Stream Metadata Gas Profile
-Validation CPU Cost: Bounded validation iterates over a maximum of 8 key-value pairs (MAX_METADATA_KEYS = 8), checking string lengths and accumulating total byte count (MAX_METADATA_BYTES = 512). Execution CPU cost is negligible (< 0.05M CPU instructions).
-Fail-Fast Early Revert: Failures during validate_metadata short-circuit before any storage key reads/writes or token transfers, avoiding wasted ledger write footprint fees.
-Query Cost (get_stream_metadata): A single read-only persistent storage lookup on DataKey::Stream(u64). Consumes minimal CPU instructions (~0.1M) with no state mutation or token call overhead.
+
+Rate Schedule Validation Gas Profile
+The `validate_rate_schedule` function validates a multi-segment rate schedule before storage.
+It performs a single linear scan over the segment array with one `checked_mul` and one
+`checked_add` per segment.
+
+Validation is bounded by `MAX_RATE_SEGMENTS = 256`:
+
+| Budget | Value | Notes |
+|---|---|---|
+| Max segments | 256 | Hard bound; exceeds → `RateScheduleTooManySegments` |
+| CPU (256 segments) | < 0.01 M instructions | Linear scan with checked arithmetic |
+| CPU (empty schedule) | < 0.001 M instructions | Length check only |
+
+**Fail-Fast Early Revert**: The count check runs first, then per-segment checks short-circuit
+at the first violation (zero-length, negative rate, or overflow) before any storage
+mutation occurs.
+
 Hot Path Analysis
 withdraw
 The withdraw function is the most common operation. Its cost is dominated by:

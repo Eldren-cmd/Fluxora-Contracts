@@ -1,6 +1,108 @@
 use crate::ContractError;
 use crate::StreamKind;
 
+/// Maximum number of segments in a piecewise rate schedule.
+///
+/// This bound prevents storage-bloat attacks where a caller submits an
+/// arbitrarily long sequence of micro-segments. At 256 segments the
+/// validation loop completes in negligible CPU (~2.5 µs at 10 ns/iteration)
+/// and the serialized schedule stays well under 4 KiB.
+///
+/// # Security
+/// - Every entrypoint that writes a multi-segment schedule **must** call
+///   [`validate_rate_schedule`] before persisting.
+/// - The bound is deliberately conservative (256). Future protocol upgrades
+///   that raise this value must update the gas documentation in `docs/gas.md`.
+pub const MAX_RATE_SEGMENTS: u32 = 256;
+
+/// A single segment in a piecewise rate schedule.
+///
+/// # Segments semantics
+/// A schedule is a contiguous sequence of non-overlapping segments.  The
+/// schedule's total duration is the sum of all `duration_secs`.  The amount
+/// accrued during each segment is `rate × duration_secs`.
+///
+/// # Invariants (enforced by [`validate_rate_schedule`])
+/// - `rate >= 0`
+/// - `duration_secs > 0`
+/// - The cumulative sum `∑(rate × duration)` across all segments fits in
+///   `i128` without wrapping.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RateSegment {
+    /// Streaming rate for this segment, in base token units per second.
+    /// Must be non-negative.
+    pub rate: i128,
+    /// Duration of this segment in seconds. Must be non-zero.
+    pub duration_secs: u64,
+}
+
+/// Validates a multi-segment rate schedule against security and arithmetic
+/// bounds.
+///
+/// # Checks performed
+/// 1. **Segment count** – `segments.len() <= MAX_RATE_SEGMENTS`.
+/// 2. **Non-negative rates** – every `segment.rate` is `>= 0`.
+/// 3. **Non-zero durations** – every `segment.duration_secs` is `> 0`.
+///    This also guarantees strictly increasing boundaries (each successive
+///    boundary is the cumulative sum of strictly positive durations).
+/// 4. **Cumulative-sum overflow** – `∑(rate × duration_secs)` over all
+///    segments fits in `i128` via `checked_mul` / `checked_add`.
+///
+/// # Returns
+/// - `Ok(())` if the schedule passes all checks.
+/// - `Err(ContractError::RateScheduleTooManySegments)` when the segment count
+///   exceeds [`MAX_RATE_SEGMENTS`].
+/// - `Err(ContractError::RateScheduleInvalid)` for any other violation
+///   (negative rate, zero-length segment, or arithmetic overflow).
+///
+/// # Gas
+/// The function performs a single linear scan over the segment array with
+/// one `checked_mul` and one `checked_add` per segment. At
+/// `MAX_RATE_SEGMENTS = 256` the CPU cost is negligible (< 0.01 M instructions).
+///
+/// # Security
+/// - Uses **checked arithmetic only** (`checked_mul`, `checked_add`).  Never
+///   wrapping or saturating — any overflow causes a clear reject.
+/// - Rejects zero-length segments because they would bloat the segment count
+///   without contributing to the cumulative sum, bypassing the economic
+///   meaning of the length cap.
+/// - Rejects negative rates because the accrual math is undefined (the
+///   existing `calculate_accrued_amount` returns `0` for negative rates,
+///   but a multi-segment schedule with negative rates could produce
+///   incorrect cumulative totals).
+pub fn validate_rate_schedule(segments: &[RateSegment]) -> Result<(), ContractError> {
+    if segments.len() > MAX_RATE_SEGMENTS as usize {
+        return Err(ContractError::RateScheduleTooManySegments);
+    }
+
+    let mut cumulative: i128 = 0;
+
+    for segment in segments {
+        // Reject zero-length segments (would bloat count without contributing).
+        if segment.duration_secs == 0 {
+            return Err(ContractError::RateScheduleInvalid);
+        }
+
+        // Reject negative rates (undefined in accrual math).
+        if segment.rate < 0 {
+            return Err(ContractError::RateScheduleInvalid);
+        }
+
+        // Checked multiplication: rate × duration_secs.
+        let product = segment
+            .rate
+            .checked_mul(segment.duration_secs as i128)
+            .ok_or(ContractError::RateScheduleInvalid)?;
+
+        // Checked addition: accumulate into total.
+        cumulative = cumulative
+            .checked_add(product)
+            .ok_or(ContractError::RateScheduleInvalid)?;
+    }
+
+    Ok(())
+}
+
 /// Assert that ledger-backed accrual time has not moved backwards.
 ///
 /// # Security

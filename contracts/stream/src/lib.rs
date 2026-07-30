@@ -696,6 +696,11 @@ pub enum ContractError {
     CyclicDelegation = 43,
     /// Maximum delegation depth exceeded.
     DelegationDepthExceeded = 44,
+    /// Rate schedule has more segments than `MAX_RATE_SEGMENTS`.
+    RateScheduleTooManySegments = 45,
+    /// Rate schedule validation failed: zero-length segment, negative rate,
+    /// non-increasing boundaries, or cumulative-sum overflow.
+    RateScheduleInvalid = 46,
     /// The token contract did not expose the expected SEP-41 interface during init.
     TokenVerificationFailed = 88,
 }
