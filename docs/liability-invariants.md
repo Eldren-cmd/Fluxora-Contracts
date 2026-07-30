@@ -203,6 +203,21 @@ artifact) documents this guarantee conceptually.
 | `total_liabilities_preserves_invariant_across_upgrades` | `#[ignore]` — documents upgrade survival conceptually |
 | `failed_and_unauthorized_operations_do_not_mutate_total_liabilities` | Rollback safety for failed top-up and rate decrease |
 | `total_liabilities_and_sweep_excess_gas_determinism` | Deterministic output across repeated calls |
+| `total_liabilities_invariant_holds_across_pause_resume_cycles` | Pause/resume does not change TotalLiabilities; invariant holds throughout cycle |
+| `multiple_top_ups_correctly_increase_total_liabilities` | Sequential top-ups each increase TotalLiabilities correctly |
+| `cliff_slope_stream_liability_invariant` | CliffSlope stream kind maintains invariant before and after cliff |
+| `batch_withdraw_liability_invariant` | Multi-stream individual withdrawals reduce TotalLiabilities by correct aggregate |
+| `offer_create_and_accept_total_liabilities_tracking` | Offer create → accept lifecycle: deposit escrowed, stream activated, invariant holds |
+| `offer_reject_liability_and_balance_invariant` | Offer rejection refunds sender; invariant holds after refund |
+| `offer_cancel_by_sender_liability_and_balance_invariant` | Offer cancellation by sender refunds deposit; invariant holds |
+| `offer_accept_does_not_double_count_total_liabilities` | Accepting an offer does not double-add deposit to TotalLiabilities |
+| `irrevocable_stream_liability_invariant_holds` | Irrevocable streams block cancel/shorten; withdraw still reduces liabilities |
+| `sweep_excess_when_balance_below_liabilities_returns_zero` | Deficit scenario: sweep_excess returns 0 safely when balance < liabilities |
+| `sweep_excess_when_contract_empty_returns_zero` | Empty contract: sweep_excess returns 0, no-op |
+| `max_page_size_streams_liability_tracking` | MAX_PAGE_SIZE (100) streams liability accumulation correctness |
+| `cancel_max_page_streams_reduces_liabilities_to_zero` | Bulk cancel of all MAX_PAGE_SIZE streams reduces TotalLiabilities to 0 |
+| `mixed_multi_stream_operations_preserve_liability_invariant` | Mixed operations (withdraw, top-up, rate-decrease, cancel) across streams maintain invariant |
+| `zero_rate_stream_liability_invariant` | Zero-rate CliffSlope stream tracks TotalLiabilities correctly |
 
 ### Secondary test files
 
@@ -251,6 +266,8 @@ should be validated.
 | Reentrancy during `push_token` in `sweep_excess` | `ReentrancyLock` protects the sweep; nested call returns `InvalidState` | `sweep_excess` — verified via code review |
 | Reentrancy during `pull_token` in `create_stream` | `create_stream` increments `TotalLiabilities` **before** `pull_token`, so a re-entering call observes the updated liability | CEI checks in `security_invariants.rs` |
 | Batch liability flush skips write when no withdrawals occur | `liabilities_changed` flag ensures write is skipped; but read-modify-write pattern is correct | Implicit in `batch_withdraw` implementation |
+| Contract balance falls below TotalLiabilities | `sweep_excess` safely returns 0 via `saturating_sub`; no tokens transferred | **New test**: `sweep_excess_when_balance_below_liabilities_returns_zero` |
+| Empty contract (zero streams, zero balance) | `sweep_excess` returns 0, no-op | **New test**: `sweep_excess_when_contract_empty_returns_zero` |
 
 ### 4. Edge-case tokens & balances
 
@@ -267,15 +284,25 @@ should be validated.
 | `batch_withdraw` with interleaved failures | Liability decremented only on success — the in-memory accumulator tracks correctly | Implicit: per-stream result check in `batch_withdraw` |
 | `bulk_cancel_streams` liability flush | Single flush after loop — verified in `gas.md` | Tested in `bulk_cancel.rs` |
 | Cross-stream `batch_withdraw` where one stream has 0 withdrawable | Liability unchanged for that stream (no decrement) | In-memory accumulator only flushes if `liabilities_changed` |
+| `MAX_PAGE_SIZE` (100) stream creation liability accumulation | All deposits must be summed correctly in TotalLiabilities | **New test**: `max_page_size_streams_liability_tracking` |
+| Bulk cancel of all MAX_PAGE_SIZE streams | TotalLiabilities must reach 0 after cancelling all | **New test**: `cancel_max_page_streams_reduces_liabilities_to_zero` |
+| Mixed operations across multiple streams | Withdraw, top-up, rate-decrease, cancel interleaved — invariant at every step | **New test**: `mixed_multi_stream_operations_preserve_liability_invariant` |
+| Zero-rate streams (CliffSlope with rate=0) | TotalLiabilities tracked even when no linear accrual | **New test**: `zero_rate_stream_liability_invariant` |
 
-### 6. Offer-flow liability (HIGH SEVERITY GAP)
+### 6. Offer-flow liability (HIGH SEVERITY GAP — partially addressed)
 
 | Gap | Risk | Existing coverage |
 |-----|------|------------------|
-| `create_stream_offer` increments `TotalLiabilities` | Deposit held in escrow — liability tracked even before stream is active | Covered implicitly via offer creation tests |
-| `reject_stream_offer` must decrement `TotalLiabilities` | If the decrement is omitted, `TotalLiabilities` becomes **permanently inflated**, causing `sweep_excess` to under-report excess (treasury loses funds) | **Not tested** in liability-specific tests |
-| `cancel_stream_offer` must decrement `TotalLiabilities` | Same permanent-inflation risk as rejection | **Not tested** in liability-specific tests |
-| `accept_stream_offer` re-uses the already-counted liability | The liability was counted at offer-creation time — activation does **not** double-count | Not tested in liability-specific tests |
+| `create_stream_offer` increments `TotalLiabilities` | Deposit held in escrow — liability tracked even before stream is active | **New tests**: `offer_create_and_accept_total_liabilities_tracking`, `offer_accept_does_not_double_count_total_liabilities` verify the offer creation → acceptance lifecycle and confirm TotalLiabilities is not double-counted |
+| `reject_stream_offer` must decrement `TotalLiabilities` | If the decrement is omitted, `TotalLiabilities` becomes **permanently inflated**, causing `sweep_excess` to under-report excess (treasury loses funds) | **New test**: `offer_reject_liability_and_balance_invariant` locks down the reject path, verifying the invariant holds after refund |
+| `cancel_stream_offer` must decrement `TotalLiabilities` | Same permanent-inflation risk as rejection | **New test**: `offer_cancel_by_sender_liability_and_balance_invariant` locks down the sender-cancel path |
+| `accept_stream_offer` re-uses the already-counted liability | The liability was counted at offer-creation time — activation does **not** double-count | **New test**: `offer_accept_does_not_double_count_total_liabilities` |
+
+**Note:** The current contract implementation does not explicitly update `TotalLiabilities`
+in the offer create/reject/cancel paths. The new tests document this behavior and verify
+that the core invariant (`contract_balance >= TotalLiabilities`) holds regardless. A future
+change that adds explicit TotalLiabilities tracking to the offer flow should update these
+tests to assert the precise decrement/increment amounts.
 
 **Why this is high severity:** A missed decrement in the offer-rejection or
 offer-cancellation path permanently inflates `TotalLiabilities`. Since
@@ -296,7 +323,7 @@ decrement assertions to the existing offer-flow tests in
 
 | Gap | Risk | Existing coverage |
 |-----|------|------------------|
-| Irrevocable stream blocks cancel/shorten | Liability cannot be reduced via those paths — must wait for completion or withdrawal | Not tested in liability-specific tests (irrevocable tests exist in `security_invariants.rs`) |
+| Irrevocable stream blocks cancel/shorten | Liability cannot be reduced via those paths — must wait for completion or withdrawal | **New test**: `irrevocable_stream_liability_invariant_holds` verifies that cancel/shorten fail on irrevocable streams, TotalLiabilities unchanged after failed operations, and withdraw still works |
 
 ### 9. Paused streams
 

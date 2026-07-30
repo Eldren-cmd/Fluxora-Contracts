@@ -933,7 +933,7 @@ pub struct KeeperCancelled {
     pub sender_refund: i128,
 }
 
-
+// (ClaimOwnershipTransferred is defined in types.rs and re-exported above)
 
 // ---------------------------------------------------------------------------
 // Offer-then-accept types (two-phase stream creation)
@@ -1160,7 +1160,9 @@ pub struct RotationEntry {
     pub authoriser: Address,
 }
 
+// (Stream struct is defined in types.rs and re-exported above)
 
+// (Page struct is defined in types.rs and re-exported above)
 
 /// Paginated aggregate health report for a sender's entire stream portfolio.
 ///
@@ -1741,6 +1743,10 @@ impl FluxoraStream {
         if let Some(ref meta) = metadata {
             storage::validate_metadata(meta)?;
         }
+        // Validate metadata size bounds before allocating a stream ID.
+        if let Some(ref md) = metadata {
+            validate_metadata(md)?;
+        }
 
         let stream_id = next_stream_id_for(env, &sender);
 
@@ -1768,7 +1774,7 @@ impl FluxoraStream {
             last_rate_change_ledger: 0,
             is_pooled: None,
             irrevocable,
-            witness: witness.clone(),
+            witness,
             delegation_depth: 0,
             parent_stream_id: None,
             decommissioned: None,
@@ -1869,7 +1875,7 @@ impl FluxoraStream {
             last_rate_change_ledger: 0,
             is_pooled: None,
             irrevocable,
-            witness: witness.clone(),
+            witness,
             delegation_depth: 0,
             parent_stream_id: None,
             decommissioned: None,
@@ -2120,7 +2126,7 @@ impl FluxoraStream {
             params.metadata,
             params.irrevocable,
             params.witness,
-            None, // max_lookback_ledgers
+            None,
         )
     }
 
