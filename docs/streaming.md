@@ -1072,6 +1072,43 @@ loop {
 - Before `cliff_time`: accrued = 0, no withdrawals
 - At or after `cliff_time`: accrual uses elapsed time from `start_time`, not cliff
 
+### Ledger Close-Time Skew and `get_cliff_status`
+
+Stellar ledger close times average 5-6 seconds but are **not** fixed to an exact cadence. A
+cliff timestamp that lands exactly on an expected ledger boundary can therefore unlock a few
+seconds later than an off-chain integrator's naive fixed-cadence expectation, even though the
+contract's `>= cliff_time` comparison is correct and unchanged. `MAX_LEDGER_CLOSE_SKEW_SECS`
+(`contracts/stream/src/accrual.rs`, value `10`) documents that worst-case expected drift as a
+named constant, and `get_cliff_status(stream_id)` exposes it as a queryable view so clients can
+distinguish "not yet due" from "due imminently, within normal close-time variance" instead of
+guessing.
+
+```rust
+pub enum CliffStatus {
+    Pending,          // now < cliff_time - MAX_LEDGER_CLOSE_SKEW_SECS
+    WithinSkewWindow, // cliff_time - MAX_LEDGER_CLOSE_SKEW_SECS <= now < cliff_time
+    Unlocked,         // now >= cliff_time
+}
+```
+
+**This is observability only.** `get_cliff_status` is a pure, read-only view computed from
+`accrual::cliff_status(now, cliff_time)`. It never changes withdrawal correctness: the actual
+unlock gate used by `withdraw`, `calculate_accrued`, and `get_withdrawable` remains the exact
+same strict `now >= cliff_time` comparison it always was. `WithinSkewWindow` still fully blocks
+withdrawal — it is a hint to clients that the unlock is imminent, not an early-unlock state.
+
+- **Applies to all `StreamKind`s.** It is primarily meaningful for `CliffOnly` and `CliffSlope`
+  streams, where the cliff gates a lump-sum unlock or the start of accrual, but works uniformly
+  for `Linear` streams too. A `Linear` stream with no meaningful cliff (`cliff_time == start_time`)
+  reports `Unlocked` immediately once `now >= start_time`.
+- **Cancelled streams.** Uses `cancelled_at` as the evaluation timestamp, consistent with
+  `calculate_accrued`'s frozen-accrual-at-cancellation semantics — a cancelled stream's cliff
+  status stays frozen at whatever it was at cancellation time and does not keep advancing with
+  wall-clock time afterward.
+- **Errors.** Returns `ContractError::StreamNotFound` for an invalid `stream_id`.
+- **Auth.** No authorization required — this is public, read-only information, same as
+  `calculate_accrued` and `get_stream_state`.
+
 ### end_time
 
 - Must satisfy `start_time < end_time`

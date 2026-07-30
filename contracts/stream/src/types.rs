@@ -473,9 +473,6 @@ pub struct Stream {
     pub irrevocable: Option<bool>,
     /// Optional compliance witness authorized to cancel via signed attestation.
     pub witness: Option<Address>,
-    /// If true, blocks all cancellation and shortening paths.
-    /// Defaults to false (None) for backward compatibility.
-    pub irrevocable: Option<bool>,
     /// Whether this stream is a pooled multi-recipient stream.
     pub is_pooled: Option<bool>,
     /// Ledger sequence number of the last rate change (or creation).
