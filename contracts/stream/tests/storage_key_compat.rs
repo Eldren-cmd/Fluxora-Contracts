@@ -228,6 +228,8 @@ impl<'a> Ctx<'a> {
             parent_stream_id: None,
             decommissioned: None,
             irrevocable: None,
+            paused_at_timestamp: 0,
+            cumulative_paused_duration: 0,
         }
     }
 
