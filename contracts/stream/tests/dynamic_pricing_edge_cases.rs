@@ -1,5 +1,9 @@
 //! Dynamic pricing edge-case tests for the Fluxora streaming contract.
 //!
+//! See also: `contracts/stream/docs/dynamic-pricing.md` for the full
+//! observable-semantics specification, boundary-condition tables,
+//! and regression-surface documentation.
+//!
 //! This test suite validates behavior around rate-update and rate-decrease
 //! operations across all boundary conditions, branch paths, and invariant
 //! boundaries. It covers:
@@ -371,6 +375,18 @@ fn decrease_rate_per_second_past_end_time_fails() {
     let stream_id = ctx.create_default_stream();
 
     ctx.env.ledger().set_timestamp(1001);
+    let result = ctx.client.try_decrease_rate_per_second(&stream_id, &1_i128);
+    assert_eq!(result, Err(Ok(ContractError::InvalidState)));
+}
+
+#[test]
+fn decrease_rate_per_second_exactly_at_end_time_fails() {
+    let ctx = TestContext::setup();
+    ctx.env.ledger().set_timestamp(0);
+    let stream_id = ctx.create_default_stream();
+
+    // Exactly at end_time: remaining duration is zero — decrease must be blocked.
+    ctx.env.ledger().set_timestamp(1000);
     let result = ctx.client.try_decrease_rate_per_second(&stream_id, &1_i128);
     assert_eq!(result, Err(Ok(ContractError::InvalidState)));
 }
