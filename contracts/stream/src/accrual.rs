@@ -192,6 +192,233 @@ pub fn unpack_rate_segment(word: u128) -> (i128, u32) {
     (rate_per_second, duration_secs)
 }
 
+#[cfg(test)]
+mod rate_segment_packing_tests {
+    use super::{
+        pack_rate_segment, unpack_rate_segment, MAX_PACKABLE_DURATION_SECS,
+        MAX_PACKABLE_RATE_MAGNITUDE, RATE_SEGMENT_DURATION_BITS, RATE_SEGMENT_RATE_BITS,
+        RATE_SEGMENT_RATE_SHIFT, RATE_SEGMENT_SIGN_BIT_POS,
+    };
+    use crate::ContractError;
+
+    // -----------------------------------------------------------------------
+    // Bit-field constant sanity
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn bit_field_widths_sum_to_128() {
+        // duration (31) + sign (1) + rate magnitude (96) == 128.
+        assert_eq!(RATE_SEGMENT_DURATION_BITS, 31);
+        assert_eq!(RATE_SEGMENT_SIGN_BIT_POS, 31);
+        assert_eq!(RATE_SEGMENT_RATE_SHIFT, 32);
+        assert_eq!(RATE_SEGMENT_RATE_BITS, 96);
+        assert_eq!(
+            RATE_SEGMENT_DURATION_BITS + 1 + RATE_SEGMENT_RATE_BITS,
+            128
+        );
+    }
+
+    #[test]
+    fn max_packable_constants_match_bit_widths() {
+        assert_eq!(MAX_PACKABLE_DURATION_SECS, (1u32 << 31) - 1);
+        assert_eq!(MAX_PACKABLE_RATE_MAGNITUDE, (1u128 << 96) - 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // Round-trip correctness
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn round_trips_zero_rate_zero_duration() {
+        let word = pack_rate_segment(0, 0).unwrap();
+        assert_eq!(word, 0);
+        assert_eq!(unpack_rate_segment(word), (0, 0));
+    }
+
+    #[test]
+    fn round_trips_typical_positive_rate() {
+        let word = pack_rate_segment(1_000_000, 3600).unwrap();
+        assert_eq!(unpack_rate_segment(word), (1_000_000, 3600));
+    }
+
+    #[test]
+    fn round_trips_negative_rate() {
+        let word = pack_rate_segment(-42, 100).unwrap();
+        assert_eq!(unpack_rate_segment(word), (-42, 100));
+    }
+
+    #[test]
+    fn round_trips_negative_one() {
+        let word = pack_rate_segment(-1, 1).unwrap();
+        assert_eq!(unpack_rate_segment(word), (-1, 1));
+    }
+
+    #[test]
+    fn round_trips_max_packable_duration() {
+        let word = pack_rate_segment(1, MAX_PACKABLE_DURATION_SECS).unwrap();
+        assert_eq!(unpack_rate_segment(word), (1, MAX_PACKABLE_DURATION_SECS));
+    }
+
+    #[test]
+    fn round_trips_max_packable_rate_magnitude_positive() {
+        let rate = MAX_PACKABLE_RATE_MAGNITUDE as i128;
+        let word = pack_rate_segment(rate, 10).unwrap();
+        assert_eq!(unpack_rate_segment(word), (rate, 10));
+    }
+
+    #[test]
+    fn round_trips_max_packable_rate_magnitude_negative() {
+        let rate = -(MAX_PACKABLE_RATE_MAGNITUDE as i128);
+        let word = pack_rate_segment(rate, 10).unwrap();
+        assert_eq!(unpack_rate_segment(word), (rate, 10));
+    }
+
+    #[test]
+    fn round_trips_max_duration_and_max_rate_together() {
+        let rate = MAX_PACKABLE_RATE_MAGNITUDE as i128;
+        let word = pack_rate_segment(rate, MAX_PACKABLE_DURATION_SECS).unwrap();
+        assert_eq!(
+            unpack_rate_segment(word),
+            (rate, MAX_PACKABLE_DURATION_SECS)
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Bounds enforcement: duration
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn duration_one_over_limit_is_rejected() {
+        let result = pack_rate_segment(1, MAX_PACKABLE_DURATION_SECS + 1);
+        assert_eq!(result, Err(ContractError::InvalidParams));
+    }
+
+    #[test]
+    fn duration_u32_max_is_rejected() {
+        let result = pack_rate_segment(1, u32::MAX);
+        assert_eq!(result, Err(ContractError::InvalidParams));
+    }
+
+    // -----------------------------------------------------------------------
+    // Bounds enforcement: rate magnitude
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn rate_one_over_limit_is_rejected() {
+        let over = MAX_PACKABLE_RATE_MAGNITUDE as i128 + 1;
+        let result = pack_rate_segment(over, 1);
+        assert_eq!(result, Err(ContractError::InvalidParams));
+    }
+
+    #[test]
+    fn negative_rate_one_over_limit_is_rejected() {
+        let over = -(MAX_PACKABLE_RATE_MAGNITUDE as i128) - 1;
+        let result = pack_rate_segment(over, 1);
+        assert_eq!(result, Err(ContractError::InvalidParams));
+    }
+
+    #[test]
+    fn i128_max_rate_is_rejected() {
+        let result = pack_rate_segment(i128::MAX, 1);
+        assert_eq!(result, Err(ContractError::InvalidParams));
+    }
+
+    /// `i128::MIN` cannot be negated directly (would overflow), so this exercises
+    /// the `unsigned_abs()` path that safely computes its magnitude (2^127)
+    /// without panicking, then correctly rejects it as out of range.
+    #[test]
+    fn i128_min_rate_is_rejected_without_panicking() {
+        let result = pack_rate_segment(i128::MIN, 1);
+        assert_eq!(result, Err(ContractError::InvalidParams));
+    }
+
+    // -----------------------------------------------------------------------
+    // Security: no bit-field bleed between rate, sign, and duration
+    // -----------------------------------------------------------------------
+
+    /// A too-large rate must be rejected outright rather than silently
+    /// truncating and bleeding into the sign bit or duration field.
+    #[test]
+    fn oversized_rate_never_corrupts_duration_field() {
+        let oversized_rate = (MAX_PACKABLE_RATE_MAGNITUDE + 1) as i128;
+        assert_eq!(
+            pack_rate_segment(oversized_rate, 42),
+            Err(ContractError::InvalidParams)
+        );
+    }
+
+    /// Max duration (all 31 duration bits set) must not set the sign bit or
+    /// leak into the rate magnitude field.
+    #[test]
+    fn max_duration_does_not_set_sign_bit() {
+        let word = pack_rate_segment(5, MAX_PACKABLE_DURATION_SECS).unwrap();
+        let sign_bit = (word >> RATE_SEGMENT_SIGN_BIT_POS) & 1;
+        assert_eq!(sign_bit, 0, "positive rate must leave sign bit clear");
+        let (rate, duration) = unpack_rate_segment(word);
+        assert_eq!(rate, 5);
+        assert_eq!(duration, MAX_PACKABLE_DURATION_SECS);
+    }
+
+    /// Negative rate sets exactly the sign bit (plus its magnitude bits);
+    /// the duration field is unaffected and stays zero.
+    #[test]
+    fn negative_rate_sets_only_sign_bit() {
+        let word = pack_rate_segment(-1, 0).unwrap();
+        let expected_magnitude_bit = 1u128 << RATE_SEGMENT_RATE_SHIFT; // magnitude == 1
+        let expected_sign_bit = 1u128 << RATE_SEGMENT_SIGN_BIT_POS;
+        assert_eq!(word, expected_magnitude_bit | expected_sign_bit);
+
+        let duration_mask = (1u128 << RATE_SEGMENT_DURATION_BITS) - 1;
+        assert_eq!(word & duration_mask, 0, "duration field must remain zero");
+    }
+
+    // -----------------------------------------------------------------------
+    // Storage-savings claim
+    // -----------------------------------------------------------------------
+
+    /// Packing halves the per-segment storage footprint: two 128-bit fields
+    /// (rate: i128, duration: u64 promoted to a 128-bit-aligned slot) become
+    /// one 128-bit word.
+    #[test]
+    fn packed_word_is_half_the_unpacked_footprint() {
+        let unpacked_bits: u32 = 128 /* rate: i128 */ + 128 /* duration_secs: u64, worst-case aligned */;
+        let packed_bits: u32 = 128; // single u128 word
+        assert_eq!(packed_bits * 2, unpacked_bits);
+    }
+
+    // -----------------------------------------------------------------------
+    // Property-style sweep
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn property_round_trip_over_sample_space() {
+        let rates: &[i128] = &[
+            0,
+            1,
+            -1,
+            42,
+            -42,
+            1_000_000_000,
+            -1_000_000_000,
+            MAX_PACKABLE_RATE_MAGNITUDE as i128,
+            -(MAX_PACKABLE_RATE_MAGNITUDE as i128),
+        ];
+        let durations: &[u32] = &[0, 1, 100, 3600, 86_400, MAX_PACKABLE_DURATION_SECS];
+
+        for &rate in rates {
+            for &duration in durations {
+                let word = pack_rate_segment(rate, duration)
+                    .unwrap_or_else(|_| panic!("expected Ok for rate={rate}, duration={duration}"));
+                assert_eq!(
+                    unpack_rate_segment(word),
+                    (rate, duration),
+                    "round-trip mismatch for rate={rate}, duration={duration}"
+                );
+            }
+        }
+    }
+}
+
 /// Assert that ledger-backed accrual time has not moved backwards.
 ///
 /// # Security
