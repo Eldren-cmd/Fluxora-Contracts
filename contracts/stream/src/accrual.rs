@@ -26,6 +26,50 @@
 //! *after* a resume. During an in-progress pause that formula keeps accruing,
 //! because the current pause has not yet been added to `paused_total`. Reading
 //! `paused_at` is what makes the freeze actually freeze.
+//!
+//! # Stated invariants
+//!
+//! These hold for every stream at every instant, and every entry point is
+//! responsible for preserving them. They are asserted after *every* operation
+//! by the test suite (`Harness::assert_invariants`), exhaustively across
+//! operation orderings by `test::monotonicity`, and over random schedules by
+//! `test::props`.
+//!
+//! **I1 — Bounds.** `0 <= withdrawn <= vested(t) <= deposited`.
+//!
+//! **I2 — Monotonic in time.** For a fixed stream state and `t1 <= t2`,
+//! `vested(t1) <= vested(t2)`.
+//!
+//! **I3 — Monotonic across calls.** For a *fixed* `t`, no entry point may
+//! reduce `vested(t)`. Formally, if a call transforms stream state `S -> S'`,
+//! then `vested(S', t) >= vested(S, t)`.
+//!
+//! **I4 — Conservation.** `vested(t) + refundable(t) == deposited`, exactly.
+//!
+//! **I5 — Pause coherence.** `paused_at.is_some()` if and only if
+//! `status == Paused`, and while paused the clock does not advance.
+//!
+//! ## Why I3 is the dangerous one
+//!
+//! I2 is the obvious property and is easy to get right. **I3 is the one that
+//! actually broke.** It is easy to violate by accident because it is a property
+//! of *state transitions*, not of the accrual formula, so reading `vested` in
+//! isolation never reveals it.
+//!
+//! `top_up` originally rounded its duration extension up, so the new duration
+//! slightly overshot, the rate fell slightly, and `vested(t)` for the *same* `t`
+//! came out lower after the call than before. That breaks I1 — a recipient who
+//! had already withdrawn at the old rate now holds more than `vested` — and
+//! from there `cancel`, which sets `deposited = vested`, drives the stream's
+//! liability negative and refunds the sender tokens the recipient already has.
+//!
+//! The general rule this yields: **any operation that changes `deposited`,
+//! `start_time`, `end_time`, `cliff_time` or `paused_total` must be checked
+//! against I3**, because those are exactly the inputs to `vested`. Operations
+//! that touch only `withdrawn`, `recipient` or `status` cannot violate it.
+//! Today that means `top_up` and `cancel` need the check and the rest do not,
+//! but the test suite verifies all of them so a future entry point cannot
+//! quietly join the first group.
 
 use crate::error::Error;
 use crate::types::Stream;

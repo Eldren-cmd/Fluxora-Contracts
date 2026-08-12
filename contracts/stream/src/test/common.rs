@@ -6,7 +6,7 @@ use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
 use soroban_sdk::{Address, Env, Vec};
 
-use crate::{accrual, storage, FluxoraStream, FluxoraStreamClient, Stream};
+use crate::{accrual, storage, FluxoraStream, FluxoraStreamClient, Stream, StreamStatus};
 
 /// USDC on Stellar has 7 decimals. Not 6, not 18.
 pub const DECIMALS: u32 = 7;
@@ -157,6 +157,91 @@ impl<'a> Harness<'a> {
         Vec::from_slice(&self.env, ids)
     }
 
+    /// **Post-condition bundle: the stated invariants I1, I4 and I5.**
+    ///
+    /// Asserted after every operation in the suite. See the `accrual` module
+    /// docs for the full statement.
+    ///
+    /// I3 (`vested` never moves backwards across a call) cannot be checked from
+    /// a single snapshot — it needs a before/after pair at a fixed instant — so
+    /// it lives in [`assert_no_vested_regression`](Self::assert_no_vested_regression)
+    /// and is exercised exhaustively by `test::monotonicity`.
+    pub fn assert_invariants(&self) {
+        let now = self.now();
+        for id in 0..self.client.stream_count() {
+            let s = self.client.get_stream(&id);
+            let vested = accrual::vested(&s, now).expect("vested must not overflow");
+
+            // I1 — bounds.
+            assert!(s.withdrawn >= 0, "stream {id}: negative withdrawn");
+            assert!(s.deposited >= 0, "stream {id}: negative deposit");
+            assert!(
+                s.withdrawn <= vested,
+                "stream {id}: I1 violated — withdrawn {} exceeds vested {vested}",
+                s.withdrawn,
+            );
+            assert!(
+                vested <= s.deposited,
+                "stream {id}: I1 violated — vested {vested} exceeds deposited {}",
+                s.deposited,
+            );
+
+            // I4 — conservation, exactly.
+            let refundable = accrual::refundable(&s, now).expect("refundable must not overflow");
+            assert_eq!(
+                vested + refundable,
+                s.deposited,
+                "stream {id}: I4 violated — conservation broken",
+            );
+
+            // I5 — pause coherence.
+            match s.status {
+                StreamStatus::Paused => assert!(
+                    s.paused_at.is_some(),
+                    "stream {id}: I5 violated — Paused with no freeze point",
+                ),
+                other => assert!(
+                    s.paused_at.is_none(),
+                    "stream {id}: I5 violated — {other:?} but still frozen",
+                ),
+            }
+
+            // Schedule sanity: a cancel must never invert the range.
+            assert!(s.end_time >= s.start_time, "stream {id}: inverted schedule",);
+        }
+    }
+
+    /// Snapshot `vested` for every stream at the current instant.
+    ///
+    /// Pair with [`assert_no_vested_regression`](Self::assert_no_vested_regression)
+    /// around a call to check invariant I3.
+    pub fn vested_snapshot(&self) -> std::vec::Vec<i128> {
+        let now = self.now();
+        (0..self.client.stream_count())
+            .map(|id| {
+                accrual::vested(&self.client.get_stream(&id), now)
+                    .expect("vested must not overflow")
+            })
+            .collect()
+    }
+
+    /// **Invariant I3.** No operation may reduce `vested(t)` for a fixed `t`.
+    ///
+    /// The clock must not have advanced between the snapshot and this call, or
+    /// the comparison is meaningless — that is why `test::monotonicity` freezes
+    /// time around each operation.
+    pub fn assert_no_vested_regression(&self, before: &[i128], label: &str) {
+        let after = self.vested_snapshot();
+        for (id, prev) in before.iter().enumerate() {
+            let now = after[id];
+            assert!(
+                now >= *prev,
+                "{label}: I3 violated — stream {id} vested moved backwards, \
+                 {prev} -> {now} at a fixed instant",
+            );
+        }
+    }
+
     /// **The pool invariant.**
     ///
     /// The contract's pooled token balance must always be at least the sum of
@@ -167,6 +252,7 @@ impl<'a> Harness<'a> {
     /// Call this after every operation. It is the single most important
     /// assertion in the suite.
     pub fn assert_pool_invariant(&self) {
+        self.assert_invariants();
         let mut total: i128 = 0;
         let count = self.client.stream_count();
         for id in 0..count {
@@ -190,6 +276,7 @@ impl<'a> Harness<'a> {
     /// true for every test that does not deliberately donate loose tokens to the
     /// contract.
     pub fn assert_pool_exact(&self) {
+        self.assert_invariants();
         let mut total: i128 = 0;
         let count = self.client.stream_count();
         for id in 0..count {

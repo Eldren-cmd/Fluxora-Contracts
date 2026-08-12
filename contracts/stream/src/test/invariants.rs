@@ -175,6 +175,10 @@ fn run_sequence(seed: u64, steps: u32) {
         let count = h.client.stream_count();
         let id = rng.below(count);
 
+        // Invariant I3: no call may reduce vested(t) at a fixed t. Snapshot
+        // before the operation; the clock does not move until after the check.
+        let vested_before = h.vested_snapshot();
+
         // Every call is a `try_` call: many will legitimately be rejected
         // (paused twice, cancelling a non-cancellable stream, withdrawing
         // nothing). A rejection must leave state untouched, which the
@@ -231,6 +235,7 @@ fn run_sequence(seed: u64, steps: u32) {
             }
         }
 
+        h.assert_no_vested_regression(&vested_before, &std::format!("seed {seed}, step {step}"));
         check_all_invariants(&h, seed, step);
 
         // Time moves between operations, sometimes a lot.

@@ -25,5 +25,6 @@ mod transfer;
 // Stage 3
 mod batch;
 mod invariants;
+mod monotonicity;
 mod resource_limits;
 mod ttl;
