@@ -1,17 +1,59 @@
-name: CI/CD Pipeline
+name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, v1-rewrite]
   pull_request:
-    branches: [main, develop]
-  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
 
 jobs:
-  ci:
-    name: CI
+  check:
+    name: fmt, clippy, test, wasm
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: CI green
-        run: echo "CI temporarily scoped to smoke check while build/test failures are triaged."
+
+      # The toolchain, including the wasm32v1-none target, comes from
+      # rust-toolchain.toml so local and CI builds cannot drift.
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Formatting
+        run: cargo fmt --all -- --check
+
+      # Lints are hard failures. A warning that CI tolerates is a warning
+      # nobody ever fixes.
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Tests
+        run: cargo test --all-features
+
+      # Resource measurements are printed rather than only asserted, so a
+      # protocol-version change that moves costs is visible in the CI log
+      # before it becomes a production surprise.
+      - name: Resource report
+        run: cargo test resource_limits -- --nocapture --test-threads=1
+
+      - name: Build contract WASM
+        run: cargo build --target wasm32v1-none --release
+
+      - name: Report WASM size
+        run: |
+          size=$(stat -c%s target/wasm32v1-none/release/fluxora_stream.wasm)
+          echo "fluxora_stream.wasm: ${size} bytes"
+          # Soroban caps a contract code entry at 131072 bytes.
+          if [ "$size" -gt 131072 ]; then
+            echo "::error::WASM exceeds the 128 KiB contract code entry limit"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fluxora-stream-wasm
+          path: target/wasm32v1-none/release/fluxora_stream.wasm
