@@ -77,11 +77,18 @@ jobs:
       # but still fast. On the nightly schedule it goes much wider. Both run in
       # release mode; the randomized suite is dominated by host invocations and
       # is several times faster optimized.
+      # Budget note: the randomized suite costs roughly seeds x steps^2, not
+      # seeds x steps — the invariant scan reads every stream after every
+      # operation, and the stream count itself grows with steps. Measured
+      # 2026-08-12: 120 seeds x 250 steps = 238s, which puts 400x400 at ~34
+      # minutes. Raise *seeds* to buy coverage; raise steps only deliberately.
+      #   400 x 200 ~= 8.5 min (nightly)
+      #    60 x 200 ~= 1.3 min (per PR)
       - name: Set fuzz budget
         run: |
           if [ "${{ github.event_name }}" = "schedule" ]; then
             echo "FLUXORA_FUZZ_SEEDS=400" >> "$GITHUB_ENV"
-            echo "FLUXORA_FUZZ_STEPS=400" >> "$GITHUB_ENV"
+            echo "FLUXORA_FUZZ_STEPS=200" >> "$GITHUB_ENV"
             echo "PROPTEST_CASES=20000"   >> "$GITHUB_ENV"
           else
             echo "FLUXORA_FUZZ_SEEDS=60"  >> "$GITHUB_ENV"
