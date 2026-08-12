@@ -260,4 +260,42 @@ proptest! {
         prop_assert_eq!(accrual::vested(&s, stretched_end).unwrap(), deposited);
         prop_assert!(accrual::vested(&s, start + duration).unwrap() < deposited);
     }
+
+    /// **A top-up must never reduce what is already vested.**
+    ///
+    /// This is the property that the floor-vs-ceiling rounding choice in
+    /// `top_up` exists to satisfy. With a ceiling the new duration overshoots,
+    /// the rate drops, and vested slides backwards — which lets `withdrawn`
+    /// exceed `vested` and, via `cancel`, drives liability negative.
+    #[test]
+    fn top_up_never_reduces_vested(
+        deposited in 1i128..i128::MAX / (1 << 60),
+        duration in 10u64..(10 * 365 * 86_400),
+        elapsed in 1u64..(10 * 365 * 86_400),
+        amount in 1i128..i128::MAX / (1 << 60),
+    ) {
+        prop_assume!(valid(deposited, duration, 0));
+        prop_assume!(elapsed < duration);
+
+        let start = 1_700_000_000u64;
+        let mut s = stream_of(deposited, start, duration, 0);
+        let now = start + elapsed;
+        let before = accrual::vested(&s, now).unwrap();
+
+        // Mirror `top_up`: floor the extension, and reject amounts too small to
+        // buy a second (the contract returns TopUpTooSmall for those).
+        let delta = amount.saturating_mul(duration as i128) / deposited;
+        prop_assume!(delta >= 1 && delta <= u64::MAX as i128);
+        prop_assume!(deposited.checked_add(amount).is_some());
+
+        s.deposited += amount;
+        s.end_time += delta as u64;
+
+        let after = accrual::vested(&s, now).unwrap();
+        prop_assert!(
+            after >= before,
+            "top_up reduced vested: {} -> {} (deposit {}, duration {}, elapsed {}, amount {})",
+            before, after, deposited, duration, elapsed, amount,
+        );
+    }
 }

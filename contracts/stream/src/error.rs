@@ -69,4 +69,8 @@ pub enum Error {
     // --- Arithmetic ---
     /// A checked arithmetic operation overflowed or underflowed.
     Overflow = 22,
+    /// `top_up` amount is smaller than one second of streaming at the current
+    /// rate, so it cannot extend the duration at all and would instead vest
+    /// retroactively. Top up by at least `deposited / duration`.
+    TopUpTooSmall = 23,
 }

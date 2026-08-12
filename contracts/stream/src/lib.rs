@@ -232,8 +232,18 @@ impl FluxoraStream {
     /// schedule, which is the property that makes it safe to accept a stream
     /// from an untrusted sender.
     ///
-    /// The duration extension rounds **up**, so the effective rate after a
-    /// top-up is never higher than the original.
+    /// # Rounding
+    ///
+    /// The duration extension rounds **down**. That direction is load-bearing,
+    /// not cosmetic: rounding up would make the new duration slightly longer
+    /// than exact, which lowers the rate and therefore *retroactively reduces*
+    /// the amount already vested. A recipient who had withdrawn at the old rate
+    /// would then hold more than `vested`, and a subsequent `cancel` — which
+    /// sets `deposited = vested` — would drive the stream's liability negative
+    /// and refund the sender money the recipient already has.
+    ///
+    /// Rounding down guarantees `vested` never decreases across a top-up. The
+    /// residual is at most one second of schedule, in the recipient's favour.
     ///
     /// # Errors
     ///
@@ -260,17 +270,24 @@ impl FluxoraStream {
 
         let current_duration = accrual::duration(&stream) as i128;
 
-        // delta = ceil(amount * duration / deposited), preserving the rate.
+        // delta = floor(amount * duration / deposited), preserving the rate.
+        // Floor, never ceiling — see the rounding note above.
         let scaled = amount
             .checked_mul(current_duration)
             .ok_or(Error::Overflow)?;
         let delta = scaled
-            .checked_add(stream.deposited - 1)
-            .ok_or(Error::Overflow)?
             .checked_div(stream.deposited)
             .ok_or(Error::Overflow)?;
         if delta < 0 || delta > u64::MAX as i128 {
             return Err(Error::Overflow);
+        }
+
+        // A top-up too small to buy even one second cannot extend the schedule,
+        // so the only way to absorb it would be to raise the rate — which
+        // re-vests elapsed time retroactively, the exact thing this function
+        // exists to avoid. Reject instead.
+        if delta == 0 {
+            return Err(Error::TopUpTooSmall);
         }
 
         let new_deposited = stream

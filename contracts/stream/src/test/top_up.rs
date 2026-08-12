@@ -131,32 +131,92 @@ fn top_up_is_allowed_while_paused_and_does_not_resume() {
     h.assert_pool_exact();
 }
 
-/// The duration extension rounds up, so the effective rate after a top-up is
-/// never faster than the original.
+/// **Regression.** The duration extension must round **down**, because rounding
+/// up lowers the rate and therefore retroactively *reduces* already-vested
+/// value — letting `withdrawn` exceed `vested`.
+///
+/// Found by `test::invariants` at seed 11694633084171541224 step 27, where a
+/// recipient ended up holding 93 stroops more than `vested_of` reported. Left
+/// unfixed, a subsequent `cancel` (which sets `deposited = vested`) would drive
+/// the stream's liability negative and refund the sender funds the recipient
+/// had already withdrawn.
 #[test]
-fn extension_rounds_up_so_the_rate_never_accelerates() {
+fn a_top_up_never_reduces_what_is_already_vested() {
     let h = Harness::new();
+    // Deliberately inexact: 1000 stroops over 300 seconds is 3.33/sec.
     let start = h.now();
-    // 1000 stroops over 300 seconds: 3.33 stroops/sec, deliberately inexact.
     let id = h.create(1_000, start, start + 300, start, true, true, true);
 
-    h.client.top_up(&id, &1);
-    let s = h.get(id);
+    h.advance(150);
+    let before = h.client.vested_of(&id);
+    h.client.withdraw(&id, &None);
+    assert_eq!(h.get(id).withdrawn, before);
 
-    // 1 stroop at 1000/300 per second is 0.3s, rounded up to 1s.
-    assert_eq!(s.end_time, start + 301);
-    assert_eq!(s.deposited, 1_001);
-
-    // The new rate must not exceed the old one at any sampled point.
-    for t in [1u64, 50, 150, 300] {
-        h.warp_to(start + t);
-        let new_rate_vested = h.client.vested_of(&id);
-        let old_rate_vested = 1_000 * t as i128 / 300;
+    // Top up by amounts chosen to land on awkward remainders.
+    for amount in [7i128, 13, 101, 17] {
+        h.client.top_up(&id, &amount);
+        let after = h.client.vested_of(&id);
+        let s = h.get(id);
         assert!(
-            new_rate_vested <= old_rate_vested,
-            "at t+{t}: topped-up stream vested {new_rate_vested} > original {old_rate_vested}",
+            after >= before,
+            "vested went backwards across top_up({amount}): {before} -> {after}",
         );
+        assert!(
+            s.withdrawn <= after,
+            "withdrawn {} exceeded vested {after} after top_up({amount})",
+            s.withdrawn,
+        );
+        h.advance(1);
     }
+    h.assert_pool_exact();
+}
+
+/// The same case carried through to settlement: cancelling after a top-up must
+/// never produce a deposit below what was already withdrawn.
+#[test]
+fn cancelling_after_a_top_up_cannot_refund_withdrawn_funds() {
+    let h = Harness::new();
+    let start = h.now();
+    let id = h.create(1_000, start, start + 300, start, true, true, true);
+
+    h.advance(150);
+    h.client.withdraw(&id, &None);
+    h.client.top_up(&id, &7);
+    h.client.cancel(&id);
+
+    let s = h.get(id);
+    assert!(
+        s.deposited >= s.withdrawn,
+        "cancel left deposited {} below withdrawn {}",
+        s.deposited,
+        s.withdrawn,
+    );
+    h.assert_pool_exact();
+}
+
+/// A top-up too small to buy one second of schedule is rejected: absorbing it
+/// would mean raising the rate, which re-vests elapsed time retroactively.
+#[test]
+fn a_sub_second_top_up_is_rejected() {
+    let h = Harness::new();
+    let start = h.now();
+
+    // 1 stroop/sec: one stroop buys exactly one second, so it is accepted.
+    let sparse = h.create(1_000, start, start + 1_000, start, true, true, true);
+    h.client.top_up(&sparse, &1);
+    assert_eq!(h.get(sparse).end_time, start + 1_001);
+
+    // 100 stroops/sec: one stroop buys nothing, so it must be rejected rather
+    // than absorbed by raising the rate.
+    let dense = h.create(10_000, start, start + 100, start, true, true, true);
+    let err = h.client.try_top_up(&dense, &1).unwrap_err().unwrap();
+    assert_eq!(err, Error::TopUpTooSmall);
+    assert_eq!(
+        h.get(dense).deposited,
+        10_000,
+        "rejected top-up changed nothing"
+    );
+    h.assert_pool_exact();
 }
 
 // --- Guards ---------------------------------------------------------------
