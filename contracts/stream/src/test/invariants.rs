@@ -241,10 +241,27 @@ fn run_sequence(seed: u64, steps: u32) {
     check_conservation_of_tokens(&h, seed);
 }
 
+/// How many seeds and how many steps per seed.
+///
+/// Overridable so CI can fuzz far deeper than a local `cargo test` should.
+/// `FLUXORA_FUZZ_SEEDS` / `FLUXORA_FUZZ_STEPS` are read once per test.
+fn fuzz_budget(default_seeds: u64, default_steps: u32) -> (u64, u32) {
+    let seeds = std::env::var("FLUXORA_FUZZ_SEEDS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default_seeds);
+    let steps = std::env::var("FLUXORA_FUZZ_STEPS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default_steps);
+    (seeds, steps)
+}
+
 #[test]
 fn the_pool_invariant_holds_across_random_operation_sequences() {
-    for seed in 1..=24u64 {
-        run_sequence(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15), 40);
+    let (seeds, steps) = fuzz_budget(24, 40);
+    for seed in 1..=seeds {
+        run_sequence(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15), steps);
     }
 }
 
@@ -253,7 +270,9 @@ fn the_pool_invariant_holds_across_random_operation_sequences() {
 /// over before anything interesting is asked of them.
 #[test]
 fn the_pool_invariant_holds_across_long_sequences() {
-    for seed in [0xF1u64, 0xB0BA, 0xDEAD_BEEF, 0x5EED] {
-        run_sequence(seed, 150);
+    let (seeds, steps) = fuzz_budget(4, 150);
+    for i in 0..seeds {
+        // Distinct from the seeds used above, and stable across runs.
+        run_sequence(0xDEAD_BEEF ^ i.wrapping_mul(0xA24B_AED4_963E_E407), steps);
     }
 }

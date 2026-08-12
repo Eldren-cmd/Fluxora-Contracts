@@ -4,6 +4,12 @@ on:
   push:
     branches: [main, v1-rewrite]
   pull_request:
+  schedule:
+    # Nightly deep fuzz. The randomized suites have found two real bugs
+    # (depleted-while-paused, and top_up rounding driving vested backwards),
+    # so they get a budget that a per-PR run cannot afford.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -57,3 +63,57 @@ jobs:
         with:
           name: fluxora-stream-wasm
           path: target/wasm32v1-none/release/fluxora_stream.wasm
+
+  fuzz:
+    name: randomized and property suites
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+
+      # On a PR this is a moderate sweep — deeper than the default `cargo test`
+      # but still fast. On the nightly schedule it goes much wider. Both run in
+      # release mode; the randomized suite is dominated by host invocations and
+      # is several times faster optimized.
+      - name: Set fuzz budget
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "FLUXORA_FUZZ_SEEDS=400" >> "$GITHUB_ENV"
+            echo "FLUXORA_FUZZ_STEPS=400" >> "$GITHUB_ENV"
+            echo "PROPTEST_CASES=20000"   >> "$GITHUB_ENV"
+          else
+            echo "FLUXORA_FUZZ_SEEDS=60"  >> "$GITHUB_ENV"
+            echo "FLUXORA_FUZZ_STEPS=200" >> "$GITHUB_ENV"
+            echo "PROPTEST_CASES=2000"    >> "$GITHUB_ENV"
+          fi
+
+      - name: Pool invariant under randomized operation sequences
+        run: "cargo test --release --all-features invariants:: -- --nocapture"
+
+      - name: Accrual property suite
+        run: "cargo test --release --all-features props:: -- --nocapture"
+
+      # A failing proptest writes the shrunk input to
+      # contracts/stream/proptest-regressions/. Those files are committed so a
+      # found failure stays found — surface them if CI produced any that are
+      # not already tracked.
+      - name: Surface new proptest regression seeds
+        if: failure()
+        run: |
+          echo "::group::proptest regression files"
+          find . -name "*.txt" -path "*proptest-regressions*" -exec sh -c \
+            'echo "--- $1"; cat "$1"' _ {} \;
+          echo "::endgroup::"
+          git status --porcelain -- '*proptest-regressions*' || true
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-failure-seeds
+          path: |
+            **/proptest-regressions/**
+            **/test_snapshots/**
+          if-no-files-found: ignore

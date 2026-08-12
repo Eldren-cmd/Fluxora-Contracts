@@ -24,4 +24,3 @@ target_local/debug/
 target_local/release/
 target_local/*.d
 test_snapshots/
-proptest-regressions/
