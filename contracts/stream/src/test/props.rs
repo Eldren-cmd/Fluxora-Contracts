@@ -220,4 +220,44 @@ proptest! {
             prop_assert_eq!(refund, 0);
         }
     }
+
+    /// Pausing conserves value: the total delivered by the stretched schedule
+    /// equals the total the unpaused schedule would have delivered.
+    #[test]
+    fn pausing_stretches_without_changing_total_value(
+        deposited in 1i128..i128::MAX / (1 << 40),
+        duration in 100u64..(10 * 365 * 86_400),
+        pause_at_frac in 1u64..99,
+        pause_len in 1u64..(2 * 365 * 86_400),
+    ) {
+        prop_assume!(valid(deposited, duration, 0));
+
+        let start = 1_700_000_000u64;
+        let mut s = stream_of(deposited, start, duration, 0);
+
+        let pause_at = start + duration * pause_at_frac / 100;
+        let at_pause = accrual::vested(&s, pause_at).unwrap();
+
+        // Freeze.
+        s.paused_at = Some(pause_at);
+        s.status = StreamStatus::Paused;
+        for probe in [0u64, 1, pause_len / 2, pause_len] {
+            prop_assert_eq!(
+                accrual::vested(&s, pause_at + probe).unwrap(),
+                at_pause,
+                "accrual continued while paused",
+            );
+        }
+
+        // Resume, and confirm the clock picks up exactly where it stopped.
+        s.paused_at = None;
+        s.paused_total += pause_len;
+        s.status = StreamStatus::Active;
+        prop_assert_eq!(accrual::vested(&s, pause_at + pause_len).unwrap(), at_pause);
+
+        // The stretched schedule still delivers the whole deposit, just later.
+        let stretched_end = start + duration + pause_len;
+        prop_assert_eq!(accrual::vested(&s, stretched_end).unwrap(), deposited);
+        prop_assert!(accrual::vested(&s, start + duration).unwrap() < deposited);
+    }
 }

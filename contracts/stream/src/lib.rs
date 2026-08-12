@@ -178,6 +178,104 @@ impl FluxoraStream {
         Ok(stream_id)
     }
 
+    /// Add funds to a live stream.
+    ///
+    /// # Semantics: extend the duration, keep the rate
+    ///
+    /// The per-second rate the recipient agreed to at creation **never
+    /// changes**. `end_time` moves forward by `amount / rate` so the added
+    /// tokens stream out at the original pace:
+    ///
+    /// ```text
+    /// before:  10_000 over 100 days  ->  100/day, ends day 100
+    /// top_up(1_000)
+    /// after:   11_000 over 110 days  ->  100/day, ends day 110
+    /// ```
+    ///
+    /// The alternative — hold `end_time` and raise the rate — was rejected
+    /// because it retroactively re-vests elapsed time: a top-up at the halfway
+    /// point would instantly increase the amount already withdrawable. Keeping
+    /// the rate fixed means a top-up can never accelerate or dilute an existing
+    /// schedule, which is the property that makes it safe to accept a stream
+    /// from an untrusted sender.
+    ///
+    /// The duration extension rounds **up**, so the effective rate after a
+    /// top-up is never higher than the original.
+    ///
+    /// # Errors
+    ///
+    /// * [`Error::StreamMatured`] — the accrual clock has already reached
+    ///   `end_time`. Extending a matured stream would make the new funds
+    ///   instantly (or near-instantly) withdrawable, which is never what the
+    ///   sender means. Create a new stream instead.
+    /// * [`Error::StreamTerminated`] — stream is cancelled or depleted.
+    pub fn top_up(env: Env, stream_id: u64, amount: i128) -> Result<(), Error> {
+        let mut stream = storage::load_stream(&env, stream_id)?;
+        stream.sender.require_auth();
+
+        if stream.status.is_terminal() {
+            return Err(Error::StreamTerminated);
+        }
+        if amount <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+
+        let now = env.ledger().timestamp();
+        if accrual::stream_time(&stream, now) >= stream.end_time {
+            return Err(Error::StreamMatured);
+        }
+
+        let current_duration = accrual::duration(&stream) as i128;
+
+        // delta = ceil(amount * duration / deposited), preserving the rate.
+        let scaled = amount
+            .checked_mul(current_duration)
+            .ok_or(Error::Overflow)?;
+        let delta = scaled
+            .checked_add(stream.deposited - 1)
+            .ok_or(Error::Overflow)?
+            .checked_div(stream.deposited)
+            .ok_or(Error::Overflow)?;
+        if delta < 0 || delta > u64::MAX as i128 {
+            return Err(Error::Overflow);
+        }
+
+        let new_deposited = stream
+            .deposited
+            .checked_add(amount)
+            .ok_or(Error::Overflow)?;
+        let new_end = stream
+            .end_time
+            .checked_add(delta as u64)
+            .ok_or(Error::Overflow)?;
+        let new_duration = new_end
+            .checked_sub(stream.start_time)
+            .ok_or(Error::Overflow)?;
+
+        // Re-establish the creation-time guards against the new figures.
+        new_deposited
+            .checked_mul(new_duration as i128)
+            .ok_or(Error::Overflow)?;
+        if new_deposited < new_duration as i128 {
+            return Err(Error::DepositRateTooLow);
+        }
+
+        let token = stream.token.clone();
+        let sender = stream.sender.clone();
+        stream.deposited = new_deposited;
+        stream.end_time = new_end;
+        storage::save_stream(&env, stream_id, &stream);
+
+        token::Client::new(&env, &token).transfer(
+            &sender,
+            MuxedAddress::from(env.current_contract_address()),
+            &amount,
+        );
+
+        events::topped_up(&env, stream_id, &stream, amount);
+        Ok(())
+    }
+
     /// Withdraw accrued tokens to the recipient.
     ///
     /// `amount == None` withdraws the full withdrawable balance. Returns the
@@ -219,6 +317,162 @@ impl FluxoraStream {
 
         Self::apply_withdrawal(&env, stream_id, &mut stream, payout)?;
         Ok(payout)
+    }
+
+    /// Cancel a stream: stop accrual and refund the unvested remainder to the
+    /// sender.
+    ///
+    /// The recipient keeps everything vested up to this instant and withdraws it
+    /// through the normal path — cancellation does not seize earned funds.
+    ///
+    /// # Implementation
+    ///
+    /// Rather than introduce a second state machine, cancellation rewrites the
+    /// schedule so the stream *looks* like one that has fully matured:
+    /// `deposited` is reduced to the amount vested right now and `end_time` is
+    /// pulled back to the current point on the stream clock. Every subsequent
+    /// `vested` call then clamps to the full (reduced) deposit, so
+    /// [`withdraw`](Self::withdraw) needs no special-casing at all.
+    ///
+    /// Cancelling before the cliff refunds everything: pre-cliff the recipient's
+    /// entitlement is zero by definition.
+    pub fn cancel(env: Env, stream_id: u64) -> Result<(), Error> {
+        let mut stream = storage::load_stream(&env, stream_id)?;
+        stream.sender.require_auth();
+
+        if !stream.cancellable {
+            return Err(Error::NotCancellable);
+        }
+        if stream.status.is_terminal() {
+            return Err(Error::StreamTerminated);
+        }
+
+        let now = env.ledger().timestamp();
+        let vested_now = accrual::vested(&stream, now)?;
+        let refund = accrual::refundable(&stream, now)?;
+
+        // Collapse the schedule onto the current point of the stream clock.
+        // Clamped at `start_time` so a cancel before the stream opens leaves a
+        // zero-length (not negative-length) schedule.
+        let settle_at = accrual::stream_time(&stream, now).max(stream.start_time);
+
+        stream.deposited = vested_now;
+        stream.end_time = settle_at;
+        stream.paused_at = None;
+        stream.status = StreamStatus::Cancelled;
+
+        let token = stream.token.clone();
+        let sender = stream.sender.clone();
+        storage::save_stream(&env, stream_id, &stream);
+
+        if refund > 0 {
+            token::Client::new(&env, &token).transfer(
+                &env.current_contract_address(),
+                MuxedAddress::from(sender),
+                &refund,
+            );
+        }
+
+        events::cancelled(&env, stream_id, &stream, refund, vested_now);
+        Ok(())
+    }
+
+    /// Pause accrual. Only the sender, and only if `pausable`.
+    ///
+    /// Pausing freezes the stream's clock and pushes the effective end date
+    /// forward by the paused duration. Total value delivered stays constant; the
+    /// schedule simply stretches. The recipient can still withdraw what they
+    /// already earned.
+    pub fn pause(env: Env, stream_id: u64) -> Result<(), Error> {
+        let mut stream = storage::load_stream(&env, stream_id)?;
+        stream.sender.require_auth();
+
+        if !stream.pausable {
+            return Err(Error::NotPausable);
+        }
+        if stream.status.is_terminal() {
+            return Err(Error::StreamTerminated);
+        }
+        if stream.status == StreamStatus::Paused {
+            return Err(Error::StreamAlreadyPaused);
+        }
+
+        let now = env.ledger().timestamp();
+        stream.paused_at = Some(now);
+        stream.status = StreamStatus::Paused;
+        storage::save_stream(&env, stream_id, &stream);
+
+        events::paused(&env, stream_id, &stream, now);
+        Ok(())
+    }
+
+    /// Resume a paused stream, absorbing the paused interval into
+    /// `paused_total` so the clock picks up exactly where it stopped.
+    pub fn resume(env: Env, stream_id: u64) -> Result<(), Error> {
+        let mut stream = storage::load_stream(&env, stream_id)?;
+        stream.sender.require_auth();
+
+        if stream.status.is_terminal() {
+            return Err(Error::StreamTerminated);
+        }
+        let paused_at = match stream.paused_at {
+            Some(t) => t,
+            None => return Err(Error::StreamNotPaused),
+        };
+        if stream.status != StreamStatus::Paused {
+            return Err(Error::StreamNotPaused);
+        }
+
+        let now = env.ledger().timestamp();
+        let paused_duration = now.saturating_sub(paused_at);
+        stream.paused_total = stream
+            .paused_total
+            .checked_add(paused_duration)
+            .ok_or(Error::Overflow)?;
+        stream.paused_at = None;
+        stream.status = StreamStatus::Active;
+        storage::save_stream(&env, stream_id, &stream);
+
+        events::resumed(&env, stream_id, &stream, paused_duration);
+        Ok(())
+    }
+
+    /// Reassign a stream's future payouts to a new recipient. Recipient auth.
+    ///
+    /// Available only if the stream was created with `transferable == true`.
+    /// A compliance-bound sender — payroll, a KYC'd grant program — can pin the
+    /// payee at creation by passing `false`.
+    ///
+    /// Any balance the old recipient had already accrued but not withdrawn moves
+    /// with the stream. Recipients should withdraw before transferring.
+    pub fn transfer_recipient(
+        env: Env,
+        stream_id: u64,
+        new_recipient: Address,
+    ) -> Result<(), Error> {
+        let mut stream = storage::load_stream(&env, stream_id)?;
+        stream.recipient.require_auth();
+
+        if !stream.transferable {
+            return Err(Error::NotTransferable);
+        }
+        if stream.status == StreamStatus::Depleted {
+            return Err(Error::StreamTerminated);
+        }
+        if new_recipient == stream.sender {
+            return Err(Error::SelfStream);
+        }
+
+        let old_recipient = stream.recipient.clone();
+        if old_recipient == new_recipient {
+            return Ok(());
+        }
+
+        stream.recipient = new_recipient.clone();
+        storage::save_stream(&env, stream_id, &stream);
+
+        events::recipient_transferred(&env, stream_id, &old_recipient, &new_recipient);
+        Ok(())
     }
 
     // ---------------------------------------------------------------------
