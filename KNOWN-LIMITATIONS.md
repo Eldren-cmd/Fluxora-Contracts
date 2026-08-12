@@ -117,6 +117,45 @@ endpoint directly. Tracked as the remaining stage 4 work.
 Until one of those lands, **this section stays open** and nothing should claim
 TTL is solved.
 
+### What we will say in each outcome — decided in advance
+
+Written down before the result is known, so the conclusion cannot be quietly
+reshaped to fit whatever happens.
+
+**Outcome A — the entry archives and the restore round trip works.**
+This section closes. The claim we then make, and its exact limits:
+
+> Fluxora's archival recovery path is verified end to end against live Stellar
+> testnet: an entry was allowed to archive, the subsequent read failed at the
+> network level, a `RestoreFootprint` operation recovered it, and the stored
+> value came back intact.
+
+That is a headline claim and it is a real differentiator — no other Soroban
+streaming implementation has demonstrated it. It still does **not** claim that a
+Fluxora *stream* archived: the probe is a separate contract, and the argument
+that the result transfers is that restore is a property of the ledger entry, not
+of the contract that wrote it. State that reasoning whenever the claim is made
+rather than letting the audience assume a stream was involved.
+
+**Outcome B — the network auto-restores, and reads never fail.**
+Then the recording-mode behaviour the unit suite relies on turns out to match
+the network, and this entire limitation was narrower than we thought. We say so
+publicly, in those words, and we **narrow the claim rather than reframing it**:
+the honest statement becomes "archival is not a failure mode on this network for
+persistent entries", the SDK's restore-detection path becomes dead code and gets
+deleted, and this section is rewritten to record that the concern did not
+materialise. We do not retro-fit the finding into a success story.
+
+**Outcome C — the entry does not archive on schedule.**
+Eviction is a background scan and lags `live_until`, so a delay of hours or days
+is expected and is not an outcome in itself. The canary script distinguishes
+this case explicitly and exits without a verdict. Re-run rather than concluding
+anything. If it is still unarchived a week past `live_until`, that is itself a
+finding worth writing up — it would mean testnet eviction is effectively not
+running, and mainnet behaviour should not be inferred from it.
+
+In all three cases the result is reported, not just the convenient ones.
+
 ### If you are integrating before then
 
 Assume archived streams are reachable and that your first call against one will
