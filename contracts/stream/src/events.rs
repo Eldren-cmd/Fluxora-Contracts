@@ -44,7 +44,8 @@ pub struct StreamCreated {
     pub transferable: bool,
 }
 
-/// The recipient drew down accrued funds. Emitted once per stream.
+/// The recipient drew down accrued funds. Emitted once per stream, including
+/// once per drawn-from stream inside a `batch_withdraw`.
 #[contractevent]
 pub struct Withdrawn {
     #[topic]
@@ -121,6 +122,14 @@ pub struct RecipientTransferred {
     pub old_recipient: Address,
     #[topic]
     pub new_recipient: Address,
+}
+
+/// A stream entry's TTL was topped up. Lets a keeper confirm its sweep landed.
+#[contractevent]
+pub struct TtlExtended {
+    #[topic]
+    pub stream_id: u64,
+    pub extended_to_ledgers: u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -210,6 +219,14 @@ pub fn recipient_transferred(
         stream_id,
         old_recipient: old_recipient.clone(),
         new_recipient: new_recipient.clone(),
+    }
+    .publish(env);
+}
+
+pub fn ttl_extended(env: &Env, stream_id: u64, extended_to_ledgers: u32) {
+    TtlExtended {
+        stream_id,
+        extended_to_ledgers,
     }
     .publish(env);
 }

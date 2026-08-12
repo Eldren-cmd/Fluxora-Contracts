@@ -285,3 +285,36 @@ fn a_rejected_double_pause_does_not_move_the_freeze_point() {
     h.client.resume(&id);
     assert_eq!(h.get(id).paused_total, 20 * DAY, "no paused time lost");
 }
+
+/// Regression: a stream paused *after* maturity and then fully drained becomes
+/// `Depleted`, and depletion is terminal — `resume` is rejected. If depletion
+/// left `paused_at` set, the stream would be permanently stuck reporting both
+/// "Depleted" and "frozen", with nothing able to clear it.
+///
+/// Found by the randomized sequence test in `test::invariants`.
+#[test]
+fn depleting_a_paused_stream_closes_out_the_pause() {
+    let h = Harness::new();
+    let id = h.create_simple(1_000 * ONE, 100 * DAY);
+
+    h.warp_to(T0 + 150 * DAY);
+    h.client.pause(&id);
+    h.advance(10 * DAY);
+    assert_eq!(h.client.withdraw(&id, &None), 1_000 * ONE);
+
+    let s = h.get(id);
+    assert_eq!(s.status, StreamStatus::Depleted);
+    assert_eq!(s.paused_at, None, "a terminal stream must not stay frozen");
+    assert_eq!(
+        s.paused_total,
+        10 * DAY,
+        "the pause is recorded, not discarded"
+    );
+
+    // And the terminal state is coherent: no further transitions are possible.
+    assert_eq!(
+        h.client.try_resume(&id).unwrap_err().unwrap(),
+        Error::StreamTerminated,
+    );
+    h.assert_pool_exact();
+}

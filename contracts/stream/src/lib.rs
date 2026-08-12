@@ -21,8 +21,10 @@
 //!
 //! There is deliberately no per-user list of stream ids in storage. A `Vec<u64>`
 //! of a treasury's streams grows without bound, costs rent forever, and blows
-//! Soroban's ~200-ledger-entry read limit once that treasury has a few hundred
-//! recipients. On chain, a stream is only ever addressed by its `u64` id.
+//! Soroban's per-transaction footprint limit once that treasury has a few
+//! hundred recipients. On chain, a stream is only ever addressed by its `u64`
+//! id. `test::resource_limits` states the payoff as a test: the 153rd stream
+//! costs exactly what the 2nd did.
 //!
 //! Discovery is an off-chain concern: [`create_stream`](FluxoraStream::create_stream)
 //! returns the new id and emits an event carrying sender, recipient and every
@@ -56,10 +58,41 @@ pub use accrual::{
     cliff_reached, duration, elapsed, liability, refundable, stream_time, vested, withdrawable,
 };
 pub use error::Error;
-pub use storage::{SECONDS_PER_LEDGER, TTL_BUFFER_SECONDS};
+pub use storage::{MIN_STREAM_TTL_LEDGERS, SECONDS_PER_LEDGER, TTL_BUFFER_SECONDS};
 pub use types::{DataKey, Stream, StreamStatus};
 
-use soroban_sdk::{contract, contractimpl, token, Address, Env, MuxedAddress};
+use soroban_sdk::{contract, contractimpl, token, Address, Env, MuxedAddress, Vec};
+
+/// Maximum number of streams one batch call may touch.
+///
+/// # Where this number comes from
+///
+/// Measured, not guessed. `test::resource_limits` reports the real cost of a
+/// full batch against protocol 27's mainnet limits, and the constraint that
+/// binds is not the one you would expect:
+///
+/// | limit | used by a 20-stream batch | ceiling |
+/// |---|---|---|
+/// | total footprint (entries) | 51 | 400 |
+/// | write entries | 24 | 200 |
+/// | instructions | ~5.8M | 400M |
+/// | **contract event bytes** | **10,240** | **16,384** |
+///
+/// Entry counts would allow well over a hundred streams per call. The *event
+/// budget* allows about 32, because each stream emits a `withdrawn` event plus
+/// the token contract's own `transfer` event — roughly 512 bytes per stream
+/// between them.
+///
+/// Sixteen is that measured ceiling with a 2x safety factor. The margin is not
+/// decoration: the per-stream event cost depends on the *token's* event
+/// payload, and a token heavier than the Stellar Asset Contract used in the
+/// tests would inflate it. A cap that merely fits today would fail on somebody
+/// else's token.
+///
+/// Larger requests are rejected with [`Error::BatchTooLarge`] rather than
+/// failing opaquely at the network level. The SDK chunks client-side, so the
+/// exact value is invisible to integrators.
+pub const MAX_BATCH_SIZE: u32 = 16;
 
 #[contract]
 pub struct FluxoraStream;
@@ -319,6 +352,70 @@ impl FluxoraStream {
         Ok(payout)
     }
 
+    /// Withdraw the full available balance from several streams at once.
+    ///
+    /// All streams must share the same `recipient`, who authorizes once for the
+    /// whole batch. Streams with nothing currently withdrawable are skipped
+    /// rather than failing the batch. Returns the total transferred across all
+    /// streams; per-stream amounts are available from the individual `withdrawn`
+    /// events.
+    ///
+    /// Streams need not share a token — each payout uses its own stream's token.
+    ///
+    /// # Errors
+    ///
+    /// * [`Error::BatchTooLarge`] — more than [`MAX_BATCH_SIZE`] ids. Chunk
+    ///   client-side; the SDK does this automatically.
+    /// * [`Error::DuplicateStreamId`] — the same id appears twice, which would
+    ///   otherwise operate on a stale copy of the stream the second time.
+    /// * [`Error::Unauthorized`] — one of the streams has a different recipient.
+    pub fn batch_withdraw(
+        env: Env,
+        recipient: Address,
+        stream_ids: Vec<u64>,
+    ) -> Result<i128, Error> {
+        recipient.require_auth();
+
+        let count = stream_ids.len();
+        if count == 0 {
+            return Err(Error::EmptyBatch);
+        }
+        if count > MAX_BATCH_SIZE {
+            return Err(Error::BatchTooLarge);
+        }
+
+        // Quadratic, but bounded by MAX_BATCH_SIZE and it avoids allocating a
+        // set. A duplicate id would load the stream twice and apply the second
+        // withdrawal to a stale copy, silently over-paying.
+        for i in 0..count {
+            for j in (i + 1)..count {
+                if stream_ids.get_unchecked(i) == stream_ids.get_unchecked(j) {
+                    return Err(Error::DuplicateStreamId);
+                }
+            }
+        }
+
+        let now = env.ledger().timestamp();
+        let mut total: i128 = 0;
+
+        for stream_id in stream_ids.iter() {
+            let mut stream = storage::load_stream(&env, stream_id)?;
+            if stream.recipient != recipient {
+                return Err(Error::Unauthorized);
+            }
+
+            let available = accrual::withdrawable(&stream, now)?;
+            if available == 0 {
+                continue;
+            }
+
+            Self::apply_withdrawal(&env, stream_id, &mut stream, available)?;
+            total = total.checked_add(available).ok_or(Error::Overflow)?;
+        }
+
+        Ok(total)
+    }
+
     /// Cancel a stream: stop accrual and refund the unvested remainder to the
     /// sender.
     ///
@@ -526,6 +623,58 @@ impl FluxoraStream {
     // Maintenance
     // ---------------------------------------------------------------------
 
+    /// Extend a stream entry's TTL. **Permissionless** — anyone may pay.
+    ///
+    /// Returns the number of ledgers the entry is now good for.
+    ///
+    /// This is the keeper hook. It is unauthenticated on purpose: a recipient's
+    /// claim must never depend on the sender's continued goodwill, and a
+    /// third-party keeper sweeping streams that approach expiry should not need
+    /// anyone's permission to do so. There is nothing to grief here — the caller
+    /// only ever *pays* rent, and TTL extension cannot move funds or change
+    /// stream state.
+    ///
+    /// Multi-year streams need this periodically no matter how generously the
+    /// contract extends at creation, because no entry may exceed the network's
+    /// `max_entry_ttl`.
+    pub fn extend_stream_ttl(env: Env, stream_id: u64) -> Result<u32, Error> {
+        let stream = storage::peek_stream(&env, stream_id)?;
+        let target = storage::ttl_target_ledgers(&env, &stream);
+        storage::extend_stream(&env, stream_id, &stream);
+        storage::extend_instance(&env);
+
+        events::ttl_extended(&env, stream_id, target);
+        Ok(target)
+    }
+
+    /// Extend several streams' TTLs in one transaction. Permissionless.
+    ///
+    /// Same [`MAX_BATCH_SIZE`] cap as [`batch_withdraw`](Self::batch_withdraw).
+    /// Unknown ids are skipped rather than failing the sweep, so a keeper
+    /// working from a slightly stale index does not lose the whole batch to one
+    /// bad id. Returns how many entries were actually extended.
+    pub fn batch_extend_ttl(env: Env, stream_ids: Vec<u64>) -> Result<u32, Error> {
+        let count = stream_ids.len();
+        if count == 0 {
+            return Err(Error::EmptyBatch);
+        }
+        if count > MAX_BATCH_SIZE {
+            return Err(Error::BatchTooLarge);
+        }
+
+        let mut extended = 0u32;
+        for stream_id in stream_ids.iter() {
+            if let Ok(stream) = storage::peek_stream(&env, stream_id) {
+                let target = storage::ttl_target_ledgers(&env, &stream);
+                storage::extend_stream(&env, stream_id, &stream);
+                events::ttl_extended(&env, stream_id, target);
+                extended += 1;
+            }
+        }
+        storage::extend_instance(&env);
+        Ok(extended)
+    }
+
     // ---------------------------------------------------------------------
     // Internal
     // ---------------------------------------------------------------------
@@ -552,6 +701,22 @@ impl FluxoraStream {
         // visibly cancelled rather than relabelling it as a clean completion.
         if stream.withdrawn >= stream.deposited && stream.status != StreamStatus::Cancelled {
             stream.status = StreamStatus::Depleted;
+
+            // A stream can be paused *after* maturity and then drained, and
+            // depletion is terminal — `resume` would be rejected — so leaving
+            // `paused_at` set would strand the stream in a state that says
+            // "Depleted" and "frozen" at once, with nothing able to clear it.
+            // Close the pause out here, exactly as `cancel` does. Accrual is
+            // unaffected: reaching `withdrawn == deposited` means the stream
+            // had already fully vested.
+            if let Some(paused_at) = stream.paused_at {
+                let now = env.ledger().timestamp();
+                stream.paused_total = stream
+                    .paused_total
+                    .checked_add(now.saturating_sub(paused_at))
+                    .ok_or(Error::Overflow)?;
+                stream.paused_at = None;
+            }
         }
 
         let token = stream.token.clone();

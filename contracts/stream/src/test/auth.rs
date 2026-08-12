@@ -85,6 +85,49 @@ fn authority_follows_the_recipient_after_a_transfer() {
     assert_eq!(required_auth(&h.env), h.other);
 }
 
+#[test]
+fn batch_withdraw_requires_the_recipient_once() {
+    let h = Harness::new();
+    let a = h.create_simple(100 * ONE, 100 * DAY);
+    let b = h.create_simple(100 * ONE, 100 * DAY);
+    h.advance(10 * DAY);
+
+    h.client.batch_withdraw(&h.recipient, &h.ids(&[a, b]));
+    assert_eq!(required_auth(&h.env), h.recipient);
+}
+
+/// A batch may not be used to drain someone else's streams by naming yourself
+/// as the recipient.
+#[test]
+fn batch_withdraw_rejects_streams_belonging_to_someone_else() {
+    let h = Harness::new();
+    let mine = h.create_simple(100 * ONE, 100 * DAY);
+    let theirs = h.client.create_stream(
+        &h.sender,
+        &h.other,
+        &h.token,
+        &(100 * ONE),
+        &h.now(),
+        &(h.now() + 100 * DAY),
+        &h.now(),
+        &true,
+        &true,
+        &true,
+    );
+    h.advance(10 * DAY);
+
+    let err = h
+        .client
+        .try_batch_withdraw(&h.recipient, &h.ids(&[mine, theirs]))
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, crate::Error::Unauthorized);
+
+    // The whole batch rolled back — no partial drain.
+    assert_eq!(h.balance(&h.recipient), 0);
+    h.assert_pool_exact();
+}
+
 // --- Negative: no authorization at all ------------------------------------
 
 #[test]
@@ -148,6 +191,30 @@ fn create_fails_without_authorization() {
 }
 
 // --- Permissionless by design ---------------------------------------------
+
+/// TTL extension is deliberately unauthenticated: a recipient's claim must
+/// never depend on the sender's continued goodwill, and a keeper should not
+/// need anyone's permission to pay rent.
+#[test]
+fn extend_stream_ttl_needs_no_authorization() {
+    let h = Harness::new();
+    let id = h.create_simple(1_000 * ONE, 100 * DAY);
+
+    revoke_all_auths(&h.env);
+    let ledgers = h.client.extend_stream_ttl(&id);
+    assert!(ledgers > 0);
+    assert!(h.env.auths().is_empty(), "should have required no auth");
+}
+
+#[test]
+fn batch_extend_ttl_needs_no_authorization() {
+    let h = Harness::new();
+    let a = h.create_simple(100 * ONE, 100 * DAY);
+    let b = h.create_simple(100 * ONE, 100 * DAY);
+
+    revoke_all_auths(&h.env);
+    assert_eq!(h.client.batch_extend_ttl(&h.ids(&[a, b])), 2);
+}
 
 /// Views must be readable by anyone, including with no auth context at all.
 #[test]
