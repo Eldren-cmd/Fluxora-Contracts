@@ -52,18 +52,33 @@ fn stream_of(deposited: i128, start: u64, duration: u64, cliff_offset: u64) -> S
     }
 }
 
-/// Mirrors `create_stream`'s validation so generated cases are ones the
-/// contract would actually accept.
-fn valid(deposited: i128, duration: u64, cliff_offset: u64) -> bool {
-    duration > 0
-        && deposited > 0
-        && deposited >= duration as i128
-        && cliff_offset <= duration
-        && deposited.checked_mul(duration as i128).is_some()
+/// Longest schedule generated. Bounded so that `deposited * duration` cannot
+/// overflow given the deposit ceiling used by the strategies below.
+const MAX_DURATION: u64 = 20 * 365 * 86_400;
+
+/// Coerce a raw generated deposit into one `create_stream` would accept.
+///
+/// Deliberately *derives* a valid value rather than filtering with
+/// `prop_assume!`. Filter-based generation starves: proptest aborts a test
+/// after 1024 global rejects, so a filter that rejects even a modest fraction
+/// of cases turns into a spurious failure once the case count is raised — which
+/// is exactly what CI does nightly. Every strategy here is rejection-free.
+fn deposit_for(raw: i128, duration: u64) -> i128 {
+    // At least one stroop per second, mirroring the contract's rate floor.
+    raw.max(duration as i128)
+}
+
+/// Map a raw value into `[0, duration)`.
+fn within(raw: u64, duration: u64) -> u64 {
+    raw % duration
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(256))]
+    // `ProptestConfig::default()` reads PROPTEST_CASES from the environment
+    // (defaulting to 256). Do NOT use `with_cases(n)` here — it overrides the
+    // env var, which would silently pin CI's nightly deep sweep back to the
+    // local default.
+    #![proptest_config(ProptestConfig::default())]
 
     /// Vesting is bounded below by zero and above by the deposit, at every
     /// instant, including far past the end and far before the start.
@@ -75,7 +90,7 @@ proptest! {
         offset in -1_000_000i64..(40 * 365 * 86_400),
     ) {
         let cliff_offset = duration * cliff_frac / 100;
-        prop_assume!(valid(deposited, duration, cliff_offset));
+        let deposited = deposit_for(deposited, duration);
 
         let start = 1_700_000_000u64;
         let s = stream_of(deposited, start, duration, cliff_offset);
@@ -97,7 +112,7 @@ proptest! {
         elapsed in 0u64..(40 * 365 * 86_400),
     ) {
         let cliff_offset = duration * cliff_frac / 100;
-        prop_assume!(valid(deposited, duration, cliff_offset));
+        let deposited = deposit_for(deposited, duration);
 
         let start = 1_700_000_000u64;
         let s = stream_of(deposited, start, duration, cliff_offset);
@@ -119,7 +134,7 @@ proptest! {
         step in 1u64..(365 * 86_400),
     ) {
         let cliff_offset = duration * cliff_frac / 100;
-        prop_assume!(valid(deposited, duration, cliff_offset));
+        let deposited = deposit_for(deposited, duration);
 
         let start = 1_700_000_000u64;
         let s = stream_of(deposited, start, duration, cliff_offset);
@@ -137,11 +152,12 @@ proptest! {
     #[test]
     fn vesting_rounds_down_and_is_tight(
         deposited in 1i128..i128::MAX / (1 << 40),
-        duration in 2u64..(20 * 365 * 86_400),
-        elapsed in 1u64..(20 * 365 * 86_400),
+        duration in 2u64..MAX_DURATION,
+        elapsed_raw in 1u64..MAX_DURATION,
     ) {
-        prop_assume!(valid(deposited, duration, 0));
-        prop_assume!(elapsed < duration);
+        let deposited = deposit_for(deposited, duration);
+        // Derived, not filtered: always strictly inside the schedule.
+        let elapsed = within(elapsed_raw, duration).max(1);
 
         let start = 1_700_000_000u64;
         let s = stream_of(deposited, start, duration, 0);
@@ -164,7 +180,7 @@ proptest! {
         cliff_frac in 1u64..100,
     ) {
         let cliff_offset = (duration * cliff_frac / 100).max(1);
-        prop_assume!(valid(deposited, duration, cliff_offset));
+        let deposited = deposit_for(deposited, duration);
 
         let start = 1_700_000_000u64;
         let s = stream_of(deposited, start, duration, cliff_offset);
@@ -186,7 +202,7 @@ proptest! {
         draw_fracs in prop::collection::vec(0u64..=120, 1..12),
     ) {
         let cliff_offset = duration * cliff_frac / 100;
-        prop_assume!(valid(deposited, duration, cliff_offset));
+        let deposited = deposit_for(deposited, duration);
 
         let start = 1_700_000_000u64;
         let mut s = stream_of(deposited, start, duration, cliff_offset);
@@ -230,7 +246,7 @@ proptest! {
         pause_at_frac in 1u64..99,
         pause_len in 1u64..(2 * 365 * 86_400),
     ) {
-        prop_assume!(valid(deposited, duration, 0));
+        let deposited = deposit_for(deposited, duration);
 
         let start = 1_700_000_000u64;
         let mut s = stream_of(deposited, start, duration, 0);
@@ -271,22 +287,25 @@ proptest! {
     fn top_up_never_reduces_vested(
         deposited in 1i128..i128::MAX / (1 << 60),
         duration in 10u64..(10 * 365 * 86_400),
-        elapsed in 1u64..(10 * 365 * 86_400),
+        elapsed_raw in 1u64..(10 * 365 * 86_400),
         amount in 1i128..i128::MAX / (1 << 60),
     ) {
-        prop_assume!(valid(deposited, duration, 0));
-        prop_assume!(elapsed < duration);
+        let deposited = deposit_for(deposited, duration);
+        let elapsed = within(elapsed_raw, duration).max(1);
 
         let start = 1_700_000_000u64;
         let mut s = stream_of(deposited, start, duration, 0);
         let now = start + elapsed;
         let before = accrual::vested(&s, now).unwrap();
 
-        // Mirror `top_up`: floor the extension, and reject amounts too small to
-        // buy a second (the contract returns TopUpTooSmall for those).
+        // Mirror `top_up`: floor the extension, and raise the amount to at
+        // least one second's worth, which is the contract's TopUpTooSmall
+        // boundary. Derived rather than filtered.
+        let one_second = (deposited / duration as i128) + 1;
+        let amount = amount.max(one_second);
         let delta = amount.saturating_mul(duration as i128) / deposited;
-        prop_assume!(delta >= 1 && delta <= u64::MAX as i128);
-        prop_assume!(deposited.checked_add(amount).is_some());
+        prop_assert!(delta >= 1, "amount coercion should guarantee a whole second");
+        prop_assume!(delta <= u64::MAX as i128 && deposited.checked_add(amount).is_some());
 
         s.deposited += amount;
         s.end_time += delta as u64;
