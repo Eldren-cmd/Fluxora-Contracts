@@ -336,10 +336,15 @@ linear. No cross-chain anything.
 
 Stages 1–3 complete: contract core, full lifecycle, TTL and resource limits.
 
-**Stage 4 (in progress):** testnet deploy plus a CLI exercising every function
-against live testnet. Its acceptance criterion is closing
-[KNOWN-LIMITATIONS.md §1](KNOWN-LIMITATIONS.md) — letting a stream entry
-genuinely archive on testnet and proving the full `RestoreFootprint` round trip.
+**Stage 4 (in progress).** Deployed to testnet as
+[`CBCGTSCJ…THXW`](https://stellar.expert/explorer/testnet/contract/CBCGTSCJXBMPPPE4BPDIPYZXPE2J5TQEKD2KCS7VQF533NKKEYGUTHXW);
+`script/testnet-exercise.sh` calls every entrypoint against the live deployment
+and passes 35/35 assertions.
+
+Its acceptance criterion — the live archival restore round trip — is **not yet
+met**. A canary entry was planted on 2026-08-12 and archives ~2026-08-19; see
+[KNOWN-LIMITATIONS.md §1](KNOWN-LIMITATIONS.md) and
+`script/archival-canary.sh`.
 
 Then the indexer, keeper and TypeScript SDK (stage 5), reference UI last (stage 6).
 

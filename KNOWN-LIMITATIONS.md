@@ -71,11 +71,51 @@ live entry with intact accounting after — and skip the failure in between.
   reliable "needs restoring" signal against a real RPC, as the SDK is intended
   to use it.
 
-### Closing it
+### Closing it — in progress, canary planted 2026-08-12
 
-Stage 4 must, against live testnet: create a stream, let its entry genuinely
-archive, observe the real failure, restore it via `RestoreFootprint`, and show
-the stream still pays out correctly. Anything less leaves this section open.
+Genuine archival cannot be observed quickly on *any* network. Measured
+2026-08-12, testnet and local quickstart carry identical settings:
+
+| setting | ledgers | at 5s/ledger |
+|---|---|---|
+| `min_persistent_ttl` | 120,960 | **7 days** |
+| `max_entry_ttl` | 3,110,400 | 180 days |
+| Fluxora's own floor (`MIN_STREAM_TTL_LEDGERS`) | 518,400 | 30 days |
+
+The 7-day figure is a *network* floor applied at entry creation — no contract
+can undercut it. Fluxora's 30-day floor sits on top, so a real stream entry
+cannot archive for a month. That floor is deliberate and stays: a settled stream
+must remain readable for the recipient's unclaimed tail and the indexer's final
+state.
+
+Two things are therefore running in parallel.
+
+**1. Testnet canary — clock started 2026-08-12.** `contracts/archival-probe` is a
+throwaway contract that writes one persistent entry and *deliberately never
+extends its TTL*, so it receives exactly `min_persistent_ttl` and archives as
+early as the network allows. The restore mechanism is a property of the ledger,
+not of the contract, so proving it there proves it for `DataKey::Stream(id)`.
+
+| | |
+|---|---|
+| probe contract | `CB4XJYNXQ62TCXI3GKCVBWADTSTFWYL3ZLYS3MKYPWRANOSADRZG4A7N` |
+| canary planted | ledger 4,097,334 |
+| archives after | ledger 4,218,293 |
+| expected | ~2026-08-19 09:39 UTC |
+
+Run `script/archival-canary.sh` any time for status; after that ledger, run it
+with `--restore` to perform and verify the round trip. It asserts each step:
+the entry stops being readable, invocation *fails* rather than returning stale
+data, `RestoreFootprint` recovers it, and the value comes back intact.
+
+**2. Config-upgraded local network — not yet built.** A `min_persistent_ttl`
+lowered via a stellar-core config upgrade would make the round trip provable in
+minutes and repeatable in CI, rather than a once-a-week manual check. There is
+no CLI support for applying a `ConfigUpgradeSet`, so this needs the core admin
+endpoint directly. Tracked as the remaining stage 4 work.
+
+Until one of those lands, **this section stays open** and nothing should claim
+TTL is solved.
 
 ### If you are integrating before then
 
