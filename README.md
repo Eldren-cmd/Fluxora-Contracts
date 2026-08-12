@@ -15,7 +15,11 @@ subscription billing, vesting schedules. The contract is the product.
 | Rust | 1.97.1, target `wasm32v1-none` |
 | Token interface | SEP-41 (USDC on Stellar has **7 decimals**) |
 | Contract size | ~47 KB |
-| Tests | 140, including property tests and a pool invariant checked after every operation |
+| Tests | 146, including property tests and a pool invariant checked after every operation |
+
+> **Read [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md) before relying on this.**
+> A green suite here does not mean TTL is solved — the archival *recovery* flow
+> is not yet proven against a live network. See §1 there, and the summary below.
 
 ---
 
@@ -25,6 +29,10 @@ subscription billing, vesting schedules. The contract is the product.
 cargo test                                    # full suite
 cargo test resource_limits -- --nocapture     # print measured resource costs
 cargo build --target wasm32v1-none --release  # build the contract
+
+# Deeper randomized sweep. CI runs this nightly; worth running before a release
+# or after touching accrual.rs. Both suites have found real bugs.
+FLUXORA_FUZZ_SEEDS=200 FLUXORA_FUZZ_STEPS=300 PROPTEST_CASES=5000 cargo test --release
 ```
 
 ---
@@ -144,11 +152,21 @@ withdrawable. Keeping the rate fixed means a top-up can never accelerate or
 dilute an existing schedule, which is what makes it safe to accept a stream from
 an untrusted sender.
 
-The extension rounds **up**, so the effective rate after a top-up is never
-faster than the original.
+The extension rounds **down**, and that direction is load-bearing rather than
+cosmetic. Rounding *up* makes the new duration slightly longer than exact, which
+lowers the rate and therefore retroactively *reduces* the amount already vested —
+letting `withdrawn` exceed `vested`, and letting a subsequent `cancel` (which
+sets `deposited = vested`) drive liability negative and refund the sender money
+the recipient already holds. This was a real bug, caught by the randomized
+sequence suite; see [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md) for the class of
+issue and `test::top_up::a_top_up_never_reduces_what_is_already_vested` for the
+regression. Rounding down guarantees `vested` never decreases; the residual is at
+most one second of schedule, in the recipient's favour.
 
 Topping up a *matured* stream is rejected (`StreamMatured`) rather than silently
-making the new funds instantly withdrawable.
+making the new funds instantly withdrawable. A top-up too small to buy one second
+of schedule is rejected (`TopUpTooSmall`), because absorbing it would mean raising
+the rate — exactly the retroactive re-vesting this design avoids.
 
 ### 2. `MAX_BATCH_SIZE = 16`, derived from measurement
 
@@ -218,24 +236,25 @@ Views deliberately do **not** extend TTL. They are called through simulation,
 where a footprint write is at best noise. Keeping a stream alive is the explicit
 job of `extend_stream_ttl`.
 
-### What the tests prove, and what they cannot
+### What the tests prove, and what they do not
+
+**This is the most important caveat in the project. Do not skip it.**
 
 The SDK's test host runs storage in recording mode, where reading an expired
-persistent entry auto-restores it with data intact and TTL reset to
-`min_persistent_entry_ttl`. That mirrors the on-network outcome of a
-`RestoreFootprint` operation, so `test::ttl` genuinely proves:
+persistent entry is **silently auto-restored** rather than failing. So `test::ttl`
+proves the rent arithmetic, the extend-on-touch behaviour, that a year-long
+stream survives on keeper sweeps alone, and that crossing the archive/restore
+boundary preserves every field of the accounting with the pool still backing it.
 
-- a year-long stream survives on keeper sweeps alone, with its accounting intact
-  and paying out in full (`a_year_long_stream_survives_on_keeper_sweeps_alone`);
-- an archived stream restores with every field of its accounting unchanged and
-  the pool still fully backing it (`an_archived_stream_restores_with_its_accounting_intact`).
+It does **not** prove the recovery flow. On a real network the transaction
+*fails first* and the caller must resubmit with a `RestoreFootprint` operation —
+a step the test host skips entirely. Nothing here establishes that the failure is
+diagnosable, that the footprint we would build is correct, or what a restore
+costs.
 
-What unit tests **cannot** reproduce is the client-side dance on a real network,
-where the transaction fails first and the caller must resubmit with a restore
-footprint. That has no unit-test surface and belongs in the testnet exercise
-(stage 4). The SDK should detect archived streams and surface a one-click restore
-rather than an opaque error; `stream_exists` returning `false` for an id below
-`stream_count` is the signal to key on.
+**TTL is therefore half-proven.** Closing the other half against live testnet is
+the acceptance criterion for stage 4, not a nice-to-have. Full detail and
+integrator guidance in [KNOWN-LIMITATIONS.md §1](KNOWN-LIMITATIONS.md).
 
 ---
 
@@ -317,8 +336,15 @@ linear. No cross-chain anything.
 
 Stages 1–3 complete: contract core, full lifecycle, TTL and resource limits.
 
-Next: testnet deploy with a CLI exercising every function against live testnet,
-then the indexer, keeper and TypeScript SDK.
+**Stage 4 (in progress):** testnet deploy plus a CLI exercising every function
+against live testnet. Its acceptance criterion is closing
+[KNOWN-LIMITATIONS.md §1](KNOWN-LIMITATIONS.md) — letting a stream entry
+genuinely archive on testnet and proving the full `RestoreFootprint` round trip.
+
+Then the indexer, keeper and TypeScript SDK (stage 5), reference UI last (stage 6).
+
+Migrating from the pre-rewrite contract? See [MIGRATION.md](MIGRATION.md) — the
+frontend's four contract calls all break, the backend is unaffected.
 
 > **Note for deployment:** the `stellar` CLI must be at least version 27 to match
 > the protocol. A protocol-23 CLI will scaffold and may misreport against a
