@@ -38,6 +38,10 @@ pub enum Error {
 
     // --- State machine ---
     /// Action requires an `Active` stream.
+    ///
+    /// Reserved in the frozen ABI; current entry points use the more specific
+    /// [`Self::StreamNotPaused`] / [`Self::StreamAlreadyPaused`] /
+    /// [`Self::StreamTerminated`] variants instead. Do not renumber.
     StreamNotActive = 11,
     /// `resume` called on a stream that is not `Paused`.
     StreamNotPaused = 12,

@@ -150,6 +150,9 @@ pub fn save_stream(env: &Env, stream_id: u64, stream: &Stream) {
 /// Ids are monotonic and never reused, so an id is a stable handle an indexer
 /// can key on forever.
 pub fn next_stream_id(env: &Env) -> Result<u64, Error> {
+    // Missing counter means no stream has been created yet — equivalent to 0.
+    // This is a default, not a precondition failure: create_stream is what
+    // initialises the counter, and there is no separate `init` entry point.
     let current: u64 = env
         .storage()
         .instance()
@@ -172,6 +175,9 @@ pub fn stream_exists(env: &Env, stream_id: u64) -> bool {
 
 /// Total number of streams ever created.
 pub fn stream_count(env: &Env) -> u64 {
+    // Same default as `next_stream_id`: an untouched instance has created
+    // zero streams. Not a recoverable precondition — callers treat 0 as the
+    // honest answer.
     env.storage()
         .instance()
         .get(&DataKey::NextStreamId)

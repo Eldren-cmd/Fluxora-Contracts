@@ -114,6 +114,14 @@ Discriminants are ABI and are never renumbered; new variants are appended.
 
 The CLI and RPC render these as `Error(Contract, #N)`.
 
+`StreamNotActive` (11) is reserved in the frozen ABI; current entry points
+return the more specific pause/terminated variants instead.
+
+`withdraw` distinguishes empty balances: a live stream with nothing accrued
+yet returns `NothingToWithdraw` (17); a `Cancelled` or `Depleted` stream with
+nothing left returns `StreamTerminated` (14). Clients must not treat those as
+equivalent.
+
 ---
 
 ## Entry points
