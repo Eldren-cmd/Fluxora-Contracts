@@ -8,6 +8,7 @@
 //!   the batch cap.
 
 mod common;
+mod missing;
 
 // Stage 1
 mod create;
