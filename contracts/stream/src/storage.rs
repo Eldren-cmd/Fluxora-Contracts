@@ -51,6 +51,17 @@ pub const MIN_STREAM_TTL_LEDGERS: u32 = (TTL_BUFFER_SECONDS / SECONDS_PER_LEDGER
 
 /// Convert a wall-clock duration into a ledger count, rounding up.
 ///
+/// # Why ceiling, not floor
+///
+/// This only ever feeds the "how long should this entry live" side of the TTL
+/// math (see [`ttl_target_ledgers`]), never the "how much has the stream
+/// promised" side. Flooring here would trim a fraction of a ledger off of
+/// every TTL target — which can only ever *shorten* the window before an
+/// entry becomes eligible to archive, never lengthen it. Ceiling guarantees
+/// the opposite: the ledger count returned, converted back to seconds, is
+/// always at least the requested duration. That guarantee is exercised
+/// directly by `seconds_to_ledgers_round_trip_never_undershoots`.
+///
 /// Saturates at `u32::MAX`; callers clamp to the network maximum anyway.
 pub fn seconds_to_ledgers(seconds: u64) -> u32 {
     let ledgers = seconds
