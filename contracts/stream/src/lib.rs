@@ -61,7 +61,7 @@ pub use error::Error;
 pub use storage::{MIN_STREAM_TTL_LEDGERS, SECONDS_PER_LEDGER, TTL_BUFFER_SECONDS};
 pub use types::{DataKey, Stream, StreamStatus};
 
-use soroban_sdk::{contract, contractimpl, token, Address, Env, MuxedAddress, Vec};
+use soroban_sdk::{contract, contractimpl, token, Address, Env, InvokeError, MuxedAddress, Vec};
 
 /// Maximum number of streams one batch call may touch.
 ///
@@ -93,6 +93,48 @@ use soroban_sdk::{contract, contractimpl, token, Address, Env, MuxedAddress, Vec
 /// failing opaquely at the network level. The SDK chunks client-side, so the
 /// exact value is invisible to integrators.
 pub const MAX_BATCH_SIZE: u32 = 16;
+
+/// Call `token.transfer(from, to, amount)` and map any failure to a stable
+/// stream-level error.
+///
+/// # Why not forward the token's error discriminant?
+///
+/// A client receiving `Error(Contract, #N)` has no way to know whether `N`
+/// comes from the stream contract or from the token contract without out-of-band
+/// knowledge of which contract threw. Forwarding the raw token discriminant
+/// would cause silent misinterpretation — e.g. token error #7 would decode as
+/// `Unauthorized` against Fluxora's table, which is wrong and unsettling.
+///
+/// Instead, failures are bucketed into two stream-level categories that are
+/// stable, unambiguous, and actionable:
+///
+/// * [`Error::TokenTransferFailed`] — the token returned a typed contract
+///   error. The root cause (insufficient balance, authorization refused by the
+///   token contract, etc.) is visible in the transaction's `diagnosticEvents`
+///   and is therefore preserved for off-chain tooling without polluting the
+///   stream ABI.
+/// * [`Error::TokenMissing`] — the host raised an `Abort` (non-contract trap).
+///   This most commonly means the `token` address has no deployed code. No
+///   funds moved, so the stream is in a clean pre-transfer state.
+fn token_transfer(
+    env: &Env,
+    token: &Address,
+    from: &Address,
+    to: MuxedAddress,
+    amount: &i128,
+) -> Result<(), Error> {
+    match token::TokenClient::new(env, token).try_transfer(from, &to, amount) {
+        Ok(Ok(())) => Ok(()),
+        // The token contract returned a typed contract error (e.g. insufficient
+        // balance, deauthorized trustline, custom token logic). The raw
+        // discriminant is intentionally discarded — see the function doc.
+        Err(Err(InvokeError::Contract(_))) | Ok(Err(_)) | Err(Ok(_)) => {
+            Err(Error::TokenTransferFailed)
+        }
+        // Host trap: most commonly the token address has no deployed code.
+        Err(Err(InvokeError::Abort)) => Err(Error::TokenMissing),
+    }
+}
 
 #[contract]
 pub struct FluxoraStream;
@@ -196,16 +238,24 @@ impl FluxoraStream {
             status: StreamStatus::Active,
         };
 
-        storage::save_stream(&env, stream_id, &stream);
-        storage::extend_instance(&env);
-
-        // Pull the deposit in last. The sender's auth on this invocation covers
-        // the nested token transfer, so no prior approval is needed.
-        token::Client::new(&env, &token).transfer(
+        // Pull the deposit before writing the stream entry. If the token
+        // transfer fails (missing contract, authorization refused, insufficient
+        // balance) we return a typed error and leave no phantom entry in
+        // storage — the id counter has already advanced, so the id is
+        // consumed, but no stream with that id is observable to any caller.
+        //
+        // The sender's auth on this invocation covers the nested token
+        // transfer; no prior approval is needed.
+        token_transfer(
+            &env,
+            &token,
             &sender,
             MuxedAddress::from(env.current_contract_address()),
             &deposit,
-        );
+        )?;
+
+        storage::save_stream(&env, stream_id, &stream);
+        storage::extend_instance(&env);
 
         events::stream_created(&env, stream_id, &stream);
         Ok(stream_id)
@@ -316,11 +366,13 @@ impl FluxoraStream {
         stream.end_time = new_end;
         storage::save_stream(&env, stream_id, &stream);
 
-        token::Client::new(&env, &token).transfer(
+        token_transfer(
+            &env,
+            &token,
             &sender,
             MuxedAddress::from(env.current_contract_address()),
             &amount,
-        );
+        )?;
 
         events::topped_up(&env, stream_id, &stream, amount);
         Ok(())
@@ -480,11 +532,13 @@ impl FluxoraStream {
         storage::save_stream(&env, stream_id, &stream);
 
         if refund > 0 {
-            token::Client::new(&env, &token).transfer(
+            token_transfer(
+                &env,
+                &token,
                 &env.current_contract_address(),
                 MuxedAddress::from(sender),
                 &refund,
-            );
+            )?;
         }
 
         events::cancelled(&env, stream_id, &stream, refund, vested_now);
@@ -740,11 +794,13 @@ impl FluxoraStream {
         let recipient = stream.recipient.clone();
         storage::save_stream(env, stream_id, stream);
 
-        token::Client::new(env, &token).transfer(
+        token_transfer(
+            env,
+            &token,
             &env.current_contract_address(),
             MuxedAddress::from(recipient),
             &payout,
-        );
+        )?;
 
         events::withdrawn(env, stream_id, stream, payout);
         Ok(())

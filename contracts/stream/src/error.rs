@@ -73,4 +73,25 @@ pub enum Error {
     /// rate, so it cannot extend the duration at all and would instead vest
     /// retroactively. Top up by at least `deposited / duration`.
     TopUpTooSmall = 23,
+
+    // --- Token sub-invocation ---
+    /// The token contract rejected the transfer (e.g. insufficient balance in
+    /// the pool on a payout, insufficient sender balance on a deposit, or the
+    /// token contract's own authorization rules refused the call).
+    ///
+    /// The token contract's internal error discriminant is **intentionally
+    /// discarded** here. Forwarding it would produce a value that clients
+    /// decode against Fluxora's own error table, yielding a silent
+    /// misinterpretation. The raw diagnostic is visible on chain in the failed
+    /// transaction's `diagnosticEvents`; this variant is what a stream client
+    /// should match on.
+    TokenTransferFailed = 24,
+
+    /// The address stored as the stream's token does not resolve to a deployed
+    /// contract. This indicates a misconfigured stream; no funds have moved.
+    ///
+    /// Surfaces when the token sub-invocation fails with an `Abort` (host
+    /// trap) rather than a typed contract error, which is what the host
+    /// produces when the callee contract does not exist.
+    TokenMissing = 25,
 }

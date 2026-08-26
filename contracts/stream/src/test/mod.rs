@@ -19,6 +19,7 @@ mod auth;
 mod cancel;
 mod cliff;
 mod pause;
+mod token_errors;
 mod top_up;
 mod transfer;
 
