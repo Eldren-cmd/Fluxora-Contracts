@@ -394,11 +394,7 @@ fn seconds_to_ledgers_rounds_up_just_below_one_ledger() {
 fn seconds_to_ledgers_exact_multiples() {
     for n in [2u64, 3, 10, 100, 1_000, 100_000] {
         let seconds = n * storage::SECONDS_PER_LEDGER;
-        assert_eq!(
-            storage::seconds_to_ledgers(seconds),
-            n as u32,
-            "n = {n}",
-        );
+        assert_eq!(storage::seconds_to_ledgers(seconds), n as u32, "n = {n}",);
     }
 }
 
