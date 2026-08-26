@@ -69,6 +69,12 @@ pub fn seconds_to_ledgers(seconds: u64) -> u32 {
 /// Targets the stream's remaining lifetime plus [`TTL_BUFFER_SECONDS`], floored
 /// at [`MIN_STREAM_TTL_LEDGERS`] and clamped to the network's `max_entry_ttl`.
 ///
+/// A future-dated stream is covered implicitly: `remaining` is measured from
+/// now to `end_time`, so the pre-start wait is part of the target. A schedule
+/// beyond one TTL window clamps here and is kept alive by the permissionless
+/// keeper path — creation deliberately does not reject it (see
+/// [`crate::FluxoraStream::create_stream`]).
+///
 /// The clamp is not optional: a multi-year stream will exceed the network
 /// maximum, so it *will* need periodic extension over its life no matter how
 /// generously we extend at creation. That is precisely what the permissionless
@@ -87,6 +93,8 @@ pub fn ttl_target_ledgers(env: &Env, stream: &Stream) -> u32 {
         });
 
     let remaining = effective_end.saturating_sub(now);
+    // `remaining` spans now → end_time, so for a future-dated stream the
+    // pre-start wait is included in the rent target.
     let target = seconds_to_ledgers(remaining.saturating_add(TTL_BUFFER_SECONDS));
     let floored = target.max(MIN_STREAM_TTL_LEDGERS);
 

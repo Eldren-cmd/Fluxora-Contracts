@@ -114,7 +114,22 @@ impl FluxoraStream {
     /// Tokens accrue linearly from `start_time` to `end_time`. `start_time` may
     /// be in the past — backdated vesting from a hire date or grant award date
     /// is a legitimate use — in which case the backdated portion is immediately
-    /// withdrawable.
+    /// withdrawable. It may equally be in the future — a scheduled stream — in
+    /// which case nothing vests until the start instant.
+    ///
+    /// There is deliberately **no bound on clock skew** in either direction.
+    /// The ledger timestamp is the only clock the contract can see, so a skew
+    /// limit would be an arbitrary business-policy number rather than a
+    /// protocol requirement; policy belongs in the SDK or a wrapping contract.
+    /// A past start vests immediately by the sender's own authorization, and a
+    /// schedule that has already fully elapsed simply reads as fully vested.
+    /// The accrual math is safe at any skew — every quantity clamps or is
+    /// checked — and TTL is where the real risk is bounded: a stream whose
+    /// schedule extends beyond the network's `max_entry_ttl` horizon is funded
+    /// for as long as the network allows at creation, and the permissionless
+    /// `extend_stream_ttl` keeper path covers the remainder, exactly as it
+    /// does for any multi-year stream. The regression tests in `test/create.rs`
+    /// pin these semantics.
     ///
     /// `cliff_time` **gates** the payout, it does not delay accrual. Pass
     /// `cliff_time == start_time` for no cliff. At the cliff instant the
