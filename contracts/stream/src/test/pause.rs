@@ -363,11 +363,7 @@ fn state_machine_pause_resume_cycle_checks_every_step() {
     assert_eq!(s.status, StreamStatus::Active);
     assert_eq!(s.paused_at, None);
     assert_eq!(s.paused_total, 10 * DAY);
-    assert_eq!(
-        h.client.vested_of(&id),
-        300 * ONE,
-        "no jump on resume"
-    );
+    assert_eq!(h.client.vested_of(&id), 300 * ONE, "no jump on resume");
 
     // Accrual resumes at the same rate.
     h.advance(20 * DAY);
@@ -485,7 +481,6 @@ fn state_machine_cancel_immediately_after_resume() {
 fn state_machine_pause_at_creation_instant() {
     let h = Harness::new();
     let id = h.create_simple(1_000 * ONE, 100 * DAY);
-    let sender_before = h.balance(&h.sender);
 
     h.client.pause(&id);
     let s = h.get(id);
@@ -693,7 +688,15 @@ fn state_machine_pause_rejects_all_invalid_targets() {
     {
         let h = Harness::new();
         let start = h.now();
-        let id = h.create(1_000 * ONE, start, start + 100 * DAY, start, true, false, true);
+        let id = h.create(
+            1_000 * ONE,
+            start,
+            start + 100 * DAY,
+            start,
+            true,
+            false,
+            true,
+        );
         h.advance(10 * DAY);
         assert_eq!(
             h.client.try_pause(&id).unwrap_err().unwrap(),
