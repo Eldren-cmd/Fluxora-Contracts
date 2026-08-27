@@ -19,6 +19,7 @@ mod auth;
 mod cancel;
 mod cliff;
 mod pause;
+mod storage_keys;
 mod top_up;
 mod transfer;
 
