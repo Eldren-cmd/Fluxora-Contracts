@@ -137,6 +137,123 @@ fn streams_with_nothing_available_are_skipped() {
 }
 
 #[test]
+fn a_mixed_batch_with_an_unauthorized_item_rolls_back_everything() {
+    let h = Harness::new();
+    let valid = h.create_simple(100 * ONE, 100 * DAY);
+    let theirs = h.client.create_stream(
+        &h.sender,
+        &h.other,
+        &h.token,
+        &(100 * ONE),
+        &h.now(),
+        &(h.now() + 100 * DAY),
+        &h.now(),
+        &true,
+        &true,
+        &true,
+    );
+    let second_valid = h.create_simple(100 * ONE, 100 * DAY);
+    h.advance(10 * DAY);
+
+    let err = h
+        .client
+        .try_batch_withdraw(&h.recipient, &h.ids(&[valid, theirs, second_valid]))
+        .unwrap_err()
+        .unwrap();
+
+    assert_eq!(err, Error::Unauthorized);
+    assert_eq!(h.balance(&h.recipient), 0, "whole batch rolled back");
+    assert_eq!(h.get(valid).withdrawn, 0);
+    assert_eq!(h.get(second_valid).withdrawn, 0);
+    h.assert_pool_exact();
+}
+
+/// Covers the "already fully withdrawn" case of the missing/unauthorized/
+/// over-withdrawn triad: a stream with nothing left to claim sitting in a
+/// batch alongside a healthy one. Proves both the amount and the event log —
+/// the drained stream contributes no new event from this call, so there is
+/// no hidden partial state for it.
+#[test]
+fn an_already_withdrawn_stream_is_skipped_without_failing_the_batch() {
+    let h = Harness::new();
+    let drained = h.create_simple(100 * ONE, 10 * DAY);
+    let pending = h.create_simple(100 * ONE, 100 * DAY);
+    h.advance(10 * DAY);
+    h.client.withdraw(&drained, &None);
+
+    let total = h
+        .client
+        .batch_withdraw(&h.recipient, &h.ids(&[drained, pending]));
+    let events = withdrawn_event_ids(&h); // ← capture right away, before any h.get() calls
+
+    assert_eq!(total, 10 * ONE, "only the still-withdrawable stream pays");
+    assert_eq!(
+        events,
+        std::vec![pending],
+        "the batch call emits exactly one new event, for the stream that \
+         actually paid — nothing for the already-drained one"
+    );
+    assert_eq!(
+        h.get(drained).withdrawn,
+        100 * ONE,
+        "already fully withdrawn"
+    );
+    assert_eq!(h.get(pending).withdrawn, 10 * ONE);
+    h.assert_pool_exact();
+}
+
+/// Covers the "over-withdrawn" case of the missing/unauthorized/over-withdrawn
+/// triad the reviewer asked for: a stream whose `withdrawn` has somehow moved
+/// past `deposited` (the only way this can arise is direct storage
+/// manipulation — see `accrual::withdrawable`'s doc comment) sitting in a
+/// batch alongside a healthy stream. Proves the corrupted stream is left
+/// completely untouched — no further payout, no event — while the healthy
+/// stream still pays in full, so there's no hidden partial state.
+///
+/// Note: this deliberately puts one stream into a state that violates I1
+/// (`withdrawn <= vested`), so `h.assert_pool_exact()` — which asserts I1
+/// across every stream — cannot be used here. The pool balance is checked
+/// directly instead, and the pool's liability accounting for the healthy
+/// stream is what actually matters for this regression.
+#[test]
+fn an_over_withdrawn_stream_is_skipped_without_hidden_partial_state() {
+    let h = Harness::new();
+    let over_withdrawn = h.create_simple(100 * ONE, 100 * DAY);
+    let valid = h.create_simple(100 * ONE, 100 * DAY);
+    h.advance(10 * DAY);
+
+    let pool_before = h.pool();
+
+    let mut corrupted = h.get(over_withdrawn);
+    corrupted.withdrawn = corrupted.deposited + ONE;
+    h.env.as_contract(&h.contract_id, || {
+        crate::storage::save_stream(&h.env, over_withdrawn, &corrupted);
+    });
+
+    let total = h
+        .client
+        .batch_withdraw(&h.recipient, &h.ids(&[over_withdrawn, valid]));
+    let events = withdrawn_event_ids(&h);
+
+    assert_eq!(total, 10 * ONE, "only the healthy stream pays");
+    assert_eq!(
+        events,
+        std::vec![valid],
+        "no withdrawn event for the over-withdrawn stream"
+    );
+    assert_eq!(
+        h.get(over_withdrawn).withdrawn,
+        corrupted.withdrawn,
+        "over-withdrawn stream is untouched, not paid again"
+    );
+    assert_eq!(h.get(valid).withdrawn, 10 * ONE);
+
+    // Pool moved by exactly what the healthy stream paid out — the
+    // corrupted stream's presence caused no extra token movement.
+    assert_eq!(h.pool(), pool_before - 10 * ONE);
+}
+
+#[test]
 fn a_batch_of_entirely_empty_streams_returns_zero() {
     let h = Harness::new();
     let a = h.create_simple(100 * ONE, 100 * DAY);
