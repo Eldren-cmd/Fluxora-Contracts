@@ -463,10 +463,8 @@ impl<'a> Harness<'a> {
         let streams = (0..count)
             .map(|id| {
                 let s: Stream = self.client.get_stream(&id);
-                let vest =
-                    accrual::vested(&s, now).expect("vested must not overflow in snapshot");
-                let draw =
-                    accrual::withdrawable(&s, now).expect("withdrawable must not overflow");
+                let vest = accrual::vested(&s, now).expect("vested must not overflow in snapshot");
+                let draw = accrual::withdrawable(&s, now).expect("withdrawable must not overflow");
                 StreamSnapshot {
                     id,
                     deposited: s.deposited,

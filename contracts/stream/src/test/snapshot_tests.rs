@@ -166,7 +166,10 @@ fn snapshot_captures_paused_stream_state() {
     let ss = &snap.streams[id as usize];
 
     assert_eq!(ss.status, StreamStatus::Paused);
-    assert!(ss.paused_at.is_some(), "paused_at must be populated while paused");
+    assert!(
+        ss.paused_at.is_some(),
+        "paused_at must be populated while paused"
+    );
     assert_eq!(ss.paused_at.unwrap(), T0 + 10 * DAY);
 }
 
@@ -183,8 +186,16 @@ fn snapshot_captures_cancelled_stream_state() {
 
     assert_eq!(ss.status, StreamStatus::Cancelled);
     // After cancel, deposited is rewritten to the amount vested at cancel.
-    assert_eq!(ss.deposited, 300 * ONE, "cancelled deposited = vested at cancel");
-    assert_eq!(ss.withdrawable, 300 * ONE, "full vested amount remains withdrawable");
+    assert_eq!(
+        ss.deposited,
+        300 * ONE,
+        "cancelled deposited = vested at cancel"
+    );
+    assert_eq!(
+        ss.withdrawable,
+        300 * ONE,
+        "full vested amount remains withdrawable"
+    );
 }
 
 #[test]
@@ -196,7 +207,11 @@ fn snapshot_pool_balance_matches_sum_of_liabilities() {
     h.advance(10 * DAY);
 
     let snap = h.snapshot();
-    let liability_sum: i128 = snap.streams.iter().map(|ss| ss.deposited - ss.withdrawn).sum();
+    let liability_sum: i128 = snap
+        .streams
+        .iter()
+        .map(|ss| ss.deposited - ss.withdrawn)
+        .sum();
     assert_eq!(
         snap.balance_pool, liability_sum,
         "pool balance must equal sum of (deposited - withdrawn)",
@@ -235,7 +250,10 @@ fn snapshot_before_and_after_withdraw_shows_movement() {
     let after = h.snapshot();
 
     let withdrawn = 400 * ONE;
-    assert_eq!(after.balance_recipient, before.balance_recipient + withdrawn);
+    assert_eq!(
+        after.balance_recipient,
+        before.balance_recipient + withdrawn
+    );
     assert_eq!(after.balance_pool, before.balance_pool - withdrawn);
     assert_eq!(after.streams[id as usize].withdrawn, withdrawn);
     assert_eq!(after.streams[id as usize].withdrawable, 0);
@@ -280,7 +298,10 @@ fn snapshot_unchanged_after_unauthorized_withdraw() {
     // is missing entirely; `try_*` surfaces this as `Err(Abort)`.  Either
     // outcome confirms the call was rejected.
     let rejected = h.client.try_withdraw(&id, &None).is_err();
-    assert!(rejected, "withdraw must be rejected without auth; pre-state:\n{before}");
+    assert!(
+        rejected,
+        "withdraw must be rejected without auth; pre-state:\n{before}"
+    );
 
     // Re-enable auths so we can query state.
     h.env.mock_all_auths();
@@ -303,7 +324,10 @@ fn snapshot_unchanged_after_unauthorized_cancel() {
 
     h.env.mock_auths(&[]);
     let rejected = h.client.try_cancel(&id).is_err();
-    assert!(rejected, "cancel must be rejected without auth; pre-state:\n{before}");
+    assert!(
+        rejected,
+        "cancel must be rejected without auth; pre-state:\n{before}"
+    );
 
     h.env.mock_all_auths();
     let after = h.snapshot();
@@ -340,7 +364,15 @@ fn snapshot_provides_context_on_premature_withdraw_before_cliff() {
     let h = Harness::new();
     let start = h.now();
     let cliff = start + 30 * DAY;
-    let id = h.create(1_000 * ONE, start, start + 100 * DAY, cliff, true, true, true);
+    let id = h.create(
+        1_000 * ONE,
+        start,
+        start + 100 * DAY,
+        cliff,
+        true,
+        true,
+        true,
+    );
 
     h.advance(15 * DAY); // still before cliff
 
@@ -385,8 +417,7 @@ fn snapshot_is_not_cached_across_time_advances() {
 
     assert_ne!(snap_before.ledger_timestamp, snap_after.ledger_timestamp);
     assert_ne!(
-        snap_before.streams[0].vested,
-        snap_after.streams[0].vested,
+        snap_before.streams[0].vested, snap_after.streams[0].vested,
         "vested must increase after time advance",
     );
 }

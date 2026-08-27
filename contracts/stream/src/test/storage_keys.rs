@@ -69,10 +69,7 @@ use crate::DataKey;
 /// This is the canonical encoding used for storage: the same bytes the host
 /// uses as the ledger-entry key.
 fn key_hex(env: &Env, key: DataKey) -> std::string::String {
-    key.to_xdr(env)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    key.to_xdr(env).iter().map(|b| format!("{b:02x}")).collect()
 }
 
 // ─── snapshot assertions ─────────────────────────────────────────────────────
@@ -184,7 +181,18 @@ fn next_stream_id_never_collides_with_any_stream_key() {
 fn distinct_stream_ids_produce_distinct_keys() {
     let env = Env::default();
 
-    let ids = [0u64, 1, 2, 255, 256, 65535, 65536, u64::MAX / 2, u64::MAX - 1, u64::MAX];
+    let ids = [
+        0u64,
+        1,
+        2,
+        255,
+        256,
+        65535,
+        65536,
+        u64::MAX / 2,
+        u64::MAX - 1,
+        u64::MAX,
+    ];
 
     for (i, &a) in ids.iter().enumerate() {
         for &b in &ids[i + 1..] {
