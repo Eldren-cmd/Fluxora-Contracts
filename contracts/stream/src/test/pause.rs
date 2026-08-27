@@ -399,7 +399,7 @@ fn state_machine_repeated_cycles_accumulate_paused_total_step_by_step() {
         h.advance(pause_len * DAY);
 
         h.client.resume(&id);
-        total_paused += pause_len;
+        total_paused += pause_len * DAY;
         let s = h.get(id);
         assert_eq!(s.status, StreamStatus::Active);
         assert_eq!(s.paused_total, total_paused);
