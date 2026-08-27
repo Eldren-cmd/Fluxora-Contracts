@@ -85,7 +85,7 @@ pub enum Error {
     /// misinterpretation. The raw diagnostic is visible on chain in the failed
     /// transaction's `diagnosticEvents`; this variant is what a stream client
     /// should match on.
-    TokenTransferFailed = 24,
+    TokenTransferFailed = 25,
 
     /// The address stored as the stream's token does not resolve to a deployed
     /// contract. This indicates a misconfigured stream; no funds have moved.
@@ -93,5 +93,11 @@ pub enum Error {
     /// Surfaces when the token sub-invocation fails with an `Abort` (host
     /// trap) rather than a typed contract error, which is what the host
     /// produces when the callee contract does not exist.
-    TokenMissing = 25,
+    TokenMissing = 26,
+
+    // --- Identifier exhaustion ---
+    /// The stream-id counter has reached `u64::MAX`; no further ids can be
+    /// handed out. Ids are monotonic and never reused, so the counter never
+    /// wraps — this error is terminal for new-stream creation.
+    StreamIdExhausted = 24,
 }

@@ -109,11 +109,11 @@ Discriminants are ABI and are never renumbered; new variants are appended.
 | 8 | `NotCancellable` | | 21 | `DuplicateStreamId` |
 | 9 | `NotPausable` | | 22 | `Overflow` |
 | 10 | `NotTransferable` | | 23 | `TopUpTooSmall` |
-| 11 | `StreamNotActive` | | 24 | `TokenTransferFailed` |
-| 12 | `StreamNotPaused` | | 25 | `TokenMissing` |
+| 11 | `StreamNotActive` | | 25 | `TokenTransferFailed` |
+| 12 | `StreamNotPaused` | | 26 | `TokenMissing` |
 | 13 | `StreamAlreadyPaused` | | | |
 
-`TokenTransferFailed` (24) and `TokenMissing` (25) are **stable stream-level categories** for token sub-invocation failures. The token contract's internal error discriminant is intentionally discarded — forwarding it would produce a value clients decode against Fluxora's error table, yielding a silent misinterpretation. The raw diagnostic is visible in the failed transaction's `diagnosticEvents`.
+`TokenTransferFailed` (25) and `TokenMissing` (26) are **stable stream-level categories** for token sub-invocation failures. The token contract's internal error discriminant is intentionally discarded — forwarding it would produce a value clients decode against Fluxora's error table, yielding a silent misinterpretation. The raw diagnostic is visible in the failed transaction's `diagnosticEvents`.
 
 * `TokenTransferFailed` — the token contract returned a typed contract error: insufficient sender balance, pool underfunded on a payout, or the token's own authorization rules refused the call.
 * `TokenMissing` — the token address resolves to nothing (Abort / host trap); the stream references a non-deployed contract.

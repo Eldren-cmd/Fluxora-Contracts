@@ -3,6 +3,29 @@
 use super::common::*;
 use crate::{Error, StreamStatus};
 
+/// A schedule that collapses to zero duration after an at-start cancel must
+/// stay readable and writable: reads return the settled (zero) amounts without
+/// dividing by zero, and withdraw reports `NothingToWithdraw` rather than
+/// trapping.
+#[test]
+fn zero_duration_collapsed_stream_is_safe_to_read_and_withdraw() {
+    let h = Harness::new();
+    let id = h.create_simple(1_000 * ONE, 100 * DAY);
+
+    // Cancel at the instant of creation collapses the schedule to zero length.
+    h.client.cancel(&id);
+
+    // Reads must not divide by zero.
+    assert_eq!(h.client.vested_of(&id), 0);
+    assert_eq!(h.client.withdrawable_of(&id), 0);
+    assert_eq!(h.client.refundable_of(&id), 0);
+
+    // Write path is a typed error, not a panic.
+    let err = h.client.try_withdraw(&id, &None).unwrap_err().unwrap();
+    assert_eq!(err, Error::NothingToWithdraw);
+    h.assert_pool_exact();
+}
+
 #[test]
 fn nothing_is_withdrawable_before_the_stream_starts() {
     let h = Harness::new();

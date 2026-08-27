@@ -169,6 +169,15 @@ impl FluxoraStream {
     /// * [`Error::SelfStream`] — sender and recipient are the same address.
     /// * [`Error::InvalidDeposit`] — deposit is not positive.
     /// * [`Error::InvalidTimeRange`] — `end_time <= start_time`.
+    ///
+    ///   **Zero-duration design decision:** a stream with `end_time == start_time`
+    ///   (or earlier) is **rejected**, never treated as "already vested". A zero
+    ///   length would make every accrual formula divide by zero, and there is no
+    ///   meaningful schedule for a single-instant stream to vest against. The
+    ///   one legitimate zero-length state — a *cancel* that collapses a live
+    ///   schedule onto its start instant — is produced by [`FluxoraStream::cancel`]
+    ///   and handled specially in [`vested`], which returns the settled deposit
+    ///   in full rather than dividing.
     /// * [`Error::InvalidCliff`] — cliff outside `[start_time, end_time]`.
     /// * [`Error::DepositRateTooLow`] — `deposit < duration`, so the per-second
     ///   rate would truncate to zero and the recipient would accrue nothing.
@@ -427,9 +436,17 @@ impl FluxoraStream {
     /// whole batch. Streams with nothing currently withdrawable are skipped
     /// rather than failing the batch. Returns the total transferred across all
     /// streams; per-stream amounts are available from the individual `withdrawn`
-    /// events.
+    /// events, which are emitted in batch order.
     ///
     /// Streams need not share a token — each payout uses its own stream's token.
+    ///
+    /// **Atomicity: the batch is all-or-nothing.** Any error — an unknown id, a
+    /// stream belonging to a different recipient, or a duplicate id — reverts
+    /// the *entire* call, including payouts already applied to earlier streams
+    /// in the batch. No accounting is written, no tokens move, and no event is
+    /// observable. A failed batch leaves the caller free to retry with a
+    /// corrected id list; the duplicates are rejected deterministically
+    /// ([`Error::DuplicateStreamId`]) no matter where in the batch they sit.
     ///
     /// # Errors
     ///
@@ -605,14 +622,18 @@ impl FluxoraStream {
         Ok(())
     }
 
-    /// Reassign a stream's future payouts to a new recipient. Recipient auth.
+    /// Reassign a stream's entire remaining claim to a new recipient.
+    /// Recipient auth.
     ///
     /// Available only if the stream was created with `transferable == true`.
     /// A compliance-bound sender — payroll, a KYC'd grant program — can pin the
     /// payee at creation by passing `false`.
     ///
-    /// Any balance the old recipient had already accrued but not withdrawn moves
-    /// with the stream. Recipients should withdraw before transferring.
+    /// Transfer changes only `recipient`: the schedule, vested amount, amount
+    /// already withdrawn and outstanding liability are unchanged. Funds already
+    /// withdrawn stay with the old recipient; every accrued but unwithdrawn
+    /// stroop and all future accrual move with the stream. After transfer only
+    /// the new recipient may withdraw the remaining claim.
     pub fn transfer_recipient(
         env: Env,
         stream_id: u64,
@@ -721,9 +742,13 @@ impl FluxoraStream {
     /// Extend several streams' TTLs in one transaction. Permissionless.
     ///
     /// Same [`MAX_BATCH_SIZE`] cap as [`batch_withdraw`](Self::batch_withdraw).
-    /// Unknown ids are skipped rather than failing the sweep, so a keeper
-    /// working from a slightly stale index does not lose the whole batch to one
-    /// bad id. Returns how many entries were actually extended.
+    ///
+    /// **The sweep is per-item, not atomic.** Unknown ids are skipped rather
+    /// than failing the batch, so a keeper working from a slightly stale index
+    /// does not lose the whole sweep to one bad id. A duplicate id is simply
+    /// extended again — the operation is idempotent and harmless — and each
+    /// occurrence counts toward the return value, so the outcome for a given
+    /// input is deterministic. Returns how many entries were actually extended.
     pub fn batch_extend_ttl(env: Env, stream_ids: Vec<u64>) -> Result<u32, Error> {
         let count = stream_ids.len();
         if count == 0 {

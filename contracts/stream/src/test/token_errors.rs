@@ -1,7 +1,7 @@
 //! Stage 2 — token sub-invocation error categories.
 //!
-//! Regression suite for [`Error::TokenTransferFailed`] (24) and
-//! [`Error::TokenMissing`] (25).
+//! Regression suite for [`Error::TokenTransferFailed`] (25) and
+//! [`Error::TokenMissing`] (26).
 //!
 //! ## Design rationale
 //!
@@ -13,9 +13,9 @@
 //! Instead, every token failure is mapped onto one of two stable stream-level
 //! categories:
 //!
-//! * `TokenTransferFailed` (24) — token returned a typed contract error
+//! * `TokenTransferFailed` (25) — token returned a typed contract error
 //!   (insufficient balance, pool underfunded, etc.).
-//! * `TokenMissing` (25) — host raised an `Abort` (non-contract trap).
+//! * `TokenMissing` (26) — host raised an `Abort` (non-contract trap).
 //!   On a real network this fires when the token address has no deployed code.
 //!   In the test host all sub-invocation failures are contract-typed, so this
 //!   variant is verified through its discriminant value only.
@@ -43,12 +43,12 @@
 //! | `cancel` | pool drained | `TokenTransferFailed` | stream status unchanged (Active) |
 //! | `withdraw` | pool drained | `TokenTransferFailed` | withdrawn unchanged, recipient 0 |
 //! | `batch_withdraw` | pool drained | `TokenTransferFailed` | recipient 0 |
-//! | discriminants | ABI table values | 24 and 25 confirmed | — |
+//! | discriminants | ABI table values | 25 and 26 confirmed | — |
 //!
 //! *The test host does not distinguish a panicking sub-contract from a
 //!  contract-error sub-contract — both surface as `TokenTransferFailed`.
 //!  `TokenMissing` is only reachable via WASM execution on a real network.
-//!  The variant's discriminant (25) is verified by `token_error_discriminants_match_the_abi_table`.
+//!  The variant's discriminant (26) is verified by `token_error_discriminants_match_the_abi_table`.
 
 use soroban_sdk::testutils::{Address as _, IssuerFlags};
 use soroban_sdk::token::{StellarAssetClient, TokenClient};
@@ -281,11 +281,7 @@ fn top_up_returns_token_transfer_failed_when_sender_has_no_balance() {
     }
     assert_eq!(tc.balance(&h.sender), 0);
 
-    let err = h
-        .client
-        .try_top_up(&id, &(200 * ONE))
-        .unwrap_err()
-        .unwrap();
+    let err = h.client.try_top_up(&id, &(200 * ONE)).unwrap_err().unwrap();
 
     assert_eq!(err, Error::TokenTransferFailed);
 
@@ -483,6 +479,6 @@ fn withdraw_is_retryable_once_pool_is_replenished() {
 /// Confirm the frozen ABI discriminants for both token error variants.
 #[test]
 fn token_error_discriminants_match_the_abi_table() {
-    assert_eq!(Error::TokenTransferFailed as u32, 24);
-    assert_eq!(Error::TokenMissing as u32, 25);
+    assert_eq!(Error::TokenTransferFailed as u32, 25);
+    assert_eq!(Error::TokenMissing as u32, 26);
 }
