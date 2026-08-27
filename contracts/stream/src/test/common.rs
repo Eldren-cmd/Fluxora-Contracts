@@ -2,11 +2,12 @@
 
 #![allow(dead_code)]
 
+use soroban_sdk::testutils::storage::Persistent as _;
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
 use soroban_sdk::{Address, Env, Vec};
 
-use crate::{accrual, storage, FluxoraStream, FluxoraStreamClient, Stream, StreamStatus};
+use crate::{accrual, storage, DataKey, FluxoraStream, FluxoraStreamClient, Stream, StreamStatus};
 
 // ---------------------------------------------------------------------------
 // TestSnapshot — deterministic, credential-free state capture
@@ -224,6 +225,28 @@ impl<'a> Harness<'a> {
 
     pub fn now(&self) -> u64 {
         self.env.ledger().timestamp()
+    }
+
+    /// Remaining TTL, in ledgers, of a stream entry.
+    pub fn ttl_of(&self, stream_id: u64) -> u32 {
+        self.env.as_contract(&self.contract_id, || {
+            self.env
+                .storage()
+                .persistent()
+                .get_ttl(&DataKey::Stream(stream_id))
+        })
+    }
+
+    /// The largest TTL any entry can actually hold right now.
+    ///
+    /// This is deliberately read from the SDK rather than from
+    /// `LedgerInfo::max_entry_ttl`: the achievable maximum is
+    /// `max_live_until_ledger - sequence`, which is not always the raw
+    /// configured value. Asserting against the config number bakes in an
+    /// off-by-one.
+    pub fn max_achievable_ttl(&self) -> u32 {
+        self.env
+            .as_contract(&self.contract_id, || self.env.storage().max_ttl())
     }
 
     pub fn balance(&self, who: &Address) -> i128 {
