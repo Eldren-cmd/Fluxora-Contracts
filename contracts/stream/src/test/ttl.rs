@@ -24,6 +24,7 @@
 //! which is far below anything this contract ever sets. [`was_restored`] uses
 //! that as a detector for "this entry archived".
 
+use proptest::prelude::*;
 use soroban_sdk::testutils::storage::Persistent as _;
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::Address;
@@ -556,4 +557,81 @@ fn seconds_to_ledgers_rounds_up() {
     assert_eq!(storage::seconds_to_ledgers(DAY), 17_280);
     // Saturates rather than wrapping.
     assert_eq!(storage::seconds_to_ledgers(u64::MAX), u32::MAX);
+}
+
+/// A duration one second shy of a full ledger must still buy the whole
+/// ledger, not zero — the same "any partial ledger counts" rule as `1`, just
+/// approached from the other side of the boundary.
+#[test]
+fn seconds_to_ledgers_rounds_up_just_below_one_ledger() {
+    assert_eq!(
+        storage::seconds_to_ledgers(storage::SECONDS_PER_LEDGER - 1),
+        1,
+    );
+}
+
+/// Exact multiples of the ledger length must convert without residue, at
+/// several scales — not just the single-ledger and one-day cases above.
+#[test]
+fn seconds_to_ledgers_exact_multiples() {
+    for n in [2u64, 3, 10, 100, 1_000, 100_000] {
+        let seconds = n * storage::SECONDS_PER_LEDGER;
+        assert_eq!(storage::seconds_to_ledgers(seconds), n as u32, "n = {n}",);
+    }
+}
+
+/// The largest input that converts without hitting the `u32::MAX` saturation
+/// clamp, and the smallest one that does. Saturation is intentional (see the
+/// doc comment on `seconds_to_ledgers`), but the clamp must engage exactly one
+/// second past the true boundary — not early, and not late.
+#[test]
+fn seconds_to_ledgers_saturation_boundary_is_exact() {
+    let last_exact = u32::MAX as u64 * storage::SECONDS_PER_LEDGER;
+    assert_eq!(
+        storage::seconds_to_ledgers(last_exact),
+        u32::MAX,
+        "the true boundary value must convert exactly, not saturate early"
+    );
+    assert_eq!(
+        storage::seconds_to_ledgers(last_exact + 1),
+        u32::MAX,
+        "one second past the boundary must saturate, not overflow"
+    );
+}
+
+// --- Property coverage of the rounding guarantee ---------------------------
+
+proptest! {
+    #![proptest_config(ProptestConfig::default())]
+
+    /// **The property ceiling rounding exists to guarantee.**
+    ///
+    /// Converting seconds to ledgers and back can never promise *less*
+    /// wall-clock time than was asked for — that is the entire reason the
+    /// design chose ceiling over floor (see the doc comment on
+    /// `seconds_to_ledgers`). Bounded to the pre-saturation domain: past
+    /// `u32::MAX` ledgers the function's contract deliberately switches to
+    /// saturation, which is covered separately by
+    /// `seconds_to_ledgers_saturation_boundary_is_exact` and the `u64::MAX`
+    /// case in `seconds_to_ledgers_rounds_up`.
+    #[test]
+    fn seconds_to_ledgers_round_trip_never_undershoots(
+        seconds in 0u64..=(u32::MAX as u64 * storage::SECONDS_PER_LEDGER)
+    ) {
+        let ledgers = storage::seconds_to_ledgers(seconds);
+        let recovered = ledgers as u64 * storage::SECONDS_PER_LEDGER;
+
+        prop_assert!(
+            recovered >= seconds,
+            "round trip undershot: {} seconds -> {} ledgers -> {} seconds",
+            seconds, ledgers, recovered,
+        );
+        // Ceiling, not some looser bound: never overshoots by more than one
+        // ledger's worth either.
+        prop_assert!(
+            recovered - seconds < storage::SECONDS_PER_LEDGER,
+            "overshot by more than one ledger's worth: {} -> {}",
+            seconds, recovered,
+        );
+    }
 }
