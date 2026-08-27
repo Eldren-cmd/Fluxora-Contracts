@@ -120,6 +120,12 @@ fn repeated_pause_cycles_accumulate_correctly() {
         h.advance(5 * DAY);
         h.client.resume(&id);
         expected_paused += 5 * DAY;
+
+        assert_eq!(
+            h.client.withdrawable_of(&id),
+            h.client.vested_of(&id),
+            "withdrawable balance must track vested balance after each resume"
+        );
     }
 
     assert_eq!(h.get(id).paused_total, expected_paused);
