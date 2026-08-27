@@ -207,6 +207,11 @@ A `transferable: bool` flag alongside `cancellable` and `pausable`. A
 compliance-bound sender — payroll, a KYC'd grant program — can pin the payee at
 creation. Without it those senders simply could not use Fluxora.
 
+Transfer moves the stream's entire remaining claim. Funds already withdrawn
+stay with the old recipient; accrued but unwithdrawn funds and all future
+accrual belong to the new recipient. The transfer itself changes no schedule or
+accounting value, and only the new recipient may withdraw afterward.
+
 ---
 
 ## TTL, rent and archival

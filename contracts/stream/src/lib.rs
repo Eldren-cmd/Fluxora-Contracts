@@ -568,14 +568,18 @@ impl FluxoraStream {
         Ok(())
     }
 
-    /// Reassign a stream's future payouts to a new recipient. Recipient auth.
+    /// Reassign a stream's entire remaining claim to a new recipient.
+    /// Recipient auth.
     ///
     /// Available only if the stream was created with `transferable == true`.
     /// A compliance-bound sender — payroll, a KYC'd grant program — can pin the
     /// payee at creation by passing `false`.
     ///
-    /// Any balance the old recipient had already accrued but not withdrawn moves
-    /// with the stream. Recipients should withdraw before transferring.
+    /// Transfer changes only `recipient`: the schedule, vested amount, amount
+    /// already withdrawn and outstanding liability are unchanged. Funds already
+    /// withdrawn stay with the old recipient; every accrued but unwithdrawn
+    /// stroop and all future accrual move with the stream. After transfer only
+    /// the new recipient may withdraw the remaining claim.
     pub fn transfer_recipient(
         env: Env,
         stream_id: u64,
