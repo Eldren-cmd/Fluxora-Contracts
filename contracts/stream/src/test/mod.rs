@@ -23,6 +23,7 @@ mod top_up;
 mod transfer;
 
 // Stage 3
+mod accrual_overflow;
 mod batch;
 mod invariants;
 mod monotonicity;
