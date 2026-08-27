@@ -147,6 +147,55 @@ fn rejects_non_positive_duration() {
     }
 }
 
+/// The zero-duration boundary (`end_time == start_time`) is **rejected**, not
+/// treated as "already fully vested". A zero-length schedule would divide by
+/// zero in the vesting math, so creation must fail with a typed error and
+/// leave no partial state behind — no stream entry, no consumed id, and no
+/// deposit pulled from the sender.
+#[test]
+fn zero_duration_creation_is_rejected_without_partial_state() {
+    let h = Harness::new();
+    let start = h.now();
+    let sender_before = h.balance(&h.sender);
+
+    let err = h
+        .client
+        .try_create_stream(
+            &h.sender,
+            &h.recipient,
+            &h.token,
+            &(100 * ONE),
+            &start,
+            &start, // zero duration: end_time == start_time
+            &start,
+            &true,
+            &true,
+            &true,
+        )
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, Error::InvalidTimeRange);
+
+    // No partial stream state was created and no funds moved.
+    assert_eq!(h.client.stream_count(), 0);
+    assert_eq!(h.balance(&h.sender), sender_before);
+    assert_eq!(h.pool(), 0);
+    assert!(!h.client.stream_exists(&0));
+}
+
+/// The minimum legal duration is one second (`end_time == start_time + 1`);
+/// anything less is rejected by [`zero_duration_creation_is_rejected_without_partial_state`].
+#[test]
+fn one_second_is_the_minimum_legal_duration() {
+    let h = Harness::new();
+    let start = h.now();
+
+    let id = h.create(1, start, start + 1, start, true, true, true);
+    assert_eq!(id, 0);
+    assert_eq!(h.client.stream_count(), 1);
+    h.assert_pool_exact();
+}
+
 #[test]
 fn rejects_cliff_outside_the_schedule() {
     let h = Harness::new();

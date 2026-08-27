@@ -127,6 +127,15 @@ impl FluxoraStream {
     /// * [`Error::SelfStream`] — sender and recipient are the same address.
     /// * [`Error::InvalidDeposit`] — deposit is not positive.
     /// * [`Error::InvalidTimeRange`] — `end_time <= start_time`.
+    ///
+    ///   **Zero-duration design decision:** a stream with `end_time == start_time`
+    ///   (or earlier) is **rejected**, never treated as "already vested". A zero
+    ///   length would make every accrual formula divide by zero, and there is no
+    ///   meaningful schedule for a single-instant stream to vest against. The
+    ///   one legitimate zero-length state — a *cancel* that collapses a live
+    ///   schedule onto its start instant — is produced by [`FluxoraStream::cancel`]
+    ///   and handled specially in [`vested`], which returns the settled deposit
+    ///   in full rather than dividing.
     /// * [`Error::InvalidCliff`] — cliff outside `[start_time, end_time]`.
     /// * [`Error::DepositRateTooLow`] — `deposit < duration`, so the per-second
     ///   rate would truncate to zero and the recipient would accrue nothing.
