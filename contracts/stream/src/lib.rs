@@ -384,9 +384,17 @@ impl FluxoraStream {
     /// whole batch. Streams with nothing currently withdrawable are skipped
     /// rather than failing the batch. Returns the total transferred across all
     /// streams; per-stream amounts are available from the individual `withdrawn`
-    /// events.
+    /// events, which are emitted in batch order.
     ///
     /// Streams need not share a token — each payout uses its own stream's token.
+    ///
+    /// **Atomicity: the batch is all-or-nothing.** Any error — an unknown id, a
+    /// stream belonging to a different recipient, or a duplicate id — reverts
+    /// the *entire* call, including payouts already applied to earlier streams
+    /// in the batch. No accounting is written, no tokens move, and no event is
+    /// observable. A failed batch leaves the caller free to retry with a
+    /// corrected id list; the duplicates are rejected deterministically
+    /// ([`Error::DuplicateStreamId`]) no matter where in the batch they sit.
     ///
     /// # Errors
     ///
@@ -676,9 +684,13 @@ impl FluxoraStream {
     /// Extend several streams' TTLs in one transaction. Permissionless.
     ///
     /// Same [`MAX_BATCH_SIZE`] cap as [`batch_withdraw`](Self::batch_withdraw).
-    /// Unknown ids are skipped rather than failing the sweep, so a keeper
-    /// working from a slightly stale index does not lose the whole batch to one
-    /// bad id. Returns how many entries were actually extended.
+    ///
+    /// **The sweep is per-item, not atomic.** Unknown ids are skipped rather
+    /// than failing the batch, so a keeper working from a slightly stale index
+    /// does not lose the whole sweep to one bad id. A duplicate id is simply
+    /// extended again — the operation is idempotent and harmless — and each
+    /// occurrence counts toward the return value, so the outcome for a given
+    /// input is deterministic. Returns how many entries were actually extended.
     pub fn batch_extend_ttl(env: Env, stream_ids: Vec<u64>) -> Result<u32, Error> {
         let count = stream_ids.len();
         if count == 0 {
