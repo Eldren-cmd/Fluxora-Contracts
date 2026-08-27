@@ -689,23 +689,32 @@ impl FluxoraStream {
     /// through simulation by the SDK and UI, where a write to the footprint is
     /// at best noise and at worst confusing. Keeping a stream alive is the
     /// explicit job of [`extend_stream_ttl`](Self::extend_stream_ttl).
+    ///
+    /// Returns [`Error::StreamNotFound`] when the id is missing or deleted.
     pub fn get_stream(env: Env, stream_id: u64) -> Result<Stream, Error> {
         storage::peek_stream(&env, stream_id)
     }
 
     /// Amount the recipient could withdraw right now.
+    ///
+    /// Returns [`Error::StreamNotFound`] when the id is missing or deleted;
+    /// zero means the stream exists but has no currently withdrawable funds.
     pub fn withdrawable_of(env: Env, stream_id: u64) -> Result<i128, Error> {
         let stream = storage::peek_stream(&env, stream_id)?;
         accrual::withdrawable(&stream, env.ledger().timestamp())
     }
 
     /// Total earned by the recipient since `start_time`, withdrawn or not.
+    ///
+    /// Returns [`Error::StreamNotFound`] when the id is missing or deleted.
     pub fn vested_of(env: Env, stream_id: u64) -> Result<i128, Error> {
         let stream = storage::peek_stream(&env, stream_id)?;
         accrual::vested(&stream, env.ledger().timestamp())
     }
 
     /// Amount that would be refunded to the sender if they cancelled right now.
+    ///
+    /// Returns [`Error::StreamNotFound`] when the id is missing or deleted.
     pub fn refundable_of(env: Env, stream_id: u64) -> Result<i128, Error> {
         let stream = storage::peek_stream(&env, stream_id)?;
         accrual::refundable(&stream, env.ledger().timestamp())
