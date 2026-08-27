@@ -187,8 +187,9 @@ fn draining_a_stream_marks_it_depleted() {
     assert_eq!(h.get(id).withdrawn, 1_000 * ONE);
 }
 
-/// A depleted stream must return a typed error, never panic and never pay
-/// twice.
+/// A depleted stream must return `StreamTerminated`, never panic and never
+/// pay twice. Distinct from `NothingToWithdraw` so a client does not confuse
+/// "not accrued yet" with "this stream is over".
 #[test]
 fn withdrawing_from_a_depleted_stream_is_a_typed_error() {
     let h = Harness::new();
@@ -197,13 +198,22 @@ fn withdrawing_from_a_depleted_stream_is_a_typed_error() {
     h.client.withdraw(&id, &None);
 
     let err = h.client.try_withdraw(&id, &None).unwrap_err().unwrap();
-    assert_eq!(err, Error::NothingToWithdraw);
+    assert_eq!(err, Error::StreamTerminated);
     assert_eq!(h.balance(&h.recipient), 1_000 * ONE);
 
     h.advance(10 * YEAR);
     let err = h.client.try_withdraw(&id, &None).unwrap_err().unwrap();
-    assert_eq!(err, Error::NothingToWithdraw);
+    assert_eq!(err, Error::StreamTerminated);
     h.assert_pool_exact();
+}
+
+/// Missing stream on a fund-moving path must be a decodable contract error,
+/// not a host trap from an unwrap on storage.
+#[test]
+fn withdrawing_unknown_stream_is_stream_not_found() {
+    let h = Harness::new();
+    let err = h.client.try_withdraw(&999, &None).unwrap_err().unwrap();
+    assert_eq!(err, Error::StreamNotFound);
 }
 
 /// A one-second stream is the tightest possible schedule and must still behave.

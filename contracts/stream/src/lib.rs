@@ -413,9 +413,14 @@ impl FluxoraStream {
     ///
     /// # Errors
     ///
-    /// * [`Error::NothingToWithdraw`] — withdrawable balance is zero. A typed
-    ///   error rather than a silent no-op, so a caller can tell the difference
-    ///   between "nothing yet" and "transferred zero".
+    /// * [`Error::StreamNotFound`] — no stream with this id.
+    /// * [`Error::StreamTerminated`] — stream is `Cancelled` or `Depleted` and
+    ///   has nothing left to pay. Distinct from [`Error::NothingToWithdraw`] so
+    ///   a client can tell "wait for accrual" apart from "this stream is over"
+    ///   without a second round-trip.
+    /// * [`Error::NothingToWithdraw`] — stream is still live but the
+    ///   withdrawable balance is zero (pre-start, pre-cliff, or fully drawn
+    ///   for now). A typed error rather than a silent no-op.
     /// * [`Error::InsufficientWithdrawable`] — explicit amount exceeds the
     ///   withdrawable balance.
     pub fn withdraw(env: Env, stream_id: u64, amount: Option<i128>) -> Result<i128, Error> {
@@ -425,6 +430,12 @@ impl FluxoraStream {
         let now = env.ledger().timestamp();
         let available = accrual::withdrawable(&stream, now)?;
         if available == 0 {
+            // Terminal with nothing left is a different precondition from a
+            // live stream that simply has not accrued (or is fully drawn for
+            // now). Integrators must be able to branch without guessing.
+            if stream.status.is_terminal() {
+                return Err(Error::StreamTerminated);
+            }
             return Err(Error::NothingToWithdraw);
         }
 
@@ -488,6 +499,11 @@ impl FluxoraStream {
         // Quadratic, but bounded by MAX_BATCH_SIZE and it avoids allocating a
         // set. A duplicate id would load the stream twice and apply the second
         // withdrawal to a stale copy, silently over-paying.
+        //
+        // Invariant: `i` and `j` are always in `0..count`, and `count` is
+        // `stream_ids.len()`, so `get_unchecked` cannot be out of range. A
+        // bounds-checked `get` would only ever return `None` if the Vec were
+        // mutated mid-loop, which it is not.
         for i in 0..count {
             for j in (i + 1)..count {
                 if stream_ids.get_unchecked(i) == stream_ids.get_unchecked(j) {
@@ -534,6 +550,12 @@ impl FluxoraStream {
     ///
     /// Cancelling before the cliff refunds everything: pre-cliff the recipient's
     /// entitlement is zero by definition.
+    ///
+    /// # Errors
+    ///
+    /// * [`Error::StreamNotFound`] — no stream with this id.
+    /// * [`Error::NotCancellable`] — created with `cancellable == false`.
+    /// * [`Error::StreamTerminated`] — already cancelled or depleted.
     pub fn cancel(env: Env, stream_id: u64) -> Result<(), Error> {
         let mut stream = storage::load_stream(&env, stream_id)?;
         stream.sender.require_auth();
