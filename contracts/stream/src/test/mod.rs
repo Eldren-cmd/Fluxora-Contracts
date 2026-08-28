@@ -37,6 +37,7 @@ mod accrual_overflow;
 mod batch;
 mod invariants;
 mod monotonicity;
+mod release_profile;
 mod resource_limits;
 mod ttl;
 
