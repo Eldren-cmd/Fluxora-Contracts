@@ -34,7 +34,7 @@ pub struct DelegateGrant {
 /// Lifecycle state of a stream.
 ///
 /// `Cancelled` and `Depleted` are both terminal and both imply
-/// `withdrawable == 0` will eventually hold, but they are kept distinct so the
+/// `withdrawable == ` will eventually hold, but they are kept distinct so the
 /// indexer can tell "ran to completion" apart from "sender clawed back the
 /// unvested remainder". `Cancelled` is sticky: a cancelled stream that is
 /// subsequently drained to zero stays `Cancelled` rather than becoming
@@ -97,10 +97,17 @@ pub struct Stream {
 
 /// Storage keys.
 ///
-/// `NextStreamId` lives in instance storage (tiny, shares the contract's TTL).
-/// `Stream(id)` entries live in persistent storage with independent TTLs.
+/// `NextStreamId` and `StreamCount` live in instance storage (tiny, share the
+/// contract's TTL). `Stream(id)` entries live in persistent storage with
+/// independent TTLs.
 /// `Delegate(stream_id, delegate)` entries live in persistent storage, scoped
 /// to the stream they were issued for.
+///
+/// Both counters are updated **only** after all validation and token transfers
+/// have succeeded. Any failure in `create_stream` MUST panic so that all
+/// storage changes are rolled back atomically. This guarantees that a failed
+/// creation does not consume an ID, increment the stream count, or leave a
+/// partial record.
 ///
 /// There is no `Config` key: with no admin, no fees and no upgradeability
 /// (all explicit non-goals), the contract has nothing to configure.
@@ -108,7 +115,12 @@ pub struct Stream {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     /// Instance storage. Monotonic counter, next id to hand out.
+    /// Incremented only on successful stream creation.
     NextStreamId,
+    /// Instance storage. Number of streams successfully created.
+    /// Incremented only in the same transaction as `NextStreamId` and the
+    /// corresponding `Stream(id)` entry.
+    StreamCount,
     /// Persistent storage. One entry per stream.
     Stream(u64),
     /// Persistent storage. One entry per (stream_id, delegate) pair.
