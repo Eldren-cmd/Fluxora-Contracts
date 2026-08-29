@@ -36,6 +36,7 @@ mod transfer;
 mod accrual_overflow;
 mod batch;
 mod invariants;
+mod lifecycle_proptest;
 mod monotonicity;
 mod resource_limits;
 mod ttl;
