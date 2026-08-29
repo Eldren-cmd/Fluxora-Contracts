@@ -985,7 +985,6 @@ impl FluxoraStream {
         }
 
         let token = stream.token.clone();
-        let sender = stream.sender.clone();
         stream.deposited = new_deposited;
         stream.end_time = new_end;
         storage::save_stream(&env, stream_id, &stream);
@@ -996,7 +995,7 @@ impl FluxoraStream {
         token_transfer(
             &env,
             &token,
-            &sender,
+            &delegate,
             MuxedAddress::from(env.current_contract_address()),
             &amount,
         )?;

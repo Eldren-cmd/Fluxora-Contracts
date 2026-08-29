@@ -8,6 +8,7 @@
 //!   the batch cap.
 
 mod common;
+mod events;
 mod missing;
 
 // ABI inventory — generated from the contract spec, independent of stage.
