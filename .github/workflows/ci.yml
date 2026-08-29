@@ -139,15 +139,12 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      # continue-on-error: --all-features currently pulls in two incompatible
-      # major versions of rand_core (0.6 via ed25519-dalek, 0.9 via a
-      # soroban-sdk testutils dependency) whose CryptoRng traits don't unify
-      # under -D warnings. cargo build/test (without --all-features) are
-      # unaffected and stay a hard gate below. Needs an upstream version
-      # bump or a narrower feature set in a follow-up.
-      - name: Run Clippy
-        run: cargo clippy --all-targets -- -D warnings
-        continue-on-error: true
+      # Lints are hard failures. A warning that CI tolerates is a warning
+      # nobody ever fixes.
+      - name: Clippy (entire workspace and test targets)
+        # Keep the scope explicit: every workspace member and test target is
+        # linted, so a new modular contract cannot bypass the quality gate.
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   build:
     name: Build
