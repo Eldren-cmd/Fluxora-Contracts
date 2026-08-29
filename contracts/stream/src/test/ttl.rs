@@ -445,6 +445,69 @@ fn a_depleted_stream_settles_to_the_floor() {
     );
 }
 
+// --- Permissionless policy regression (issue #1563) ------------------------
+
+/// `extend_stream_ttl` must only touch the entry's TTL. The stream record
+/// — deposit, withdrawn, schedule, status — must be byte-identical before
+/// and after.
+#[test]
+fn extend_stream_ttl_does_not_mutate_stream_state() {
+    let h = Harness::new();
+    let id = h.create_simple(1_000 * ONE, 100 * DAY);
+    h.advance(30 * DAY);
+    h.client.withdraw(&id, &Some(100 * ONE));
+
+    let before = h.get(id);
+    let pool_before = h.pool();
+    let snap = h.snapshot();
+
+    age_ledgers(&h, ttl_of(&h, id) - 1_000);
+    h.client.extend_stream_ttl(&id);
+
+    let after = h.get(id);
+    assert_eq!(after, before, "stream state must not change\n{snap}");
+    assert_eq!(h.pool(), pool_before, "pool must not change");
+    h.assert_pool_exact();
+}
+
+/// A failed `extend_stream_ttl` (non-existent id) must not mutate the
+/// counter, any live stream, any live TTL, or the pool.
+#[test]
+fn extend_stream_ttl_failure_does_not_mutate_storage() {
+    let h = Harness::new();
+    let id = h.create_simple(1_000 * ONE, 100 * DAY);
+    let before = h.get(id);
+    let rent = ttl_of(&h, id);
+    let pool = h.pool();
+
+    let err = h
+        .client
+        .try_extend_stream_ttl(&999_u64)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, Error::StreamNotFound);
+
+    assert_eq!(h.client.stream_count(), 1, "counter must not move");
+    assert_eq!(h.get(id), before, "live stream must not change");
+    assert_eq!(ttl_of(&h, id), rent, "live TTL must not change");
+    assert_eq!(h.pool(), pool, "pool must not change");
+}
+
+/// An entry one ledger from archival recovers its full rent window on extension.
+#[test]
+fn extend_stream_ttl_near_expiry_recovers_full_window() {
+    let h = Harness::new();
+    h.env.ledger().set_max_entry_ttl(50_000);
+    let id = h.create_simple(1_000 * ONE, YEAR);
+
+    // Decay to the edge.
+    age_ledgers(&h, 49_999);
+    assert_eq!(ttl_of(&h, id), 1, "must be at the archival boundary");
+
+    h.client.extend_stream_ttl(&id);
+    assert_eq!(ttl_of(&h, id), 50_000, "must recover the full window");
+}
+
 // --- Missing entries -------------------------------------------------------
 
 /// Every single-stream entry point answers a never-issued id with
@@ -635,25 +698,3 @@ proptest! {
         );
     }
 }
-
- # [ t e s t ] 
- f n   s e c o n d s _ t o _ l e d g e r s _ e d g e _ c a s e s ( )   { 
-         a s s e r t _ e q ! ( s t o r a g e : : s e c o n d s _ t o _ l e d g e r s ( 0 ) ,   0 ) ; 
-         a s s e r t _ e q ! ( s t o r a g e : : s e c o n d s _ t o _ l e d g e r s ( 1 ) ,   1 ) ; 
-         a s s e r t _ e q ! ( s t o r a g e : : s e c o n d s _ t o _ l e d g e r s ( u 6 4 : : M A X ) ,   u 3 2 : : M A X ) ; 
- } 
- 
- # [ t e s t ] 
- f n   t t l _ t a r g e t _ l e d g e r s _ a l r e a d y _ e x p i r e d ( )   { 
-         l e t   h   =   H a r n e s s : : n e w ( ) ; 
-         l e t   i d   =   h . c r e a t e _ s i m p l e ( 1 _ 0 0 0   *   O N E ,   1 0   *   D A Y ) ; 
- 
-         / /   f a s t   f o r w a r d   w a y   p a s t   t h e   e n d   d a t e 
-         h . w a r p _ t o ( T 0   +   1 0 0   *   D A Y ) ; 
- 
-         / /   T a r g e t   s h o u l d   b e   f l o o r e d   a t   t h e   m i n i m u m 
-         l e t   t a r g e t   =   s t o r a g e : : t t l _ t a r g e t _ l e d g e r s ( & h . e n v ,   & h . g e t ( i d ) ) ; 
-         a s s e r t _ e q ! ( t a r g e t ,   s t o r a g e : : M I N _ S T R E A M _ T T L _ L E D G E R S ) ; 
- } 
-  
- 
